@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Clock, BookOpen, FileText, CheckCircle, LogOut, User, Play, AlertTriangle, 
-  ArrowRight, LayoutDashboard, History, Check, Plus, Trash2, Edit3, Users 
+  ArrowRight, LayoutDashboard, History, Check, Plus, Trash2, Edit3, Users, Lock
 } from 'lucide-react';
 
 // Firebase imports
@@ -162,25 +162,27 @@ const LoginScreen = ({ onAuthAction }) => {
             />
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1 mt-2">I am a...</label>
-            <div className="grid grid-cols-2 gap-4">
-              <button
-                type="button"
-                onClick={() => setRole('student')}
-                className={`py-2 px-4 rounded-lg border font-medium flex items-center justify-center gap-2 transition-all ${role === 'student' ? 'bg-blue-50 border-blue-500 text-blue-700 ring-1 ring-blue-500' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
-              >
-                <User className="w-4 h-4" /> Student
-              </button>
-              <button
-                type="button"
-                onClick={() => setRole('teacher')}
-                className={`py-2 px-4 rounded-lg border font-medium flex items-center justify-center gap-2 transition-all ${role === 'teacher' ? 'bg-purple-50 border-purple-500 text-purple-700 ring-1 ring-purple-500' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
-              >
-                <Users className="w-4 h-4" /> Teacher
-              </button>
+          {!isLogin && (
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1 mt-2">I am a...</label>
+              <div className="grid grid-cols-2 gap-4">
+                <button
+                  type="button"
+                  onClick={() => setRole('student')}
+                  className={`py-2 px-4 rounded-lg border font-medium flex items-center justify-center gap-2 transition-all ${role === 'student' ? 'bg-blue-50 border-blue-500 text-blue-700 ring-1 ring-blue-500' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                >
+                  <User className="w-4 h-4" /> Student
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRole('teacher')}
+                  className={`py-2 px-4 rounded-lg border font-medium flex items-center justify-center gap-2 transition-all ${role === 'teacher' ? 'bg-purple-50 border-purple-500 text-purple-700 ring-1 ring-purple-500' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                >
+                  <Users className="w-4 h-4" /> Teacher
+                </button>
+              </div>
             </div>
-          </div>
+          )}
 
           <button
             type="submit"
@@ -229,7 +231,7 @@ const LoginScreen = ({ onAuthAction }) => {
 const TeacherDashboard = ({ user, tests, onLogout }) => {
   const [isBuildingTest, setIsBuildingTest] = useState(false);
   const [newTest, setNewTest] = useState({
-    title: '', type: 'IELTS', category: 'Exam', durationMinutes: 30, description: '', questions: []
+    title: '', type: 'IELTS', category: 'Exam', durationMinutes: 30, description: '', questions: [], pin: ''
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -281,7 +283,7 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
       await addDoc(testsRef, testToSave);
       
       setIsBuildingTest(false);
-      setNewTest({ title: '', type: 'IELTS', category: 'Exam', durationMinutes: 30, description: '', questions: [] });
+      setNewTest({ title: '', type: 'IELTS', category: 'Exam', durationMinutes: 30, description: '', questions: [], pin: '' });
     } catch (err) {
       console.error(err);
       alert("Failed to save test.");
@@ -340,9 +342,12 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
                     <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${getStatusColor(test.category)}`}>
                       {test.category} • {test.type}
                     </span>
-                    <button onClick={() => deleteTest(test.id)} className="text-slate-400 hover:text-red-500">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      {test.pin && <Lock className="w-4 h-4 text-amber-500" title="PIN Protected" />}
+                      <button onClick={() => deleteTest(test.id)} className="text-slate-400 hover:text-red-500 ml-2">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                   <h3 className="text-lg font-bold text-slate-800 mb-2">{test.title}</h3>
                   <p className="text-sm text-slate-600 mb-4 flex-grow line-clamp-2">{test.description}</p>
@@ -399,6 +404,12 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
                     <label className="block text-sm font-medium text-slate-700 mb-1">Time Limit (Minutes)</label>
                     <input type="number" min="1" value={newTest.durationMinutes} onChange={e => setNewTest({...newTest, durationMinutes: parseInt(e.target.value)})} className="w-full p-3 rounded-lg border border-slate-300 focus:ring-2 focus:ring-purple-500 outline-none" />
                   </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-1">
+                      <Lock className="w-3 h-3 text-slate-500"/> Secret PIN (Optional)
+                    </label>
+                    <input type="text" value={newTest.pin || ''} onChange={e => setNewTest({...newTest, pin: e.target.value})} placeholder="e.g. NUET2026" className="w-full p-3 rounded-lg border border-slate-300 focus:ring-2 focus:ring-purple-500 outline-none" />
+                  </div>
                 </div>
 
                 <div className="pt-6 border-t border-slate-200">
@@ -452,8 +463,27 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
 
 const StudentDashboard = ({ user, tests, results, onStartTest, onLogout }) => {
   const [activeTab, setActiveTab] = useState('tests');
+  const [pinModal, setPinModal] = useState({ isOpen: false, test: null, enteredPin: '', error: '' });
 
   const hasCompletedTest = (testId) => results.some(r => r.testId === testId);
+
+  const handleStartClick = (test) => {
+    // Check if test has a PIN
+    if (test.pin && test.pin.trim() !== '') {
+      setPinModal({ isOpen: true, test, enteredPin: '', error: '' });
+    } else {
+      onStartTest(test); // No PIN required, start immediately
+    }
+  };
+
+  const submitPin = () => {
+    if (pinModal.enteredPin === pinModal.test.pin) {
+      onStartTest(pinModal.test);
+      setPinModal({ isOpen: false, test: null, enteredPin: '', error: '' });
+    } else {
+      setPinModal(prev => ({ ...prev, error: 'Incorrect PIN. Please try again.' }));
+    }
+  };
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -512,7 +542,9 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onLogout }) => {
                     </span>
                   </div>
                   
-                  <h3 className="text-lg font-bold text-slate-800 mb-2">{test.title}</h3>
+                  <h3 className="text-lg font-bold text-slate-800 mb-2 flex items-center gap-2">
+                    {test.pin && <Lock className="w-4 h-4 text-slate-400" />} {test.title}
+                  </h3>
                   <p className="text-sm text-slate-600 mb-6 flex-grow line-clamp-3">{test.description}</p>
                   
                   <div className="mt-auto">
@@ -521,7 +553,7 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onLogout }) => {
                         <Check className="w-5 h-5" /> Completed
                       </button>
                     ) : (
-                      <button onClick={() => onStartTest(test)} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2 shadow-sm">
+                      <button onClick={() => handleStartClick(test)} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2 shadow-sm">
                         <Play className="w-5 h-5" /> Start Task
                       </button>
                     )}
@@ -558,7 +590,7 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onLogout }) => {
                        </div>
                        <div className="flex items-center gap-4 bg-slate-50 px-4 py-2 rounded-lg border border-slate-100">
                          <div className="text-center">
-                           <div className="text-sm text-slate-500">Auto-Score</div>
+                           <div className="text-sm text-slate-500">Your Results</div>
                            <div className="font-bold text-lg text-blue-600">
                              {result.score} <span className="text-sm text-slate-400 font-normal">/ {result.maxPossibleScore}</span>
                            </div>
@@ -571,16 +603,39 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onLogout }) => {
             )}
           </div>
         )}
+
+        {/* PIN Entry Modal */}
+        <Modal isOpen={pinModal.isOpen} title="Enter Secret PIN" onClose={() => setPinModal({ isOpen: false, test: null, enteredPin: '', error: '' })}>
+          <p className="text-slate-600 mb-4">This assessment is protected. Please enter the PIN provided by your teacher to begin.</p>
+          <input
+            type="text"
+            value={pinModal.enteredPin}
+            onChange={(e) => setPinModal(prev => ({ ...prev, enteredPin: e.target.value, error: '' }))}
+            onKeyDown={(e) => e.key === 'Enter' && submitPin()}
+            placeholder="e.g. NUET2026"
+            className="w-full p-3 rounded-lg border border-slate-300 mb-2 focus:ring-2 focus:ring-blue-500 outline-none"
+            autoFocus
+          />
+          {pinModal.error && <p className="text-red-500 text-sm mb-4">{pinModal.error}</p>}
+          <div className="mt-4">
+            <button onClick={submitPin} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 rounded-lg transition-colors shadow-sm">
+              Unlock Assessment
+            </button>
+          </div>
+        </Modal>
+
       </main>
     </div>
   );
 };
 
-const ExamInterface = ({ test, onComplete, onCancel }) => {
+const ExamInterface = ({ test, onComplete }) => {
   const [timeLeft, setTimeLeft] = useState(test.durationSeconds);
   const [answers, setAnswers] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showConfirmCancel, setShowConfirmCancel] = useState(false);
+  
+  // New Pagination State
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
 
   useEffect(() => {
     if (timeLeft <= 0) {
@@ -632,6 +687,9 @@ const ExamInterface = ({ test, onComplete, onCancel }) => {
   const handleAutoSubmit = () => submitTest(true);
 
   const isWarningTime = timeLeft <= 60;
+  
+  // Get current question based on pagination index
+  const currentQuestion = test.questions && test.questions[currentQuestionIndex];
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col font-sans">
@@ -653,9 +711,10 @@ const ExamInterface = ({ test, onComplete, onCancel }) => {
         Do not refresh this page. The test will auto-submit when time is up.
       </div>
 
-      <main className="flex-grow max-w-4xl w-full mx-auto p-4 sm:p-6 lg:p-8 overflow-y-auto">
+      <main className="flex-grow max-w-4xl w-full mx-auto p-4 sm:p-6 lg:p-8 overflow-y-auto pb-24">
         <div className="space-y-8">
           
+          {/* Instructions Block - Stays visible on every page */}
           {test.description && (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 sm:p-8">
                <h3 className="font-bold text-slate-800 mb-2 border-b border-slate-100 pb-2">Instructions / Reading Material</h3>
@@ -663,57 +722,89 @@ const ExamInterface = ({ test, onComplete, onCancel }) => {
             </div>
           )}
 
-          {test.questions?.map((q, index) => (
-            <div key={q.id} className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 sm:p-8">
+          {/* Single Question Display (Pagination) */}
+          {currentQuestion && (
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 sm:p-8 animate-in fade-in duration-300">
               <div className="flex gap-4">
                 <div className="flex-shrink-0 w-8 h-8 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center font-bold text-sm">
-                  {index + 1}
+                  {currentQuestionIndex + 1}
                 </div>
                 <div className="flex-grow space-y-4">
                   <p className="text-lg text-slate-800 font-medium leading-relaxed whitespace-pre-wrap">
-                    {q.text}
+                    {currentQuestion.text}
                   </p>
                   
-                  {q.type === 'mcq' && (
+                  {currentQuestion.type === 'mcq' && (
                     <div className="space-y-2 mt-4">
-                      {q.options.map((option, optIdx) => (
-                        <label key={optIdx} className={`flex items-center gap-3 p-4 border rounded-lg cursor-pointer transition-all ${answers[q.id] === option ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500' : 'border-slate-200 hover:bg-slate-50'}`}>
-                          <input type="radio" name={`question-${q.id}`} value={option} checked={answers[q.id] === option} onChange={() => handleAnswerChange(q.id, option)} className="w-4 h-4 text-blue-600 border-slate-300 focus:ring-blue-500" />
+                      {currentQuestion.options.map((option, optIdx) => (
+                        <label key={optIdx} className={`flex items-center gap-3 p-4 border rounded-lg cursor-pointer transition-all ${answers[currentQuestion.id] === option ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500' : 'border-slate-200 hover:bg-slate-50'}`}>
+                          <input 
+                            type="radio" 
+                            name={`question-${currentQuestion.id}`} 
+                            value={option} 
+                            checked={answers[currentQuestion.id] === option} 
+                            onChange={() => handleAnswerChange(currentQuestion.id, option)} 
+                            className="w-4 h-4 text-blue-600 border-slate-300 focus:ring-blue-500" 
+                          />
                           <span className="text-slate-700">{option}</span>
                         </label>
                       ))}
                     </div>
                   )}
 
-                  {q.type === 'text' && (
+                  {currentQuestion.type === 'text' && (
                     <div className="mt-4">
-                      <textarea rows="6" placeholder="Type your answer here..." value={answers[q.id] || ''} onChange={(e) => handleAnswerChange(q.id, e.target.value)} className="w-full p-4 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-y transition-all"></textarea>
+                      <textarea 
+                        rows="6" 
+                        placeholder="Type your answer here..." 
+                        value={answers[currentQuestion.id] || ''} 
+                        onChange={(e) => handleAnswerChange(currentQuestion.id, e.target.value)} 
+                        className="w-full p-4 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-y transition-all"
+                      ></textarea>
                     </div>
                   )}
                 </div>
               </div>
             </div>
-          ))}
-        </div>
+          )}
 
-        <div className="mt-8 flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-          <button onClick={() => setShowConfirmCancel(true)} className="px-4 py-2 text-slate-500 hover:text-slate-800 font-medium transition-colors">
-            Cancel Test
-          </button>
-          <button onClick={handleManualSubmit} disabled={isSubmitting} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-sm transition-colors flex items-center gap-2 disabled:opacity-70">
-            {isSubmitting ? 'Submitting...' : 'Submit Answers'} <CheckCircle className="w-5 h-5" />
-          </button>
+          {/* Pagination Navigation */}
+          {test.questions && test.questions.length > 1 && (
+            <div className="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+              <button 
+                onClick={() => setCurrentQuestionIndex(prev => Math.max(0, prev - 1))}
+                disabled={currentQuestionIndex === 0}
+                className="px-5 py-2.5 bg-slate-100 text-slate-700 font-medium rounded-lg hover:bg-slate-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                ← Previous
+              </button>
+              
+              <span className="text-slate-500 font-medium text-sm">
+                Question {currentQuestionIndex + 1} of {test.questions.length}
+              </span>
+              
+              <button 
+                onClick={() => setCurrentQuestionIndex(prev => Math.min(test.questions.length - 1, prev + 1))}
+                disabled={currentQuestionIndex === test.questions.length - 1}
+                className="px-5 py-2.5 bg-slate-100 text-slate-700 font-medium rounded-lg hover:bg-slate-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Next →
+              </button>
+            </div>
+          )}
+
         </div>
       </main>
 
-      <Modal isOpen={showConfirmCancel} title="Cancel Exam?" onClose={() => setShowConfirmCancel(false)}>
-        <p className="text-slate-600 mb-6">Are you sure you want to cancel? All your progress will be lost and nothing will be saved.</p>
-        <div className="flex justify-end gap-3">
-          <button onClick={onCancel} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors">
-            Yes, Cancel Exam
-          </button>
-        </div>
-      </Modal>
+      {/* Floating Submit Button (Always visible at bottom) */}
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-30">
+         <div className="max-w-4xl mx-auto flex justify-end">
+            <button onClick={handleManualSubmit} disabled={isSubmitting} className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-sm transition-colors flex items-center gap-2 disabled:opacity-70">
+              {isSubmitting ? 'Submitting...' : 'Submit Final Answers'} <CheckCircle className="w-5 h-5" />
+            </button>
+         </div>
+      </div>
+
     </div>
   );
 };
@@ -797,7 +888,6 @@ export default function App() {
     } else if (action === 'login') {
       await signInWithEmailAndPassword(auth, data.email, data.password);
     } else if (action === 'google') {
-      // GOOGLE LOGIN LOGIC ADDED HERE!
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
       const googleUser = result.user;
@@ -806,7 +896,6 @@ export default function App() {
       const profileSnap = await getDoc(profileRef);
       
       if (!profileSnap.exists()) {
-        // First time Google login, create their profile using the selected role!
         const newProfile = { 
           name: googleUser.displayName || 'Google User', 
           role: data.role, 
@@ -816,7 +905,6 @@ export default function App() {
         setUser({ uid: googleUser.uid, name: newProfile.name, role: newProfile.role });
         setCurrentView(newProfile.role === 'teacher' ? 'teacher_dashboard' : 'student_dashboard');
       } else {
-        // Returning user, log them in
         const existingData = profileSnap.data();
         setUser({ uid: googleUser.uid, ...existingData });
         setCurrentView(existingData.role === 'teacher' ? 'teacher_dashboard' : 'student_dashboard');
@@ -846,8 +934,8 @@ export default function App() {
       setCurrentView('student_dashboard');
       setModalInfo({ 
         isOpen: true, 
-        title: 'Task Submitted', 
-        message: `Your ${resultData.isAutoSubmitted ? 'time ran out and your ' : ''}answers have been submitted. Auto-score: ${resultData.score}/${resultData.maxPossibleScore}.` 
+        title: 'Task Submitted Successfully', 
+        message: `Your ${resultData.isAutoSubmitted ? 'time ran out and your ' : ''}answers have been safely submitted. \n\nYour Results: ${resultData.score} / ${resultData.maxPossibleScore}` 
       });
     } catch (err) {
       console.error(err);
@@ -871,10 +959,10 @@ export default function App() {
       {currentView === 'login' && <LoginScreen onAuthAction={handleAuthAction} />}
       {currentView === 'teacher_dashboard' && <TeacherDashboard user={user} tests={tests} onLogout={handleLogout} />}
       {currentView === 'student_dashboard' && <StudentDashboard user={user} tests={tests} results={results} onStartTest={startTest} onLogout={handleLogout} />}
-      {currentView === 'exam' && activeTest && <ExamInterface test={activeTest} onComplete={completeTest} onCancel={() => { setActiveTest(null); setCurrentView('student_dashboard'); }} />}
+      {currentView === 'exam' && activeTest && <ExamInterface test={activeTest} onComplete={completeTest} />}
 
       <Modal isOpen={modalInfo.isOpen} title={modalInfo.title} onClose={() => setModalInfo(prev => ({ ...prev, isOpen: false }))}>
-        <p className="text-slate-600">{modalInfo.message}</p>
+        <p className="text-slate-600 whitespace-pre-wrap">{modalInfo.message}</p>
       </Modal>
     </>
   );
