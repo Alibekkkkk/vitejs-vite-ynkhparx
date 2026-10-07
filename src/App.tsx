@@ -68,6 +68,19 @@ const getStatusColor = (category) => {
   }
 };
 
+// MAGIC EXTRACTOR: Finds the direct image link even if the user pastes BBCode or HTML!
+const extractImageUrl = (input) => {
+  if (!input) return '';
+  // Check for BBCode like [img]https://...[/img]
+  const bbMatch = input.match(/\[img\](.*?)\[\/img\]/i);
+  if (bbMatch) return bbMatch[1];
+  // Check for HTML like <img src="https://...">
+  const htmlMatch = input.match(/src=["'](.*?)["']/i);
+  if (htmlMatch) return htmlMatch[1];
+  // Return raw input if no match
+  return input.trim();
+};
+
 const LoginScreen = ({ onAuthAction }) => {
   const [isLogin, setIsLogin] = useState(false);
   const [email, setEmail] = useState('');
@@ -244,7 +257,7 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
         id: `q_${Date.now()}`,
         type,
         text: '',
-        imageUrl: '', // Holds the direct URL string (FREE METHOD)
+        imageUrl: '',
         options: type === 'mcq' ? ['', '', '', ''] : undefined,
         correctAnswer: ''
       }]
@@ -253,13 +266,18 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
 
   const handleUpdateQuestion = (index, field, value) => {
     const updated = [...newTest.questions];
-    updated[index][field] = value;
+    // Magic Image Link Extractor
+    if (field === 'imageUrl') {
+      updated[index][field] = extractImageUrl(value);
+    } else {
+      updated[index][field] = value;
+    }
     setNewTest({ ...newTest, questions: updated });
   };
 
   const handleUpdateOption = (qIndex, optIndex, value) => {
     const updated = [...newTest.questions];
-    updated[qIndex].options[optIndex] = value;
+    updated[qIndex].options[optIndex] = extractImageUrl(value);
     setNewTest({ ...newTest, questions: updated });
   };
 
@@ -425,24 +443,23 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
                           <button onClick={() => handleRemoveQuestion(qIndex)} className="text-red-500 text-sm hover:underline">Remove</button>
                        </div>
                        
-                       <textarea value={q.text} onChange={e => handleUpdateQuestion(qIndex, 'text', e.target.value)} placeholder="Type the question here..." rows="2" className="w-full p-3 rounded-lg border border-slate-300 mb-3 outline-none"></textarea>
+                       <textarea value={q.text} onChange={e => handleUpdateQuestion(qIndex, 'text', e.target.value)} placeholder="Type the question text here..." rows="2" className="w-full p-3 rounded-lg border border-slate-300 mb-3 outline-none"></textarea>
 
-                       {/* URL Image Link Field (Free Method) */}
+                       {/* MAGIC URL Image Link Field */}
                        <div className="mb-4 bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
                           <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-1">
-                            <ImageIcon className="w-4 h-4 text-blue-500" /> Attach Image Link (Optional)
+                            <ImageIcon className="w-4 h-4 text-blue-500" /> Attach Figure / Image (Optional)
                           </label>
-                          <p className="text-xs text-slate-500 mb-2">Must be a "Direct Link" ending in .png or .jpg (e.g. from imgbb.com)</p>
                           <input 
-                            type="url"
+                            type="text"
                             value={q.imageUrl || ''}
                             onChange={(e) => handleUpdateQuestion(qIndex, 'imageUrl', e.target.value)}
-                            placeholder="https://i.ibb.co/example/image.png"
+                            placeholder="Paste image link or ImgBB code here..."
                             className="w-full p-2 text-sm rounded border border-slate-300 outline-none focus:ring-2 focus:ring-blue-500"
                           />
-                          {q.imageUrl && (
+                          {q.imageUrl && q.imageUrl.startsWith('http') && (
                             <div className="mt-3 flex justify-center">
-                              <img src={q.imageUrl} alt="Preview" className="max-h-40 rounded border border-slate-300 shadow-sm" onError={(e) => { e.target.style.display='none'; alert("That link didn't work! Make sure you copied the 'Direct Link' ending in .jpg or .png"); }} />
+                              <img src={q.imageUrl} alt="Preview" className="max-h-40 rounded border border-slate-300 shadow-sm" onError={(e) => { e.target.style.display='none'; alert("That image link didn't work. Make sure it ends in .png or .jpg, or paste the ImgBB BBCode directly!"); }} />
                             </div>
                           )}
                        </div>
