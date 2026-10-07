@@ -15,7 +15,6 @@ import {
   signInWithPopup
 } from "firebase/auth";
 import { getFirestore, doc, getDoc, setDoc, addDoc, collection, onSnapshot, serverTimestamp, deleteDoc } from "firebase/firestore";
-import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
 // Your exact database configuration!
 const firebaseConfig = {
@@ -28,13 +27,10 @@ const firebaseConfig = {
   measurementId: "G-WH8LWEWDGR"
 };
 
-// Initialize Firebase
+// Initialize Firebase (NO STORAGE NEEDED - 100% FREE URL METHOD)
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const storage = getStorage(app);
-
-// Use your project ID to organize the database
 const appId = "exam-portal-71a9b";
 
 const Modal = ({ isOpen, title, children, onClose }) => {
@@ -77,7 +73,7 @@ const LoginScreen = ({ onAuthAction }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
-  const [role, setRole] = useState('student'); // Default to Student
+  const [role, setRole] = useState('student');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -101,9 +97,9 @@ const LoginScreen = ({ onAuthAction }) => {
       await onAuthAction('google', { role });
     } catch (err) {
       console.error(err);
-      // NEW: Catch the specific popup error and give a friendly instruction!
-      if (err.code === 'auth/popup-closed-by-user' || err.message.includes('popup-closed-by-user')) {
-        setError('Google Login was blocked by your app. Please open this link directly in Safari or Chrome!');
+      // IPHONE AND MINI-BROWSER FIX
+      if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/popup-blocked' || err.message.includes('popup')) {
+        setError('Popup Blocked! If you are on an iPhone or using Instagram/WhatsApp, please tap the Compass icon or open this website directly in Safari/Chrome.');
       } else {
         setError(err.message.replace('Firebase: ', ''));
       }
@@ -123,7 +119,7 @@ const LoginScreen = ({ onAuthAction }) => {
         <p className="text-center text-slate-500 mb-8">{isLogin ? 'Login to your account' : 'Create a new account'}</p>
         
         {error && (
-          <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-600 rounded-lg text-sm">
+          <div className="mb-4 p-4 bg-red-50 border border-red-200 text-red-600 rounded-lg text-sm font-medium leading-relaxed">
             {error}
           </div>
         )}
@@ -137,7 +133,7 @@ const LoginScreen = ({ onAuthAction }) => {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="e.g. John Doe"
-                className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+                className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
                 required={!isLogin}
               />
             </div>
@@ -150,7 +146,7 @@ const LoginScreen = ({ onAuthAction }) => {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="name@example.com"
-              className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+              className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
               required
             />
           </div>
@@ -163,7 +159,7 @@ const LoginScreen = ({ onAuthAction }) => {
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
               minLength="6"
-              className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+              className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
               required
             />
           </div>
@@ -240,7 +236,6 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
     title: '', type: 'IELTS', category: 'Exam', durationMinutes: 30, description: '', questions: [], pin: ''
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [uploadingImageForQ, setUploadingImageForQ] = useState(null); // Tracks which question is currently uploading an image
 
   const handleAddQuestion = (type) => {
     setNewTest(prev => ({
@@ -249,7 +244,7 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
         id: `q_${Date.now()}`,
         type,
         text: '',
-        imageUrl: '', // New field for the image!
+        imageUrl: '', // Holds the direct URL string (FREE METHOD)
         options: type === 'mcq' ? ['', '', '', ''] : undefined,
         correctAnswer: ''
       }]
@@ -272,25 +267,6 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
     const updated = [...newTest.questions];
     updated.splice(index, 1);
     setNewTest({ ...newTest, questions: updated });
-  };
-
-  // NEW: Handle uploading an image to Firebase Storage
-  const handleImageUpload = async (qIndex, file) => {
-    if (!file) return;
-    setUploadingImageForQ(qIndex);
-    try {
-      // Create a reference to a unique file name in Storage
-      const fileRef = ref(storage, `artifacts/${appId}/public/images/${Date.now()}_${file.name}`);
-      await uploadBytes(fileRef, file);
-      const downloadUrl = await getDownloadURL(fileRef);
-      
-      // Save the URL to the question
-      handleUpdateQuestion(qIndex, 'imageUrl', downloadUrl);
-    } catch (err) {
-      console.error(err);
-      alert("Failed to upload image. Did you turn on Firebase Storage in Test Mode?");
-    }
-    setUploadingImageForQ(null);
   };
 
   const saveTest = async () => {
@@ -451,34 +427,33 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
                        
                        <textarea value={q.text} onChange={e => handleUpdateQuestion(qIndex, 'text', e.target.value)} placeholder="Type the question here..." rows="2" className="w-full p-3 rounded-lg border border-slate-300 mb-3 outline-none"></textarea>
 
-                       {/* NEW: Image Upload Field */}
+                       {/* URL Image Link Field (Free Method) */}
                        <div className="mb-4 bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
-                          <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-2">
-                            <ImageIcon className="w-4 h-4 text-blue-500" /> Attach Figure / Image (Optional)
+                          <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-1">
+                            <ImageIcon className="w-4 h-4 text-blue-500" /> Attach Image Link (Optional)
                           </label>
+                          <p className="text-xs text-slate-500 mb-2">Must be a "Direct Link" ending in .png or .jpg (e.g. from imgbb.com)</p>
                           <input 
-                            type="file" 
-                            accept="image/png, image/jpeg, image/jpg"
-                            onChange={(e) => handleImageUpload(qIndex, e.target.files[0])}
-                            className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 transition-colors cursor-pointer"
+                            type="url"
+                            value={q.imageUrl || ''}
+                            onChange={(e) => handleUpdateQuestion(qIndex, 'imageUrl', e.target.value)}
+                            placeholder="https://i.ibb.co/example/image.png"
+                            className="w-full p-2 text-sm rounded border border-slate-300 outline-none focus:ring-2 focus:ring-blue-500"
                           />
-                          {uploadingImageForQ === qIndex && <p className="text-sm text-blue-600 mt-2 animate-pulse">Uploading image securely...</p>}
                           {q.imageUrl && (
-                            <div className="mt-3 relative inline-block">
-                              <img src={q.imageUrl} alt="Uploaded figure" className="max-h-40 rounded border border-slate-300 shadow-sm" />
-                              <button onClick={() => handleUpdateQuestion(qIndex, 'imageUrl', '')} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-md hover:bg-red-600 transition-colors">
-                                <Trash2 className="w-3 h-3" />
-                              </button>
+                            <div className="mt-3 flex justify-center">
+                              <img src={q.imageUrl} alt="Preview" className="max-h-40 rounded border border-slate-300 shadow-sm" onError={(e) => { e.target.style.display='none'; alert("That link didn't work! Make sure you copied the 'Direct Link' ending in .jpg or .png"); }} />
                             </div>
                           )}
                        </div>
 
                        {q.type === 'mcq' && (
                          <div className="space-y-2 ml-4 border-l-2 border-slate-200 pl-4">
+                           <p className="text-xs font-semibold text-slate-500 uppercase">Options (You can type text OR paste an image link)</p>
                            {q.options.map((opt, oIndex) => (
                               <div key={oIndex} className="flex items-center gap-2">
-                                <input type="radio" name={`correct_${q.id}`} checked={q.correctAnswer === opt && opt !== ''} onChange={() => handleUpdateQuestion(qIndex, 'correctAnswer', opt)} className="w-4 h-4" />
-                                <input type="text" value={opt} onChange={e => handleUpdateOption(qIndex, oIndex, e.target.value)} placeholder={`Option ${oIndex + 1}`} className="flex-grow p-2 rounded-md border border-slate-300 text-sm outline-none" />
+                                <input type="radio" name={`correct_${q.id}`} checked={q.correctAnswer === opt && opt !== ''} onChange={() => handleUpdateQuestion(qIndex, 'correctAnswer', opt)} className="w-4 h-4 cursor-pointer" />
+                                <input type="text" value={opt} onChange={e => handleUpdateOption(qIndex, oIndex, e.target.value)} placeholder={`Option ${oIndex + 1} (Text or URL)`} className="flex-grow p-2 rounded-md border border-slate-300 text-sm outline-none" />
                               </div>
                            ))}
                            <p className="text-xs text-slate-500 italic mt-1">Select the radio button next to the correct answer for grading.</p>
@@ -498,7 +473,7 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
                 </div>
 
                 <div className="flex justify-end pt-6 border-t border-slate-200">
-                  <button onClick={saveTest} disabled={isSubmitting || uploadingImageForQ !== null} className="bg-purple-600 hover:bg-purple-700 text-white px-8 py-3 rounded-lg font-bold shadow-md transition-colors disabled:opacity-50 flex items-center gap-2">
+                  <button onClick={saveTest} disabled={isSubmitting} className="bg-purple-600 hover:bg-purple-700 text-white px-8 py-3 rounded-lg font-bold shadow-md transition-colors disabled:opacity-50 flex items-center gap-2">
                     {isSubmitting ? 'Saving...' : 'Publish Assessment'} <CheckCircle className="w-5 h-5" />
                   </button>
                 </div>
@@ -517,7 +492,7 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onLogout }) => {
   const hasCompletedTest = (testId) => results.some(r => r.testId === testId);
 
   const handleStartClick = (test) => {
-    // PIN Check
+    // PIN Check logic
     if (test.pin && test.pin.trim() !== '') {
       setPinModal({ isOpen: true, test, enteredPin: '', error: '' });
     } else {
@@ -685,9 +660,7 @@ const ExamInterface = ({ test, onComplete }) => {
   const [timeLeft, setTimeLeft] = useState(test.durationSeconds);
   const [answers, setAnswers] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
-  
-  // Pagination State
-  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0); // Pagination Tracker
 
   useEffect(() => {
     if (timeLeft <= 0) {
@@ -738,9 +711,15 @@ const ExamInterface = ({ test, onComplete }) => {
 
   const handleAutoSubmit = () => submitTest(true);
 
+  // Helper to check if a string is a URL (for image options)
+  const renderOptionContent = (optString) => {
+    if (optString.startsWith('http://') || optString.startsWith('https://')) {
+      return <img src={optString} alt="Option Visual" className="max-h-32 rounded object-contain shadow-sm border border-slate-200 bg-white p-1" />;
+    }
+    return <span>{optString}</span>;
+  };
+
   const isWarningTime = timeLeft <= 60;
-  
-  // Get current question based on pagination index
   const currentQuestion = test.questions && test.questions[currentQuestionIndex];
 
   return (
@@ -766,7 +745,6 @@ const ExamInterface = ({ test, onComplete }) => {
       <main className="flex-grow max-w-4xl w-full mx-auto p-4 sm:p-6 lg:p-8 overflow-y-auto pb-24">
         <div className="space-y-6">
           
-          {/* Instructions Block - Stays visible on every page */}
           {test.description && (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 sm:p-6">
                <h3 className="font-bold text-slate-800 mb-2 border-b border-slate-100 pb-2">Instructions / Reading Material</h3>
@@ -774,7 +752,6 @@ const ExamInterface = ({ test, onComplete }) => {
             </div>
           )}
 
-          {/* Single Question Display (Pagination) */}
           {currentQuestion && (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 sm:p-8 animate-in fade-in duration-300">
               <div className="flex gap-4">
@@ -786,7 +763,6 @@ const ExamInterface = ({ test, onComplete }) => {
                     {currentQuestion.text}
                   </p>
                   
-                  {/* NEW: Render the Image if it exists */}
                   {currentQuestion.imageUrl && (
                     <div className="my-6 flex justify-center bg-slate-50 rounded-lg p-2 border border-slate-100">
                       <img 
@@ -798,18 +774,20 @@ const ExamInterface = ({ test, onComplete }) => {
                   )}
                   
                   {currentQuestion.type === 'mcq' && (
-                    <div className="space-y-2 mt-4">
+                    <div className="space-y-3 mt-4">
                       {currentQuestion.options.map((option, optIdx) => (
-                        <label key={optIdx} className={`flex items-center gap-3 p-4 border rounded-lg cursor-pointer transition-all ${answers[currentQuestion.id] === option ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500' : 'border-slate-200 hover:bg-slate-50'}`}>
+                        <label key={optIdx} className={`flex items-center gap-4 p-4 border rounded-xl cursor-pointer transition-all ${answers[currentQuestion.id] === option ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-500 shadow-md' : 'border-slate-200 hover:bg-slate-50 hover:shadow-sm'}`}>
                           <input 
                             type="radio" 
                             name={`question-${currentQuestion.id}`} 
                             value={option} 
                             checked={answers[currentQuestion.id] === option} 
                             onChange={() => handleAnswerChange(currentQuestion.id, option)} 
-                            className="w-4 h-4 text-blue-600 border-slate-300 focus:ring-blue-500" 
+                            className="w-5 h-5 text-blue-600 border-slate-300 focus:ring-blue-500" 
                           />
-                          <span className="text-slate-700">{option}</span>
+                          <span className="text-slate-700 text-base font-medium flex-grow">
+                            {renderOptionContent(option)}
+                          </span>
                         </label>
                       ))}
                     </div>
@@ -831,7 +809,7 @@ const ExamInterface = ({ test, onComplete }) => {
             </div>
           )}
 
-          {/* Pagination Navigation */}
+          {/* Pagination Controls */}
           {test.questions && test.questions.length > 1 && (
             <div className="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-slate-200">
               <button 
@@ -859,7 +837,7 @@ const ExamInterface = ({ test, onComplete }) => {
         </div>
       </main>
 
-      {/* Floating Submit Button (Always visible at bottom, removed cancel button) */}
+      {/* Floating Submit Button (NO CANCEL BUTTON) */}
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-30">
          <div className="max-w-4xl mx-auto flex justify-end">
             <button onClick={handleManualSubmit} disabled={isSubmitting} className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-sm transition-colors flex items-center gap-2 disabled:opacity-70">
@@ -1025,7 +1003,7 @@ export default function App() {
       {currentView === 'exam' && activeTest && <ExamInterface test={activeTest} onComplete={completeTest} />}
 
       <Modal isOpen={modalInfo.isOpen} title={modalInfo.title} onClose={() => setModalInfo(prev => ({ ...prev, isOpen: false }))}>
-        <p className="text-slate-600 whitespace-pre-wrap">{modalInfo.message}</p>
+        <p className="text-slate-600 whitespace-pre-wrap font-medium">{modalInfo.message}</p>
       </Modal>
     </>
   );
