@@ -542,30 +542,41 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onLogout }) => {
             ) : (
               <div className="divide-y divide-slate-200">
                 {results.map((result, idx) => {
-                   const testInfo = tests.find(t => t.id === result.testId) || { title: 'Unknown Test', type: 'Unknown' };
-                   return (
-                     <div key={idx} className="p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-50 transition-colors">
-                       <div>
-                         <div className="flex items-center gap-3 mb-1">
-                           <h4 className="font-semibold text-slate-800">{testInfo.title}</h4>
-                           <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
-                             {testInfo.type}
-                           </span>
-                         </div>
-                         <p className="text-sm text-slate-500">
-                           Submitted on: {new Date(result.submittedAt).toLocaleDateString()} at {new Date(result.submittedAt).toLocaleTimeString()}
-                         </p>
-                       </div>
-                       <div className="flex items-center gap-4 bg-slate-50 px-4 py-2 rounded-lg border border-slate-100">
-                         <div className="text-center">
-                           <div className="text-sm text-slate-500">Auto-Score</div>
-                           <div className="font-bold text-lg text-blue-600">
-                             {result.score} <span className="text-sm text-slate-400 font-normal">/ {result.maxPossibleScore}</span>
-                           </div>
-                         </div>
-                       </div>
-                     </div>
-                   );
+                  const testInfo = tests.find(
+                    (t) => t.id === result.testId
+                  ) || { title: 'Unknown Test', type: 'Unknown' };
+                  return (
+                    <div
+                      key={idx}
+                      className="p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-50 transition-colors"
+                    >
+                      <div>
+                        <div className="flex items-center gap-3 mb-1">
+                          <h4 className="font-semibold text-slate-800">
+                            {testInfo.title}
+                          </h4>
+                          <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+                            {testInfo.type}
+                          </span>
+                        </div>
+                        <p className="text-sm text-slate-500">
+                          Submitted on:{' '}
+                          {new Date(result.submittedAt).toLocaleDateString()} at{' '}
+                          {new Date(result.submittedAt).toLocaleTimeString()}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-4 bg-slate-50 px-4 py-2 rounded-lg border border-slate-100">
+                        <div className="text-center">
+                          <div className="text-sm font-medium text-slate-600">
+                            Status
+                          </div>
+                          <div className="font-bold text-lg text-emerald-600">
+                            Submitted <CheckCircle className="w-4 h-4 inline" />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
                 })}
               </div>
             )}
@@ -580,7 +591,7 @@ const ExamInterface = ({ test, onComplete, onCancel }) => {
   const [timeLeft, setTimeLeft] = useState(test.durationSeconds);
   const [answers, setAnswers] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showConfirmCancel, setShowConfirmCancel] = useState(false);
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
 
   useEffect(() => {
     if (timeLeft <= 0) {
@@ -632,6 +643,8 @@ const ExamInterface = ({ test, onComplete, onCancel }) => {
   const handleAutoSubmit = () => submitTest(true);
 
   const isWarningTime = timeLeft <= 60;
+  const currentQuestion = test.questions[currentQuestionIndex];
+  const isLastQuestion = currentQuestionIndex === (test.questions?.length || 0) - 1;
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col font-sans">
@@ -655,65 +668,106 @@ const ExamInterface = ({ test, onComplete, onCancel }) => {
 
       <main className="flex-grow max-w-4xl w-full mx-auto p-4 sm:p-6 lg:p-8 overflow-y-auto">
         <div className="space-y-8">
-          
-          {test.description && (
+          {test.description && currentQuestionIndex === 0 && (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 sm:p-8">
-               <h3 className="font-bold text-slate-800 mb-2 border-b border-slate-100 pb-2">Instructions / Reading Material</h3>
-               <p className="whitespace-pre-wrap text-slate-700 leading-relaxed">{test.description}</p>
+              <h3 className="font-bold text-slate-800 mb-2 border-b border-slate-100 pb-2">
+                Instructions / Reading Material
+              </h3>
+              <p className="whitespace-pre-wrap text-slate-700 leading-relaxed">
+                {test.description}
+              </p>
             </div>
           )}
 
-          {test.questions?.map((q, index) => (
-            <div key={q.id} className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 sm:p-8">
+          {currentQuestion && (
+            <div
+              key={currentQuestion.id}
+              className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 sm:p-8 animate-in fade-in slide-in-from-right-4 duration-300"
+            >
               <div className="flex gap-4">
                 <div className="flex-shrink-0 w-8 h-8 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center font-bold text-sm">
-                  {index + 1}
+                  {currentQuestionIndex + 1}
                 </div>
                 <div className="flex-grow space-y-4">
                   <p className="text-lg text-slate-800 font-medium leading-relaxed whitespace-pre-wrap">
-                    {q.text}
+                    {currentQuestion.text}
                   </p>
-                  
-                  {q.type === 'mcq' && (
+
+                  {currentQuestion.type === 'mcq' && (
                     <div className="space-y-2 mt-4">
-                      {q.options.map((option, optIdx) => (
-                        <label key={optIdx} className={`flex items-center gap-3 p-4 border rounded-lg cursor-pointer transition-all ${answers[q.id] === option ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500' : 'border-slate-200 hover:bg-slate-50'}`}>
-                          <input type="radio" name={`question-${q.id}`} value={option} checked={answers[q.id] === option} onChange={() => handleAnswerChange(q.id, option)} className="w-4 h-4 text-blue-600 border-slate-300 focus:ring-blue-500" />
+                      {currentQuestion.options.map((option, optIdx) => (
+                        <label
+                          key={optIdx}
+                          className={`flex items-center gap-3 p-4 border rounded-lg cursor-pointer transition-all ${
+                            answers[currentQuestion.id] === option
+                              ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500'
+                              : 'border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name={`question-${currentQuestion.id}`}
+                            value={option}
+                            checked={answers[currentQuestion.id] === option}
+                            onChange={() => handleAnswerChange(currentQuestion.id, option)}
+                            className="w-4 h-4 text-blue-600 border-slate-300 focus:ring-blue-500"
+                          />
                           <span className="text-slate-700">{option}</span>
                         </label>
                       ))}
                     </div>
                   )}
 
-                  {q.type === 'text' && (
+                  {currentQuestion.type === 'text' && (
                     <div className="mt-4">
-                      <textarea rows="6" placeholder="Type your answer here..." value={answers[q.id] || ''} onChange={(e) => handleAnswerChange(q.id, e.target.value)} className="w-full p-4 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-y transition-all"></textarea>
+                      <textarea
+                        rows="6"
+                        placeholder="Type your answer here..."
+                        value={answers[currentQuestion.id] || ''}
+                        onChange={(e) =>
+                          handleAnswerChange(currentQuestion.id, e.target.value)
+                        }
+                        className="w-full p-4 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-y transition-all"
+                      ></textarea>
                     </div>
                   )}
                 </div>
               </div>
             </div>
-          ))}
+          )}
         </div>
 
         <div className="mt-8 flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-          <button onClick={() => setShowConfirmCancel(true)} className="px-4 py-2 text-slate-500 hover:text-slate-800 font-medium transition-colors">
-            Cancel Test
+          <button
+            onClick={() => setCurrentQuestionIndex(prev => Math.max(0, prev - 1))}
+            disabled={currentQuestionIndex === 0}
+            className="px-6 py-3 text-slate-600 font-medium rounded-lg hover:bg-slate-50 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            ← Previous
           </button>
-          <button onClick={handleManualSubmit} disabled={isSubmitting} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-sm transition-colors flex items-center gap-2 disabled:opacity-70">
-            {isSubmitting ? 'Submitting...' : 'Submit Answers'} <CheckCircle className="w-5 h-5" />
-          </button>
+          
+          <div className="text-sm font-medium text-slate-500 hidden sm:block">
+            Question {currentQuestionIndex + 1} of {test.questions?.length || 0}
+          </div>
+
+          {isLastQuestion ? (
+            <button
+              onClick={handleManualSubmit}
+              disabled={isSubmitting}
+              className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-sm transition-colors flex items-center gap-2 disabled:opacity-70"
+            >
+              {isSubmitting ? 'Submitting...' : 'Submit Answers'} <CheckCircle className="w-5 h-5" />
+            </button>
+          ) : (
+            <button
+              onClick={() => setCurrentQuestionIndex(prev => Math.min((test.questions?.length || 1) - 1, prev + 1))}
+              className="px-6 py-3 bg-slate-800 hover:bg-slate-900 text-white font-semibold rounded-lg shadow-sm transition-colors flex items-center gap-2"
+            >
+              Next →
+            </button>
+          )}
         </div>
       </main>
-
-      <Modal isOpen={showConfirmCancel} title="Cancel Exam?" onClose={() => setShowConfirmCancel(false)}>
-        <p className="text-slate-600 mb-6">Are you sure you want to cancel? All your progress will be lost and nothing will be saved.</p>
-        <div className="flex justify-end gap-3">
-          <button onClick={onCancel} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors">
-            Yes, Cancel Exam
-          </button>
-        </div>
-      </Modal>
     </div>
   );
 };
@@ -840,14 +894,23 @@ export default function App() {
   const completeTest = async (resultData) => {
     if (!user || !db) return;
     try {
-      const resultsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'results');
+      const resultsRef = collection(
+        db,
+        'artifacts',
+        appId,
+        'users',
+        user.uid,
+        'results'
+      );
       await addDoc(resultsRef, resultData);
       setActiveTest(null);
       setCurrentView('student_dashboard');
-      setModalInfo({ 
-        isOpen: true, 
-        title: 'Task Submitted', 
-        message: `Your ${resultData.isAutoSubmitted ? 'time ran out and your ' : ''}answers have been submitted. Auto-score: ${resultData.score}/${resultData.maxPossibleScore}.` 
+      setModalInfo({
+        isOpen: true,
+        title: 'Task Submitted',
+        message: `Your ${
+          resultData.isAutoSubmitted ? 'time ran out and your ' : ''
+        }answers have been submitted successfully. Your teacher will review them shortly.`,
       });
     } catch (err) {
       console.error(err);
