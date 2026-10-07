@@ -101,7 +101,12 @@ const LoginScreen = ({ onAuthAction }) => {
       await onAuthAction('google', { role });
     } catch (err) {
       console.error(err);
-      setError(err.message.replace('Firebase: ', ''));
+      // NEW: Catch the specific popup error and give a friendly instruction!
+      if (err.code === 'auth/popup-closed-by-user' || err.message.includes('popup-closed-by-user')) {
+        setError('Google Login was blocked by your app. Please open this link directly in Safari or Chrome!');
+      } else {
+        setError(err.message.replace('Firebase: ', ''));
+      }
     }
     setLoading(false);
   };
