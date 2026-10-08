@@ -992,11 +992,6 @@ export default function App() {
 
   return (
     <>
-      <style>{`
-        #root { max-width: 100% !important; width: 100% !important; margin: 0 !important; padding: 0 !important; }
-        body { margin: 0; padding: 0; min-width: 100vw; overflow-x: hidden; }
-      `}</style>
-
       <button 
         onClick={() => setIsDark(!isDark)} 
         className="fixed bottom-24 sm:bottom-6 right-6 p-4 rounded-full bg-slate-800 dark:bg-white text-white dark:text-slate-800 shadow-xl z-50 hover:scale-110 transition-transform flex items-center justify-center"
