@@ -452,10 +452,9 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
                           <p className="text-xs text-blue-600 dark:text-blue-400 font-medium mt-1">
                             Paste the "BBCode full linked" from ImgBB. The app will magically extract the picture!
                           </p>
-                          {}
                           {q.imageUrl && q.imageUrl.startsWith('http') && (
-                            <div className="mt-4 w-full bg-white dark:bg-slate-800 p-2 rounded border border-slate-200 dark:border-slate-700">
-                              <img src={q.imageUrl} alt="Preview" className="w-full h-auto object-contain rounded shadow-sm" />
+                            <div className="mt-4 w-full bg-white dark:bg-slate-800 p-2 rounded border border-slate-200 dark:border-slate-700 overflow-hidden flex justify-center">
+                              <img src={q.imageUrl} alt="Preview" className="max-w-full h-auto object-contain rounded shadow-sm" />
                             </div>
                           )}
                        </div>
@@ -463,12 +462,12 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
                        {q.type === 'mcq' && (
                          <div className="space-y-2 ml-4 border-l-2 border-slate-200 dark:border-slate-600 pl-4 text-left">
                            {q.options.map((opt, oIndex) => (
-                              <div key={oIndex} className="flex items-center gap-2">
+                              <div key={oIndex} className="flex items-center gap-2 w-full">
                                 <input type="radio" name={`correct_${q.id}`} checked={q.correctAnswer === opt && opt !== ''} onChange={() => handleUpdateQuestion(qIndex, 'correctAnswer', opt)} className="w-4 h-4 flex-shrink-0" />
-                                <input type="text" value={opt} onChange={e => handleUpdateOption(qIndex, oIndex, e.target.value)} placeholder={`Option ${oIndex + 1} (Text or Image Link)`} className="flex-grow p-2 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white text-sm outline-none text-left" />
+                                <input type="text" value={opt} onChange={e => handleUpdateOption(qIndex, oIndex, e.target.value)} placeholder={`Option ${oIndex + 1} (Text or Image Link)`} className="flex-grow p-2 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white text-sm outline-none text-left min-w-0" />
                                 
                                 {q.options.length > 2 && (
-                                   <button onClick={() => handleRemoveOption(qIndex, oIndex)} className="text-red-400 hover:text-red-600 dark:hover:text-red-300 p-1" title="Remove this option">
+                                   <button onClick={() => handleRemoveOption(qIndex, oIndex)} className="text-red-400 hover:text-red-600 dark:hover:text-red-300 p-1 flex-shrink-0" title="Remove this option">
                                      <X className="w-4 h-4" />
                                    </button>
                                 )}
@@ -768,7 +767,7 @@ const ExamInterface = ({ test, onComplete }) => {
 
           {currentQuestion && (
             <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 sm:p-8 animate-in fade-in duration-300 transition-colors">
-              <div className="flex gap-4 text-left">
+              <div className="flex gap-4 text-left w-full">
                 <div className="flex-shrink-0 w-8 h-8 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-full flex items-center justify-center font-bold text-sm">
                   {currentQuestionIndex + 1}
                 </div>
@@ -778,10 +777,9 @@ const ExamInterface = ({ test, onComplete }) => {
                     {currentQuestion.text}
                   </p>
                   
-                  {}
                   {currentQuestion.imageUrl && (
-                    <div className="my-6 w-full bg-slate-50 dark:bg-slate-900 rounded-lg p-2 border border-slate-100 dark:border-slate-700">
-                      <img src={currentQuestion.imageUrl} alt="Question Figure" className="w-full h-auto object-contain rounded shadow-sm" />
+                    <div className="my-6 w-full bg-slate-50 dark:bg-slate-900 rounded-lg p-2 border border-slate-100 dark:border-slate-700 overflow-hidden flex justify-center">
+                      <img src={currentQuestion.imageUrl} alt="Question Figure" className="max-w-full h-auto object-contain rounded shadow-sm" />
                     </div>
                   )}
                   
@@ -791,10 +789,11 @@ const ExamInterface = ({ test, onComplete }) => {
                         <label key={optIdx} className={`flex items-center gap-3 p-4 border rounded-lg cursor-pointer transition-all w-full text-left ${answers[currentQuestion.id] === option ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500 dark:bg-blue-900/30 dark:border-blue-500' : 'border-slate-200 hover:bg-slate-50 dark:border-slate-600 dark:hover:bg-slate-700'}`}>
                           <input type="radio" name={`question-${currentQuestion.id}`} value={option} checked={answers[currentQuestion.id] === option} onChange={() => handleAnswerChange(currentQuestion.id, option)} className="w-4 h-4 text-blue-600 border-slate-300 focus:ring-blue-500 flex-shrink-0 mt-0.5" />
                           
-                          <span className="text-slate-700 dark:text-slate-200 text-left flex-grow break-words block w-full min-w-0">
-                            {}
+                          <span className="text-slate-700 dark:text-slate-200 text-left flex-grow break-words block w-full min-w-0 overflow-hidden">
                             {option.startsWith('http') ? (
-                              <img src={option} alt={`Option ${optIdx + 1}`} className="w-full h-auto object-contain rounded border border-slate-200 dark:border-slate-600 mt-1" />
+                              <div className="w-full flex justify-start">
+                                <img src={option} alt={`Option ${optIdx + 1}`} className="max-w-full h-auto object-contain rounded border border-slate-200 dark:border-slate-600 mt-1" />
+                              </div>
                             ) : (
                               option
                             )}
