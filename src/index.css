@@ -1,15 +1,11 @@
-@tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* STREAMING_CHUNK:Importing beautiful LaTeX Academic Font... */
+@import url('https://fonts.cdnfonts.com/css/computer-modern-serif');
+
 /* STREAMING_CHUNK:Overriding Vite layout constraints... */
 #root {
-max-width: 100% !important;
-width: 100% !important;
-margin: 0 !important;
-padding: 0 !important;
-text-align: left !important;
-}
 
 body {
 margin: 0;
@@ -17,3 +13,18 @@ padding: 0;
 min-width: 100vw;
 overflow-x: hidden;
 }
+
+/* STREAMING_CHUNK:Applying LaTeX Font and Increasing Global Text Size... */
+
+{
+font-family: 'Computer Modern Serif', 'Times New Roman', serif !important;
+}
+
+/* Override standard sizes to make everything bigger and more readable */
+.text-xs { font-size: 0.9rem !important; }
+.text-sm { font-size: 1.05rem !important; }
+.text-base { font-size: 1.15rem !important; }
+.text-lg { font-size: 1.35rem !important; }
+.text-xl { font-size: 1.55rem !important; }
+.text-2xl { font-size: 1.8rem !important; }
+.text-3xl { font-size: 2.1rem !important; }
