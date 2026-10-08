@@ -452,9 +452,10 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
                           <p className="text-xs text-blue-600 dark:text-blue-400 font-medium mt-1">
                             Paste the "BBCode full linked" from ImgBB. The app will magically extract the picture!
                           </p>
+                          {}
                           {q.imageUrl && q.imageUrl.startsWith('http') && (
-                            <div className="mt-3 flex justify-start bg-white dark:bg-slate-800 p-2 rounded border border-slate-200 dark:border-slate-700 overflow-hidden">
-                              <img src={q.imageUrl} alt="Preview" className="w-auto h-auto max-w-full object-contain rounded shadow-sm" style={{ maxHeight: 'none' }} />
+                            <div className="mt-4 w-full bg-white dark:bg-slate-800 p-2 rounded border border-slate-200 dark:border-slate-700">
+                              <img src={q.imageUrl} alt="Preview" className="w-full h-auto object-contain rounded shadow-sm" />
                             </div>
                           )}
                        </div>
@@ -777,9 +778,10 @@ const ExamInterface = ({ test, onComplete }) => {
                     {currentQuestion.text}
                   </p>
                   
+                  {}
                   {currentQuestion.imageUrl && (
-                    <div className="my-6 flex justify-start bg-slate-50 dark:bg-slate-900 rounded-lg p-2 border border-slate-100 dark:border-slate-700 w-full overflow-hidden">
-                      <img src={currentQuestion.imageUrl} alt="Question Figure" className="w-auto h-auto max-w-full object-contain rounded shadow-sm" style={{ maxHeight: 'none' }} />
+                    <div className="my-6 w-full bg-slate-50 dark:bg-slate-900 rounded-lg p-2 border border-slate-100 dark:border-slate-700">
+                      <img src={currentQuestion.imageUrl} alt="Question Figure" className="w-full h-auto object-contain rounded shadow-sm" />
                     </div>
                   )}
                   
@@ -790,8 +792,9 @@ const ExamInterface = ({ test, onComplete }) => {
                           <input type="radio" name={`question-${currentQuestion.id}`} value={option} checked={answers[currentQuestion.id] === option} onChange={() => handleAnswerChange(currentQuestion.id, option)} className="w-4 h-4 text-blue-600 border-slate-300 focus:ring-blue-500 flex-shrink-0 mt-0.5" />
                           
                           <span className="text-slate-700 dark:text-slate-200 text-left flex-grow break-words block w-full min-w-0">
+                            {}
                             {option.startsWith('http') ? (
-                              <img src={option} alt={`Option ${optIdx + 1}`} className="w-auto h-auto max-w-full object-contain rounded border border-slate-200 dark:border-slate-600 mt-1" style={{ maxHeight: 'none' }} />
+                              <img src={option} alt={`Option ${optIdx + 1}`} className="w-full h-auto object-contain rounded border border-slate-200 dark:border-slate-600 mt-1" />
                             ) : (
                               option
                             )}
