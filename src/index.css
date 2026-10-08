@@ -1,111 +1,82 @@
-:root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
-  --social-bg: rgba(244, 243, 236, 0.5);
-  --shadow:
-    rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
-
-  font: 18px/145% var(--sans);
-  letter-spacing: 0.18px;
-  color-scheme: light dark;
-  color: var(--text);
-  background: var(--bg);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-
-  @media (max-width: 1024px) {
-    font-size: 16px;
-  }
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow:
-      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
-  }
-
-  #social .button-icon {
-    filter: invert(1) brightness(2);
-  }
-}
-
+/* Override Vite defaults to make the app full screen */
 #root {
-  width: 1126px;
-  max-width: 100%;
-  margin: 0 auto;
-  text-align: center;
-  border-inline: 1px solid var(--border);
-  min-height: 100svh;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
+max-width: 100% !important;
+margin: 0 !important;
+padding: 0 !important;
+text-align: left !important;
 }
 
-body {
-  margin: 0;
-}
+5. Click **Commit changes**.
 
-h1,
-h2 {
-  font-family: var(--heading);
-  font-weight: 500;
-  color: var(--text-h);
-}
+### Step 2: Fix the Image Quality & Cut-Offs
+Now we will update the `App.tsx` file so the images scale perfectly to their original size and don't break the mobile screen layout.
 
-h1 {
-  font-size: 56px;
-  letter-spacing: -1.68px;
-  margin: 32px 0;
-  @media (max-width: 1024px) {
-    font-size: 36px;
-    margin: 20px 0;
-  }
-}
-h2 {
-  font-size: 24px;
-  line-height: 118%;
-  letter-spacing: -0.24px;
-  margin: 0 0 8px;
-  @media (max-width: 1024px) {
-    font-size: 20px;
-  }
-}
-p {
-  margin: 0;
-}
+1. Go back to the **`src`** folder and open **`App.tsx`**.
+2. Click the **Pencil icon** to edit.
+3. Instead of deleting the whole file, you can copy the blocks below and replace the old sections. *(Or, if it's easier, you can replace the entire file if you know where these sections are!)*
 
-code,
-.counter {
-  font-family: var(--mono);
-  display: inline-flex;
-  border-radius: 4px;
-  color: var(--text-h);
-}
+```react:Updated Exam Portal:src/App.tsx
+<!-- ... existing code ... -->
+                          <p className="text-xs text-blue-600 dark:text-blue-400 font-medium mt-1">
+                            Paste the "BBCode full linked" from ImgBB. The app will magically extract the picture!
+                          </p>
+                          {q.imageUrl && q.imageUrl.startsWith('http') && (
+                            <div className="mt-3 flex justify-center bg-white dark:bg-slate-800 p-2 rounded border border-slate-200 dark:border-slate-700">
+                              <img src={q.imageUrl} alt="Preview" className="max-w-full h-auto object-contain rounded shadow-sm" />
+                            </div>
+                          )}
+                       </div>
 
-code {
-  font-size: 15px;
-  line-height: 135%;
-  padding: 4px 8px;
-  background: var(--code-bg);
-}
+                       {q.type === 'mcq' && (
+<!-- ... existing code ... -->
+          {currentQuestion && (
+            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 sm:p-8 animate-in fade-in duration-300 transition-colors">
+              <div className="flex gap-4">
+                <div className="flex-shrink-0 w-8 h-8 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-full flex items-center justify-center font-bold text-sm">
+                  {currentQuestionIndex + 1}
+                </div>
+                <div className="flex-grow min-w-0 space-y-4 text-left w-full">
+                  
+                  {/* FORCED LEFT ALIGNMENT FOR QUESTION TEXT */}
+                  <p className="text-lg text-slate-800 dark:text-white font-medium leading-relaxed whitespace-pre-wrap text-left w-full block">
+                    {currentQuestion.text}
+                  </p>
+                  
+                  {currentQuestion.imageUrl && (
+                    <div className="my-6 flex justify-start bg-slate-50 dark:bg-slate-900 rounded-lg p-2 border border-slate-100 dark:border-slate-700 w-full overflow-hidden">
+                      <img src={currentQuestion.imageUrl} alt="Question Figure" className="max-w-full h-auto object-contain rounded shadow-sm" />
+                    </div>
+                  )}
+                  
+                  {currentQuestion.type === 'mcq' && (
+                    <div className="space-y-3 mt-4 text-left w-full">
+                      {currentQuestion.options.map((option, optIdx) => (
+                        <label key={optIdx} className={`flex items-center gap-3 p-4 border rounded-lg cursor-pointer transition-all w-full text-left ${answers[currentQuestion.id] === option ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500 dark:bg-blue-900/30 dark:border-blue-500' : 'border-slate-200 hover:bg-slate-50 dark:border-slate-600 dark:hover:bg-slate-700'}`}>
+                          <input type="radio" name={`question-${currentQuestion.id}`} value={option} checked={answers[currentQuestion.id] === option} onChange={() => handleAnswerChange(currentQuestion.id, option)} className="w-4 h-4 text-blue-600 border-slate-300 focus:ring-blue-500 flex-shrink-0 mt-0.5" />
+                          
+                          {/* MAGIC EXTRACTOR FOR OPTIONS - AND FORCED LEFT ALIGNMENT */}
+                          <span className="text-slate-700 dark:text-slate-200 text-left flex-grow break-words block w-full min-w-0">
+                            {option.startsWith('http') ? (
+                              <img src={option} alt={`Option ${optIdx + 1}`} className="max-w-full h-auto object-contain rounded border border-slate-200 dark:border-slate-600 mt-1" />
+                            ) : (
+                              option
+                            )}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+
+                  {currentQuestion.type === 'text' && (
+<!-- ... existing code ... -->
+
+
+Click Commit changes.
+
+Wait 60 seconds, then refresh your live website on your computer and your phone.
+
+The layout will immediately snap to full width, and the images on your phone will dynamically shrink to fit the screen without stretching or cutting off!
