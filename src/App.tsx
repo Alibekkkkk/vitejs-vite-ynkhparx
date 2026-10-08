@@ -5,7 +5,6 @@ import {
   Lock, Image as ImageIcon, Sun, Moon, X
 } from 'lucide-react';
 
-// Firebase imports
 import { initializeApp } from "firebase/app";
 import { 
   getAuth, 
@@ -16,9 +15,11 @@ import {
   GoogleAuthProvider,
   signInWithPopup
 } from "firebase/auth";
-import { getFirestore, doc, getDoc, setDoc, addDoc, collection, onSnapshot, serverTimestamp, deleteDoc } from "firebase/firestore";
+import { 
+  getFirestore, doc, getDoc, setDoc, addDoc, collection, onSnapshot, 
+  serverTimestamp, deleteDoc, updateDoc 
+} from "firebase/firestore";
 
-// Your exact database configuration!
 const firebaseConfig = {
   apiKey: "AIzaSyBj6nrhP7w-KbMeYHV7wtEMk-yHftG8H4c",
   authDomain: "exam-portal-71a9b.firebaseapp.com",
@@ -29,13 +30,11 @@ const firebaseConfig = {
   measurementId: "G-WH8LWEWDGR"
 };
 
-// Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = "exam-portal-71a9b";
 
-// UI Components
 const Modal = ({ isOpen, title, children, onClose }) => {
   if (!isOpen) return null;
   return (
@@ -55,7 +54,6 @@ const Modal = ({ isOpen, title, children, onClose }) => {
   );
 };
 
-// Helper Functions
 const formatTime = (totalSeconds) => {
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
@@ -72,7 +70,6 @@ const getStatusColor = (category) => {
   }
 };
 
-// MAGIC EXTRACTOR (Cleans up BBCode automatically)
 const extractImageUrl = (input) => {
   if (!input) return '';
   const bbMatch = input.match(/\[img\](.*?)\[\/img\]/i);
@@ -112,7 +109,7 @@ const LoginScreen = ({ onAuthAction }) => {
     } catch (err) {
       console.error(err);
       if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/popup-blocked' || err.message.includes('popup')) {
-        setError('Popup Blocked! If you are using Instagram/WhatsApp/Telegram, please tap the Compass/Browser icon in the corner to open this in Safari or Chrome.');
+        setError('Popup Blocked! If you are using an app like Telegram or Instagram, please tap the Compass/Browser icon in the corner to open this in Safari or Chrome to log in.');
       } else {
         setError(err.message.replace('Firebase: ', ''));
       }
@@ -204,6 +201,7 @@ const LoginScreen = ({ onAuthAction }) => {
 
 const TeacherDashboard = ({ user, tests, onLogout }) => {
   const [isBuildingTest, setIsBuildingTest] = useState(false);
+  const [editingId, setEditingId] = useState(null);
   const [newTest, setNewTest] = useState({
     title: '', type: 'IELTS', category: 'Exam', durationMinutes: 30, description: '', questions: [], pin: ''
   });
@@ -268,16 +266,22 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
       const testToSave = {
         ...newTest,
         durationSeconds: newTest.durationMinutes * 60,
-        createdAt: new Date().toISOString(),
         authorId: user.uid,
         authorName: user.name
       };
       delete testToSave.durationMinutes;
 
-      const testsRef = collection(db, 'artifacts', appId, 'public', 'data', 'tests');
-      await addDoc(testsRef, testToSave);
+      if (editingId) {
+        testToSave.updatedAt = new Date().toISOString();
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tests', editingId), testToSave);
+      } else {
+        testToSave.createdAt = new Date().toISOString();
+        const testsRef = collection(db, 'artifacts', appId, 'public', 'data', 'tests');
+        await addDoc(testsRef, testToSave);
+      }
       
       setIsBuildingTest(false);
+      setEditingId(null);
       setNewTest({ title: '', type: 'IELTS', category: 'Exam', durationMinutes: 30, description: '', questions: [], pin: '' });
     } catch (err) {
       console.error(err);
@@ -294,6 +298,21 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
       console.error(err);
     }
   }
+
+  const handleEditTest = (test) => {
+    setNewTest({
+      ...test,
+      durationMinutes: Math.floor(test.durationSeconds / 60)
+    });
+    setEditingId(test.id);
+    setIsBuildingTest(true);
+  };
+
+  const cancelEdit = () => {
+    setIsBuildingTest(false);
+    setEditingId(null);
+    setNewTest({ title: '', type: 'IELTS', category: 'Exam', durationMinutes: 30, description: '', questions: [], pin: '' });
+  };
 
   return (
     <div className="min-h-screen w-full bg-slate-50 dark:bg-slate-900 transition-colors duration-300">
@@ -336,7 +355,10 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
                     </span>
                     <div className="flex items-center gap-2">
                       {test.pin && <Lock className="w-4 h-4 text-amber-500" title="PIN Protected" />}
-                      <button onClick={() => deleteTest(test.id)} className="text-slate-400 dark:text-slate-500 hover:text-red-500 ml-2">
+                      <button onClick={() => handleEditTest(test)} className="text-slate-400 dark:text-slate-500 hover:text-blue-500 ml-2" title="Edit Assessment">
+                        <Edit3 className="w-4 h-4" />
+                      </button>
+                      <button onClick={() => deleteTest(test.id)} className="text-slate-400 dark:text-slate-500 hover:text-red-500 ml-2" title="Delete Assessment">
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
@@ -361,8 +383,8 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
         ) : (
           <div className="max-w-4xl mx-auto bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 md:p-8 transition-colors text-left">
              <div className="flex justify-between items-center mb-6 border-b border-slate-100 dark:border-slate-700 pb-4">
-                <h2 className="text-xl font-bold text-slate-800 dark:text-white">Test Builder</h2>
-                <button onClick={() => setIsBuildingTest(false)} className="text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white font-medium transition-colors">Cancel</button>
+                <h2 className="text-xl font-bold text-slate-800 dark:text-white">{editingId ? 'Edit Assessment' : 'Test Builder'}</h2>
+                <button onClick={cancelEdit} className="text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white font-medium transition-colors">Cancel</button>
              </div>
 
              <div className="space-y-6">
@@ -416,7 +438,6 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
                        
                        <textarea value={q.text} onChange={e => handleUpdateQuestion(qIndex, 'text', e.target.value)} placeholder="Type the question text here..." rows="2" className="w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white mb-3 outline-none"></textarea>
 
-                       {/* MAGIC URL Image Link Field */}
                        <div className="mb-4 bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg border border-blue-200 dark:border-blue-800 shadow-sm text-left">
                           <label className="flex items-center gap-2 text-sm font-medium text-blue-800 dark:text-blue-300 mb-1">
                             <ImageIcon className="w-4 h-4 text-blue-500" /> ✨ Magic Extractor Active (Attach Figure)
@@ -432,7 +453,7 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
                             Paste the "BBCode full linked" from ImgBB. The app will magically extract the picture!
                           </p>
                           {q.imageUrl && q.imageUrl.startsWith('http') && (
-                            <div className="mt-3 flex justify-start bg-white dark:bg-slate-800 p-2 rounded border border-slate-200 dark:border-slate-700">
+                            <div className="mt-3 flex justify-start bg-white dark:bg-slate-800 p-2 rounded border border-slate-200 dark:border-slate-700 overflow-hidden">
                               <img src={q.imageUrl} alt="Preview" className="w-auto h-auto max-w-full object-contain rounded shadow-sm" style={{ maxHeight: 'none' }} />
                             </div>
                           )}
@@ -476,7 +497,7 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
 
                 <div className="flex justify-end pt-6 border-t border-slate-200 dark:border-slate-700">
                   <button onClick={saveTest} disabled={isSubmitting} className="bg-purple-600 hover:bg-purple-700 text-white px-8 py-3 rounded-lg font-bold shadow-md transition-colors disabled:opacity-50 flex items-center gap-2">
-                    {isSubmitting ? 'Saving...' : 'Publish Assessment'} <CheckCircle className="w-5 h-5" />
+                    {isSubmitting ? 'Saving...' : (editingId ? 'Update Assessment' : 'Publish Assessment')} <CheckCircle className="w-5 h-5" />
                   </button>
                 </div>
              </div>
@@ -827,10 +848,8 @@ export default function App() {
   const [activeTest, setActiveTest] = useState(null);
   const [modalInfo, setModalInfo] = useState({ isOpen: false, title: '', message: '' });
   
-  // Theme Toggle State
   const [isDark, setIsDark] = useState(false);
 
-  // Apply dark mode class to HTML tag
   useEffect(() => {
     if (isDark) {
       document.documentElement.classList.add('dark');
@@ -973,13 +992,11 @@ export default function App() {
 
   return (
     <>
-      {/* DEVELOPER TRICK: Override Vite's strict box constraints directly! */}
       <style>{`
         #root { max-width: 100% !important; width: 100% !important; margin: 0 !important; padding: 0 !important; }
         body { margin: 0; padding: 0; min-width: 100vw; overflow-x: hidden; }
       `}</style>
 
-      {/* Floating Theme Toggle */}
       <button 
         onClick={() => setIsDark(!isDark)} 
         className="fixed bottom-24 sm:bottom-6 right-6 p-4 rounded-full bg-slate-800 dark:bg-white text-white dark:text-slate-800 shadow-xl z-50 hover:scale-110 transition-transform flex items-center justify-center"
