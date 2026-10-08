@@ -41,8 +41,8 @@ const Modal = ({ isOpen, title, children, onClose }) => {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
       <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl max-w-lg w-full p-6 animate-in fade-in zoom-in duration-200 max-h-[90vh] overflow-y-auto border border-slate-200 dark:border-slate-700">
-        <h3 className="text-xl font-bold text-gray-800 dark:text-white mb-4">{title}</h3>
-        <div className="text-slate-600 dark:text-slate-300">{children}</div>
+        <h3 className="text-xl font-bold text-gray-800 dark:text-white mb-4 text-left">{title}</h3>
+        <div className="text-slate-600 dark:text-slate-300 text-left">{children}</div>
         {onClose && (
            <div className="mt-6 flex justify-end">
              <button onClick={onClose} className="px-4 py-2 bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-white font-medium rounded-lg hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors">
@@ -72,7 +72,7 @@ const getStatusColor = (category) => {
   }
 };
 
-// MAGIC EXTRACTOR
+// MAGIC EXTRACTOR (Cleans up BBCode automatically)
 const extractImageUrl = (input) => {
   if (!input) return '';
   const bbMatch = input.match(/\[img\](.*?)\[\/img\]/i);
@@ -121,7 +121,7 @@ const LoginScreen = ({ onAuthAction }) => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900 p-4 transition-colors duration-300">
+    <div className="min-h-screen w-full flex items-center justify-center bg-slate-50 dark:bg-slate-900 p-4 transition-colors duration-300">
       <div className="max-w-md w-full bg-white dark:bg-slate-800 rounded-2xl shadow-xl p-8 border border-slate-100 dark:border-slate-700">
         <div className="flex justify-center mb-6">
           <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-200 dark:shadow-none">
@@ -132,12 +132,12 @@ const LoginScreen = ({ onAuthAction }) => {
         <p className="text-center text-slate-500 dark:text-slate-400 mb-8">{isLogin ? 'Login to your account' : 'Create a new account'}</p>
         
         {error && (
-          <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 rounded-lg text-sm font-medium leading-relaxed">
+          <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 rounded-lg text-sm font-medium leading-relaxed text-left">
             {error}
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4 text-left">
           {!isLogin && (
             <div>
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Full Name</label>
@@ -249,8 +249,6 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
     const updated = [...newTest.questions];
     const removedOption = updated[qIndex].options[optIndex];
     updated[qIndex].options.splice(optIndex, 1);
-    
-    // Reset correct answer if it was the one removed
     if (updated[qIndex].correctAnswer === removedOption) {
       updated[qIndex].correctAnswer = '';
     }
@@ -298,9 +296,9 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 transition-colors duration-300">
-      <header className="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 sticky top-0 z-10 transition-colors">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen w-full bg-slate-50 dark:bg-slate-900 transition-colors duration-300">
+      <header className="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 sticky top-0 z-10 transition-colors w-full">
+        <div className="w-full px-4 sm:px-8 lg:px-12 mx-auto">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-2">
               <Users className="w-6 h-6 text-purple-600 dark:text-purple-400" />
@@ -316,11 +314,11 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 py-8">
+      <main className="w-full px-4 sm:px-8 lg:px-12 py-8 mx-auto">
         {!isBuildingTest ? (
           <div>
             <div className="flex justify-between items-center mb-8">
-              <div>
+              <div className="text-left">
                 <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Manage Assessments</h1>
                 <p className="text-slate-500 dark:text-slate-400 mt-1">Create and monitor exams and homework.</p>
               </div>
@@ -329,7 +327,7 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
               </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 text-left">
               {tests.map(test => (
                 <div key={test.id} className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 flex flex-col transition-colors">
                   <div className="flex justify-between items-start mb-4">
@@ -361,7 +359,7 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
             </div>
           </div>
         ) : (
-          <div className="max-w-3xl mx-auto bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 md:p-8 transition-colors">
+          <div className="max-w-4xl mx-auto bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 md:p-8 transition-colors text-left">
              <div className="flex justify-between items-center mb-6 border-b border-slate-100 dark:border-slate-700 pb-4">
                 <h2 className="text-xl font-bold text-slate-800 dark:text-white">Test Builder</h2>
                 <button onClick={() => setIsBuildingTest(false)} className="text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white font-medium transition-colors">Cancel</button>
@@ -410,16 +408,16 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
                   <h3 className="font-bold text-slate-800 dark:text-white mb-4">Questions</h3>
                   
                   {newTest.questions.map((q, qIndex) => (
-                    <div key={q.id} className="bg-slate-50 dark:bg-slate-700/50 p-4 rounded-lg border border-slate-200 dark:border-slate-600 mb-4 transition-colors">
+                    <div key={q.id} className="bg-slate-50 dark:bg-slate-700/50 p-4 rounded-lg border border-slate-200 dark:border-slate-600 mb-4 transition-colors text-left">
                        <div className="flex justify-between mb-2">
-                          <span className="font-semibold text-slate-700 dark:text-slate-200 text-left">Question {qIndex + 1} ({q.type.toUpperCase()})</span>
+                          <span className="font-semibold text-slate-700 dark:text-slate-200">Question {qIndex + 1} ({q.type.toUpperCase()})</span>
                           <button onClick={() => handleRemoveQuestion(qIndex)} className="text-red-500 dark:text-red-400 text-sm hover:underline">Remove</button>
                        </div>
                        
                        <textarea value={q.text} onChange={e => handleUpdateQuestion(qIndex, 'text', e.target.value)} placeholder="Type the question text here..." rows="2" className="w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white mb-3 outline-none"></textarea>
 
                        {/* MAGIC URL Image Link Field */}
-                       <div className="mb-4 bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg border border-blue-200 dark:border-blue-800 shadow-sm">
+                       <div className="mb-4 bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg border border-blue-200 dark:border-blue-800 shadow-sm text-left">
                           <label className="flex items-center gap-2 text-sm font-medium text-blue-800 dark:text-blue-300 mb-1">
                             <ImageIcon className="w-4 h-4 text-blue-500" /> ✨ Magic Extractor Active (Attach Figure)
                           </label>
@@ -434,20 +432,19 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
                             Paste the "BBCode full linked" from ImgBB. The app will magically extract the picture!
                           </p>
                           {q.imageUrl && q.imageUrl.startsWith('http') && (
-                            <div className="mt-3 flex justify-center bg-white dark:bg-slate-800 p-2 rounded border border-slate-200 dark:border-slate-700">
-                              <img src={q.imageUrl} alt="Preview" className="max-h-40 rounded shadow-sm" />
+                            <div className="mt-3 flex justify-start bg-white dark:bg-slate-800 p-2 rounded border border-slate-200 dark:border-slate-700">
+                              <img src={q.imageUrl} alt="Preview" className="w-auto h-auto max-w-full object-contain rounded shadow-sm" style={{ maxHeight: 'none' }} />
                             </div>
                           )}
                        </div>
 
                        {q.type === 'mcq' && (
-                         <div className="space-y-2 ml-4 border-l-2 border-slate-200 dark:border-slate-600 pl-4">
+                         <div className="space-y-2 ml-4 border-l-2 border-slate-200 dark:border-slate-600 pl-4 text-left">
                            {q.options.map((opt, oIndex) => (
                               <div key={oIndex} className="flex items-center gap-2">
                                 <input type="radio" name={`correct_${q.id}`} checked={q.correctAnswer === opt && opt !== ''} onChange={() => handleUpdateQuestion(qIndex, 'correctAnswer', opt)} className="w-4 h-4 flex-shrink-0" />
-                                <input type="text" value={opt} onChange={e => handleUpdateOption(qIndex, oIndex, e.target.value)} placeholder={`Option ${oIndex + 1} (Text or Image Link)`} className="flex-grow p-2 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white text-sm outline-none" />
+                                <input type="text" value={opt} onChange={e => handleUpdateOption(qIndex, oIndex, e.target.value)} placeholder={`Option ${oIndex + 1} (Text or Image Link)`} className="flex-grow p-2 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white text-sm outline-none text-left" />
                                 
-                                {/* Remove Option Button */}
                                 {q.options.length > 2 && (
                                    <button onClick={() => handleRemoveOption(qIndex, oIndex)} className="text-red-400 hover:text-red-600 dark:hover:text-red-300 p-1" title="Remove this option">
                                      <X className="w-4 h-4" />
@@ -455,9 +452,8 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
                                 )}
                               </div>
                            ))}
-                           <p className="text-xs text-slate-500 dark:text-slate-400 italic mt-1 text-left">Select the radio button next to the correct answer for auto-grading.</p>
+                           <p className="text-xs text-slate-500 dark:text-slate-400 italic mt-1">Select the radio button next to the correct answer for auto-grading.</p>
                            
-                           {/* Add Option Button */}
                            {q.options.length < 8 && (
                              <button onClick={() => handleAddOption(qIndex)} className="text-blue-600 dark:text-blue-400 hover:underline text-sm font-medium mt-2 flex items-center gap-1">
                                <Plus className="w-4 h-4" /> Add Another Option
@@ -515,9 +511,9 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onLogout }) => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 transition-colors duration-300">
-      <header className="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 sticky top-0 z-10">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen w-full bg-slate-50 dark:bg-slate-900 transition-colors duration-300">
+      <header className="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 sticky top-0 z-10 w-full">
+        <div className="w-full px-4 sm:px-8 lg:px-12 mx-auto">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-2">
               <BookOpen className="w-6 h-6 text-blue-600 dark:text-blue-400" />
@@ -536,7 +532,7 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onLogout }) => {
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="w-full px-4 sm:px-8 lg:px-12 py-8 mx-auto text-left">
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Welcome back, {user?.name}!</h1>
           <p className="text-slate-500 dark:text-slate-400 mt-1">Ready to ace your next exam or homework?</p>
@@ -552,7 +548,7 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onLogout }) => {
         </div>
 
         {activeTab === 'tests' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {tests.length === 0 && (
                <div className="col-span-full py-12 text-center text-slate-500 dark:text-slate-400">
                  No tests have been published by your teacher yet.
@@ -574,7 +570,7 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onLogout }) => {
                   <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2 flex items-center gap-2">
                     {test.pin && <Lock className="w-4 h-4 text-slate-400 dark:text-slate-500" title="PIN Required" />} {test.title}
                   </h3>
-                  <p className="text-sm text-slate-600 dark:text-slate-400 mb-6 flex-grow line-clamp-3 text-left">{test.description}</p>
+                  <p className="text-sm text-slate-600 dark:text-slate-400 mb-6 flex-grow line-clamp-3">{test.description}</p>
                   
                   <div className="mt-auto">
                     {completed ? (
@@ -594,7 +590,7 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onLogout }) => {
         )}
 
         {activeTab === 'results' && (
-          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
+          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden max-w-5xl mx-auto">
             {results.length === 0 ? (
               <div className="p-8 text-center text-slate-500 dark:text-slate-400 flex flex-col items-center">
                 <FileText className="w-12 h-12 mb-3 text-slate-300 dark:text-slate-600" />
@@ -608,7 +604,7 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onLogout }) => {
                      <div key={idx} className="p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
                        <div className="text-left">
                          <div className="flex items-center gap-3 mb-1">
-                           <h4 className="font-semibold text-slate-800 dark:text-white text-left">{testInfo.title}</h4>
+                           <h4 className="font-semibold text-slate-800 dark:text-white">{testInfo.title}</h4>
                            <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-600">
                              {testInfo.type}
                            </span>
@@ -641,7 +637,7 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onLogout }) => {
             onChange={(e) => setPinModal(prev => ({ ...prev, enteredPin: e.target.value, error: '' }))}
             onKeyDown={(e) => e.key === 'Enter' && submitPin()}
             placeholder="e.g. NUET2026"
-            className="w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white mb-2 focus:ring-2 focus:ring-blue-500 outline-none"
+            className="w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white mb-2 focus:ring-2 focus:ring-blue-500 outline-none text-left"
             autoFocus
           />
           {pinModal.error && <p className="text-red-500 dark:text-red-400 text-sm mb-4 text-left">{pinModal.error}</p>}
@@ -719,9 +715,9 @@ const ExamInterface = ({ test, onComplete }) => {
   const currentQuestion = test.questions && test.questions[currentQuestionIndex];
 
   return (
-    <div className="min-h-screen bg-slate-100 dark:bg-slate-900 flex flex-col font-sans transition-colors duration-300">
-      <header className="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 shadow-sm sticky top-0 z-20 transition-colors">
-        <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
+    <div className="min-h-screen w-full bg-slate-100 dark:bg-slate-900 flex flex-col font-sans transition-colors duration-300">
+      <header className="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 shadow-sm sticky top-0 z-20 transition-colors w-full">
+        <div className="max-w-6xl mx-auto px-4 sm:px-8 py-3 flex items-center justify-between">
           <div className="text-left">
             <h2 className="font-bold text-lg text-slate-800 dark:text-white line-clamp-1">{test.title}</h2>
             <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{test.type} {test.category}</div>
@@ -733,16 +729,16 @@ const ExamInterface = ({ test, onComplete }) => {
         </div>
       </header>
 
-      <div className="bg-amber-50 dark:bg-amber-900/40 border-b border-amber-200 dark:border-amber-800 px-4 py-2 text-center text-sm text-amber-800 dark:text-amber-400 flex items-center justify-center gap-2">
+      <div className="w-full bg-amber-50 dark:bg-amber-900/40 border-b border-amber-200 dark:border-amber-800 px-4 py-2 text-center text-sm text-amber-800 dark:text-amber-400 flex items-center justify-center gap-2">
         <AlertTriangle className="w-4 h-4 flex-shrink-0" />
         Do not refresh this page. The test will auto-submit when time is up.
       </div>
 
-      <main className="flex-grow max-w-4xl w-full mx-auto p-4 sm:p-6 lg:p-8 overflow-y-auto pb-24 text-left">
+      <main className="flex-grow max-w-6xl w-full mx-auto p-4 sm:p-8 overflow-y-auto pb-24 text-left">
         <div className="space-y-6 text-left">
           
           {test.description && (
-            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-5 sm:p-6 text-left transition-colors">
+            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-5 sm:p-8 text-left transition-colors">
                <h3 className="font-bold text-slate-800 dark:text-white mb-2 border-b border-slate-100 dark:border-slate-700 pb-2">Instructions / Reading Material</h3>
                <p className="whitespace-pre-wrap text-slate-700 dark:text-slate-300 leading-relaxed text-sm text-left">{test.description}</p>
             </div>
@@ -750,20 +746,19 @@ const ExamInterface = ({ test, onComplete }) => {
 
           {currentQuestion && (
             <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 sm:p-8 animate-in fade-in duration-300 transition-colors">
-              <div className="flex gap-4">
+              <div className="flex gap-4 text-left">
                 <div className="flex-shrink-0 w-8 h-8 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-full flex items-center justify-center font-bold text-sm">
                   {currentQuestionIndex + 1}
                 </div>
-                <div className="flex-grow space-y-4 text-left w-full">
+                <div className="flex-grow min-w-0 space-y-4 text-left w-full">
                   
-                  {/* FORCED LEFT ALIGNMENT FOR QUESTION TEXT */}
                   <p className="text-lg text-slate-800 dark:text-white font-medium leading-relaxed whitespace-pre-wrap text-left w-full block">
                     {currentQuestion.text}
                   </p>
                   
                   {currentQuestion.imageUrl && (
-                    <div className="my-6 flex justify-start bg-slate-50 dark:bg-slate-900 rounded-lg p-2 border border-slate-100 dark:border-slate-700">
-                      <img src={currentQuestion.imageUrl} alt="Question Figure" className="max-w-full max-h-96 rounded shadow-sm" />
+                    <div className="my-6 flex justify-start bg-slate-50 dark:bg-slate-900 rounded-lg p-2 border border-slate-100 dark:border-slate-700 w-full overflow-hidden">
+                      <img src={currentQuestion.imageUrl} alt="Question Figure" className="w-auto h-auto max-w-full object-contain rounded shadow-sm" style={{ maxHeight: 'none' }} />
                     </div>
                   )}
                   
@@ -773,10 +768,9 @@ const ExamInterface = ({ test, onComplete }) => {
                         <label key={optIdx} className={`flex items-center gap-3 p-4 border rounded-lg cursor-pointer transition-all w-full text-left ${answers[currentQuestion.id] === option ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500 dark:bg-blue-900/30 dark:border-blue-500' : 'border-slate-200 hover:bg-slate-50 dark:border-slate-600 dark:hover:bg-slate-700'}`}>
                           <input type="radio" name={`question-${currentQuestion.id}`} value={option} checked={answers[currentQuestion.id] === option} onChange={() => handleAnswerChange(currentQuestion.id, option)} className="w-4 h-4 text-blue-600 border-slate-300 focus:ring-blue-500 flex-shrink-0 mt-0.5" />
                           
-                          {/* MAGIC EXTRACTOR FOR OPTIONS - AND FORCED LEFT ALIGNMENT */}
-                          <span className="text-slate-700 dark:text-slate-200 text-left flex-grow break-words block w-full">
+                          <span className="text-slate-700 dark:text-slate-200 text-left flex-grow break-words block w-full min-w-0">
                             {option.startsWith('http') ? (
-                              <img src={option} alt={`Option ${optIdx + 1}`} className="max-h-32 rounded border border-slate-200 dark:border-slate-600 mt-1" />
+                              <img src={option} alt={`Option ${optIdx + 1}`} className="w-auto h-auto max-w-full object-contain rounded border border-slate-200 dark:border-slate-600 mt-1" style={{ maxHeight: 'none' }} />
                             ) : (
                               option
                             )}
@@ -813,8 +807,8 @@ const ExamInterface = ({ test, onComplete }) => {
         </div>
       </main>
 
-      <div className="fixed bottom-0 left-0 right-0 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 p-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] dark:shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.5)] z-30 transition-colors">
-         <div className="max-w-4xl mx-auto flex justify-end">
+      <div className="fixed bottom-0 left-0 right-0 w-full bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 p-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] dark:shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.5)] z-30 transition-colors">
+         <div className="max-w-6xl mx-auto px-4 flex justify-end">
             <button onClick={handleManualSubmit} disabled={isSubmitting} className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-sm transition-colors flex items-center gap-2 disabled:opacity-70">
               {isSubmitting ? 'Submitting...' : 'Submit Final Answers'} <CheckCircle className="w-5 h-5" />
             </button>
@@ -968,7 +962,7 @@ export default function App() {
 
   if (loadingAuth || currentView === 'loading') {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900 transition-colors duration-300">
+      <div className="min-h-screen w-full flex items-center justify-center bg-slate-50 dark:bg-slate-900 transition-colors duration-300">
         <div className="flex flex-col items-center">
           <div className="w-12 h-12 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-4"></div>
           <p className="text-slate-500 dark:text-slate-400 font-medium">Loading Portal...</p>
@@ -979,10 +973,16 @@ export default function App() {
 
   return (
     <>
-      {/* Floating Theme Toggle (Always visible) */}
+      {/* DEVELOPER TRICK: Override Vite's strict box constraints directly! */}
+      <style>{`
+        #root { max-width: 100% !important; width: 100% !important; margin: 0 !important; padding: 0 !important; }
+        body { margin: 0; padding: 0; min-width: 100vw; overflow-x: hidden; }
+      `}</style>
+
+      {/* Floating Theme Toggle */}
       <button 
         onClick={() => setIsDark(!isDark)} 
-        className="fixed bottom-6 right-6 p-4 rounded-full bg-slate-800 dark:bg-white text-white dark:text-slate-800 shadow-xl z-50 hover:scale-110 transition-transform flex items-center justify-center"
+        className="fixed bottom-24 sm:bottom-6 right-6 p-4 rounded-full bg-slate-800 dark:bg-white text-white dark:text-slate-800 shadow-xl z-50 hover:scale-110 transition-transform flex items-center justify-center"
         title="Toggle Dark Mode"
       >
         {isDark ? <Sun className="w-6 h-6"/> : <Moon className="w-6 h-6" />}
