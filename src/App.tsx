@@ -766,33 +766,33 @@ const ExamInterface = ({ test, onComplete }) => {
           )}
 
           {currentQuestion && (
-            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 sm:p-8 animate-in fade-in duration-300 transition-colors">
-              <div className="flex gap-4 text-left w-full">
+            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 sm:p-8 animate-in fade-in duration-300 transition-colors w-full overflow-hidden">
+              <div className="flex gap-4 text-left w-full overflow-hidden">
                 <div className="flex-shrink-0 w-8 h-8 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-full flex items-center justify-center font-bold text-sm">
                   {currentQuestionIndex + 1}
                 </div>
-                <div className="flex-grow min-w-0 space-y-4 text-left w-full">
+                <div className="flex-grow min-w-0 space-y-4 text-left w-full overflow-hidden">
                   
                   <p className="text-lg text-slate-800 dark:text-white font-medium leading-relaxed whitespace-pre-wrap text-left w-full block">
                     {currentQuestion.text}
                   </p>
                   
                   {currentQuestion.imageUrl && (
-                    <div className="my-6 w-full bg-slate-50 dark:bg-slate-900 rounded-lg p-2 border border-slate-100 dark:border-slate-700 overflow-hidden flex justify-center">
-                      <img src={currentQuestion.imageUrl} alt="Question Figure" className="max-w-full h-auto object-contain rounded shadow-sm" />
+                    <div className="my-6 w-full bg-slate-50 dark:bg-slate-900 rounded-lg p-2 border border-slate-100 dark:border-slate-700 overflow-hidden flex justify-center box-border">
+                      <img src={currentQuestion.imageUrl} alt="Question Figure" className="max-w-full h-auto object-contain rounded shadow-sm" style={{ maxWidth: '100%', display: 'block' }} />
                     </div>
                   )}
                   
                   {currentQuestion.type === 'mcq' && (
-                    <div className="space-y-3 mt-4 text-left w-full">
+                    <div className="space-y-3 mt-4 text-left w-full overflow-hidden">
                       {currentQuestion.options.map((option, optIdx) => (
-                        <label key={optIdx} className={`flex items-center gap-3 p-4 border rounded-lg cursor-pointer transition-all w-full text-left ${answers[currentQuestion.id] === option ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500 dark:bg-blue-900/30 dark:border-blue-500' : 'border-slate-200 hover:bg-slate-50 dark:border-slate-600 dark:hover:bg-slate-700'}`}>
+                        <label key={optIdx} className={`flex items-center gap-3 p-4 border rounded-lg cursor-pointer transition-all w-full text-left overflow-hidden ${answers[currentQuestion.id] === option ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500 dark:bg-blue-900/30 dark:border-blue-500' : 'border-slate-200 hover:bg-slate-50 dark:border-slate-600 dark:hover:bg-slate-700'}`}>
                           <input type="radio" name={`question-${currentQuestion.id}`} value={option} checked={answers[currentQuestion.id] === option} onChange={() => handleAnswerChange(currentQuestion.id, option)} className="w-4 h-4 text-blue-600 border-slate-300 focus:ring-blue-500 flex-shrink-0 mt-0.5" />
                           
                           <span className="text-slate-700 dark:text-slate-200 text-left flex-grow break-words block w-full min-w-0 overflow-hidden">
                             {option.startsWith('http') ? (
-                              <div className="w-full flex justify-start">
-                                <img src={option} alt={`Option ${optIdx + 1}`} className="max-w-full h-auto object-contain rounded border border-slate-200 dark:border-slate-600 mt-1" />
+                              <div className="w-full flex justify-start overflow-hidden">
+                                <img src={option} alt={`Option ${optIdx + 1}`} className="max-w-full h-auto object-contain rounded border border-slate-200 dark:border-slate-600 mt-1" style={{ maxWidth: '100%' }} />
                               </div>
                             ) : (
                               option
