@@ -679,9 +679,10 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onLogout }) => {
 
 const ExamInterface = ({ test, onComplete }) => {
   const [timeLeft, setTimeLeft] = useState(test.durationSeconds);
-  const [answers, setAnswers] = useState({});
+  const [answers, setAnswers] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [isConfirmSubmitOpen, setIsConfirmSubmitOpen] = useState(false);
 
   useEffect(() => {
     if (timeLeft <= 0) {
@@ -723,20 +724,21 @@ const ExamInterface = ({ test, onComplete }) => {
   };
 
   const handleManualSubmit = () => {
-    const answeredCount = Object.keys(answers).length;
-    if (answeredCount < test.questions?.length && !window.confirm("You haven't answered all questions. Submit anyway?")) {
-      return;
-    }
-    submitTest(false);
+    setIsConfirmSubmitOpen(true);
   };
 
   const handleAutoSubmit = () => submitTest(true);
 
   const isWarningTime = timeLeft <= 60;
   const currentQuestion = test.questions && test.questions[currentQuestionIndex];
+  const unansweredQuestions = ((test.questions || []) as Array<{ id: string }>).reduce<number[]>((unanswered, question, index) => {
+      const answer = answers[question.id];
+      if (answer == null || answer.trim() === '') unanswered.push(index + 1);
+      return unanswered;
+    }, []);
 
   return (
-    <div className="min-h-screen w-full bg-slate-100 dark:bg-slate-900 flex flex-col font-sans transition-colors duration-300">
+    <div className="exam-interface min-h-screen w-full bg-slate-100 dark:bg-slate-900 flex flex-col font-sans transition-colors duration-300">
       <header className="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 shadow-sm sticky top-0 z-20 transition-colors w-full">
         <div className="max-w-6xl mx-auto px-4 sm:px-8 py-3 flex items-center justify-between">
           <div className="text-left">
@@ -755,7 +757,7 @@ const ExamInterface = ({ test, onComplete }) => {
         Do not refresh this page. The test will auto-submit when time is up.
       </div>
 
-      <main className="flex-grow max-w-6xl w-full mx-auto p-4 sm:p-8 overflow-y-auto pb-24 text-left">
+      <main className="flex-grow max-w-6xl w-full mx-auto p-4 sm:p-8 text-left">
         <div className="space-y-6 text-left">
           
           {test.description && (
@@ -813,7 +815,7 @@ const ExamInterface = ({ test, onComplete }) => {
             </div>
           )}
 
-          {test.questions && test.questions.length > 1 && (
+          {test.questions && test.questions.length > 0 && (
             <div className="flex justify-between items-center bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 transition-colors">
               <button onClick={() => setCurrentQuestionIndex(prev => Math.max(0, prev - 1))} disabled={currentQuestionIndex === 0} className="px-5 py-2.5 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-white font-medium rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                 ← Previous
@@ -821,22 +823,47 @@ const ExamInterface = ({ test, onComplete }) => {
               <span className="text-slate-500 dark:text-slate-400 font-medium text-sm">
                 Question {currentQuestionIndex + 1} of {test.questions.length}
               </span>
-              <button onClick={() => setCurrentQuestionIndex(prev => Math.min(test.questions.length - 1, prev + 1))} disabled={currentQuestionIndex === test.questions.length - 1} className="px-5 py-2.5 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-white font-medium rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-                Next →
-              </button>
+              {currentQuestionIndex === test.questions.length - 1 ? (
+                <button onClick={handleManualSubmit} disabled={isSubmitting} className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition-colors disabled:opacity-70">
+                  Submit Final Answers
+                </button>
+              ) : (
+                <button onClick={() => setCurrentQuestionIndex(prev => Math.min(test.questions.length - 1, prev + 1))} className="px-5 py-2.5 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-white font-medium rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">
+                  Next →
+                </button>
+              )}
             </div>
           )}
 
         </div>
       </main>
 
-      <div className="fixed bottom-0 left-0 right-0 w-full bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 p-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] dark:shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.5)] z-30 transition-colors">
-         <div className="max-w-6xl mx-auto px-4 flex justify-end">
-            <button onClick={handleManualSubmit} disabled={isSubmitting} className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-sm transition-colors flex items-center gap-2 disabled:opacity-70">
-              {isSubmitting ? 'Submitting...' : 'Submit Final Answers'} <CheckCircle className="w-5 h-5" />
-            </button>
-         </div>
-      </div>
+      <Modal
+        isOpen={isConfirmSubmitOpen}
+        title="Submit your answers?"
+        onClose={() => setIsConfirmSubmitOpen(false)}
+      >
+        <p className="mb-4 text-slate-700 dark:text-slate-300">
+          {unansweredQuestions.length > 0
+            ? `You have not answered question${unansweredQuestions.length === 1 ? '' : 's'} ${unansweredQuestions.join(', ')}. Do you want to submit anyway?`
+            : 'Are you sure you want to submit your answers? You will not be able to change them after submission.'}
+        </p>
+        <div className="mt-6 flex justify-end gap-3">
+          <button
+            onClick={() => setIsConfirmSubmitOpen(false)}
+            className="px-5 py-3 bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-white font-medium rounded-lg hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors"
+          >
+            No, review answers
+          </button>
+          <button
+            onClick={() => submitTest(false)}
+            disabled={isSubmitting}
+            className="px-5 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition-colors disabled:opacity-70"
+          >
+            {isSubmitting ? 'Submitting...' : 'Yes, submit'}
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 };
