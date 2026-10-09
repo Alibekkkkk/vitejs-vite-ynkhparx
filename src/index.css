@@ -1,9 +1,9 @@
+/* STREAMING_CHUNK:Importing beautiful LaTeX Academic Font... */
+@import url('https://fonts.cdnfonts.com/css/computer-modern-serif');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-/* STREAMING_CHUNK:Importing beautiful LaTeX Academic Font... */
-@import url('https://fonts.cdnfonts.com/css/computer-modern-serif');
 
 /* STREAMING_CHUNK:Overriding Vite layout constraints to force full screen... */
 html, body, #root {
@@ -14,17 +14,17 @@ padding: 0;
 overflow-x: hidden;
 }
 
-/* STREAMING_CHUNK:Applying LaTeX Font and Increasing Global Text Size... */
-
-{
-font-family: 'Computer Modern Serif', 'Times New Roman', serif !important;
+/* Use a Computer Modern face for the exam, like the type used in LaTeX. */
+.exam-interface {
+  font-family: 'Computer Modern Serif', 'Latin Modern Roman', 'CMU Serif', 'Times New Roman', serif;
+  font-size: 2rem;
 }
 
-/* Override standard sizes to make everything bigger and more readable */
-.text-xs { font-size: 0.95rem !important; }
-.text-sm { font-size: 1.1rem !important; }
-.text-base { font-size: 1.2rem !important; }
-.text-lg { font-size: 1.4rem !important; }
-.text-xl { font-size: 1.6rem !important; }
-.text-2xl { font-size: 1.85rem !important; }
-.text-3xl { font-size: 2.15rem !important; }
+/* Double exam text sizes while keeping image dimensions and layout utilities intact. */
+.exam-interface .text-xs { font-size: 1.5rem; }
+.exam-interface .text-sm { font-size: 1.75rem; }
+.exam-interface .text-base { font-size: 2rem; }
+.exam-interface .text-lg { font-size: 2.25rem; }
+.exam-interface .text-xl { font-size: 2.5rem; }
+.exam-interface .text-2xl { font-size: 3rem; }
+.exam-interface .text-3xl { font-size: 3.75rem; }
