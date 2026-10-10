@@ -85,6 +85,7 @@ const LoginScreen = ({ onAuthAction }) => {
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [role, setRole] = useState('student');
+  const [groupCode, setGroupCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -93,7 +94,7 @@ const LoginScreen = ({ onAuthAction }) => {
     setError('');
     setLoading(true);
     try {
-      await onAuthAction(isLogin ? 'login' : 'signup', { email, password, name, role });
+      await onAuthAction(isLogin ? 'login' : 'signup', { email, password, name, role, groupCode });
     } catch (err) {
       console.error(err);
       setError(err.message.replace('Firebase: ', ''));
@@ -105,7 +106,7 @@ const LoginScreen = ({ onAuthAction }) => {
     setError('');
     setLoading(true);
     try {
-      await onAuthAction('google', { role });
+      await onAuthAction('google', { role, groupCode });
     } catch (err) {
       console.error(err);
       if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/popup-blocked' || err.message.includes('popup')) {
@@ -139,6 +140,14 @@ const LoginScreen = ({ onAuthAction }) => {
             <div>
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Full Name</label>
               <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. John Doe" className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all" required={!isLogin} />
+            </div>
+          )}
+
+          {!isLogin && role === 'student' && (
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Student group code (optional)</label>
+              <input type="text" value={groupCode} onChange={(e) => setGroupCode(e.target.value)} placeholder="Enter the code from your teacher" className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all" />
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Your teacher must give you the exact group code to see that group’s exams.</p>
             </div>
           )}
           
@@ -203,7 +212,7 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
   const [isBuildingTest, setIsBuildingTest] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [newTest, setNewTest] = useState({
-    title: '', type: 'IELTS', category: 'Exam', durationMinutes: 30, description: '', questions: [], pin: ''
+    title: '', type: 'IELTS', category: 'Exam', durationMinutes: 30, description: '', questions: [], pin: '', groupCode: ''
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -265,6 +274,7 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
     try {
       const testToSave = {
         ...newTest,
+        groupCode: newTest.groupCode.trim().toLowerCase() || 'all',
         durationSeconds: newTest.durationMinutes * 60,
         authorId: user.uid,
         authorName: user.name
@@ -282,7 +292,7 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
       
       setIsBuildingTest(false);
       setEditingId(null);
-      setNewTest({ title: '', type: 'IELTS', category: 'Exam', durationMinutes: 30, description: '', questions: [], pin: '' });
+      setNewTest({ title: '', type: 'IELTS', category: 'Exam', durationMinutes: 30, description: '', questions: [], pin: '', groupCode: '' });
     } catch (err) {
       console.error(err);
       alert("Failed to save test.");
@@ -302,6 +312,7 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
   const handleEditTest = (test) => {
     setNewTest({
       ...test,
+      groupCode: test.groupCode || '',
       durationMinutes: Math.floor(test.durationSeconds / 60)
     });
     setEditingId(test.id);
@@ -311,7 +322,7 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
   const cancelEdit = () => {
     setIsBuildingTest(false);
     setEditingId(null);
-    setNewTest({ title: '', type: 'IELTS', category: 'Exam', durationMinutes: 30, description: '', questions: [], pin: '' });
+    setNewTest({ title: '', type: 'IELTS', category: 'Exam', durationMinutes: 30, description: '', questions: [], pin: '', groupCode: '' });
   };
 
   return (
@@ -365,6 +376,7 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
                   </div>
                   <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2">{test.title}</h3>
                   <p className="text-sm text-slate-600 dark:text-slate-400 mb-4 flex-grow line-clamp-2">{test.description}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">Group: {test.groupCode || 'all students'}</p>
                   <div className="flex justify-between items-center text-sm text-slate-500 dark:text-slate-400 border-t border-slate-100 dark:border-slate-700 pt-4 mt-auto">
                     <span className="flex items-center gap-1"><Clock className="w-4 h-4" /> {Math.floor(test.durationSeconds / 60)} mins</span>
                     <span className="flex items-center gap-1"><FileText className="w-4 h-4" /> {test.questions?.length || 0} Qs</span>
@@ -423,6 +435,11 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
                       <Lock className="w-3 h-3 text-slate-500 dark:text-slate-400"/> Secret PIN (Optional)
                     </label>
                     <input type="text" value={newTest.pin || ''} onChange={e => setNewTest({...newTest, pin: e.target.value})} placeholder="e.g. NUET2026" className="w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:ring-2 focus:ring-purple-500 outline-none" />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Student group code</label>
+                    <input type="text" value={newTest.groupCode || ''} onChange={e => setNewTest({...newTest, groupCode: e.target.value})} placeholder="Leave blank to show this exam to everyone" className="w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:ring-2 focus:ring-purple-500 outline-none" />
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Use a unique code and give it only to students assigned to this exam. The code is not case-sensitive.</p>
                   </div>
                 </div>
 
@@ -508,9 +525,29 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
   )
 }
 
-const StudentDashboard = ({ user, tests, results, onStartTest, onLogout }) => {
+const StudentDashboard = ({ user, tests, results, onStartTest, onSaveGroupCode, onLogout }) => {
   const [activeTab, setActiveTab] = useState('tests');
   const [pinModal, setPinModal] = useState({ isOpen: false, test: null, enteredPin: '', error: '' });
+  const [groupCodeInput, setGroupCodeInput] = useState(user?.groupCode || '');
+  const [isSavingGroupCode, setIsSavingGroupCode] = useState(false);
+
+  const normalizedGroupCode = (user?.groupCode || '').trim().toLowerCase();
+  const visibleTests = tests.filter((test) => {
+    const testGroupCode = (test.groupCode || 'all').trim().toLowerCase();
+    return testGroupCode === 'all' || (normalizedGroupCode && testGroupCode === normalizedGroupCode);
+  });
+
+  const saveGroupCode = async () => {
+    setIsSavingGroupCode(true);
+    try {
+      await onSaveGroupCode(groupCodeInput.trim().toLowerCase());
+    } catch (error) {
+      console.error(error);
+      alert('Could not save the group code. Please try again.');
+    } finally {
+      setIsSavingGroupCode(false);
+    }
+  };
 
   const hasCompletedTest = (testId) => results.some(r => r.testId === testId);
 
@@ -557,6 +594,14 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onLogout }) => {
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Welcome back, {user?.name}!</h1>
           <p className="text-slate-500 dark:text-slate-400 mt-1">Ready to ace your next exam or homework?</p>
+          <div className="mt-4 flex flex-col sm:flex-row sm:items-end gap-2 max-w-xl">
+            <div className="flex-grow">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Your student group code</label>
+              <input type="text" value={groupCodeInput} onChange={e => setGroupCodeInput(e.target.value)} placeholder="Enter the code provided by your teacher" className="w-full p-2.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <button onClick={saveGroupCode} disabled={isSavingGroupCode} className="px-4 py-2.5 bg-slate-700 hover:bg-slate-800 text-white rounded-lg font-medium disabled:opacity-60">{isSavingGroupCode ? 'Saving...' : 'Save group'}</button>
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Ask your teacher for the exact code. Leave it blank to see exams shared with everyone.</p>
         </div>
 
         <div className="flex space-x-4 border-b border-slate-200 dark:border-slate-700 mb-6">
@@ -570,12 +615,12 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onLogout }) => {
 
         {activeTab === 'tests' && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {tests.length === 0 && (
+            {visibleTests.length === 0 && (
                <div className="col-span-full py-12 text-center text-slate-500 dark:text-slate-400">
-                 No tests have been published by your teacher yet.
+                 No exams are available for your group yet. Check that you entered the correct group code.
                </div>
             )}
-            {tests.map((test) => {
+            {visibleTests.map((test) => {
               const completed = hasCompletedTest(test.id);
               return (
                 <div key={test.id} className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 flex flex-col transition-shadow hover:shadow-md">
@@ -950,9 +995,9 @@ export default function App() {
       const userCred = await createUserWithEmailAndPassword(auth, data.email, data.password);
       const uid = userCred.user.uid;
       const profileRef = doc(db, 'artifacts', appId, 'users', uid, 'profile', 'info');
-      await setDoc(profileRef, { name: data.name, role: data.role, createdAt: serverTimestamp() });
+      await setDoc(profileRef, { name: data.name, role: data.role, groupCode: data.role === 'student' ? (data.groupCode || '').trim().toLowerCase() : '', createdAt: serverTimestamp() });
       
-      setUser({ uid, name: data.name, role: data.role });
+      setUser({ uid, name: data.name, role: data.role, groupCode: data.role === 'student' ? (data.groupCode || '').trim().toLowerCase() : '' });
       setCurrentView(data.role === 'teacher' ? 'teacher_dashboard' : 'student_dashboard');
     } else if (action === 'login') {
       await signInWithEmailAndPassword(auth, data.email, data.password);
@@ -966,8 +1011,10 @@ export default function App() {
       const profileSnap = await getDoc(profileRef);
       
       if (!profileSnap.exists()) {
-        await setDoc(profileRef, { name: userCred.user.displayName || 'New User', role: data.role || 'student', createdAt: serverTimestamp() });
-        setUser({ uid, name: userCred.user.displayName, role: data.role || 'student' });
+        const role = data.role || 'student';
+        const groupCode = role === 'student' ? (data.groupCode || '').trim().toLowerCase() : '';
+        await setDoc(profileRef, { name: userCred.user.displayName || 'New User', role, groupCode, createdAt: serverTimestamp() });
+        setUser({ uid, name: userCred.user.displayName, role, groupCode });
         setCurrentView((data.role || 'student') === 'teacher' ? 'teacher_dashboard' : 'student_dashboard');
       } else {
         const existingData = profileSnap.data();
@@ -986,8 +1033,21 @@ export default function App() {
   };
 
   const startTest = (test) => {
+    const testGroupCode = (test.groupCode || 'all').trim().toLowerCase();
+    const studentGroupCode = (user?.groupCode || '').trim().toLowerCase();
+    if (user?.role === 'student' && testGroupCode !== 'all' && testGroupCode !== studentGroupCode) {
+      setModalInfo({ isOpen: true, title: 'Exam not available', message: 'This exam is assigned to a different student group.' });
+      return;
+    }
     setActiveTest(test);
     setCurrentView('exam');
+  };
+
+  const saveStudentGroupCode = async (groupCode) => {
+    if (!user || user.role !== 'student') return;
+    const profileRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'info');
+    await updateDoc(profileRef, { groupCode });
+    setUser((previousUser) => ({ ...previousUser, groupCode }));
   };
 
   const completeTest = async (resultData) => {
@@ -1031,7 +1091,7 @@ export default function App() {
 
       {currentView === 'login' && <LoginScreen onAuthAction={handleAuthAction} />}
       {currentView === 'teacher_dashboard' && <TeacherDashboard user={user} tests={tests} onLogout={handleLogout} />}
-      {currentView === 'student_dashboard' && <StudentDashboard user={user} tests={tests} results={results} onStartTest={startTest} onLogout={handleLogout} />}
+      {currentView === 'student_dashboard' && <StudentDashboard user={user} tests={tests} results={results} onStartTest={startTest} onSaveGroupCode={saveStudentGroupCode} onLogout={handleLogout} />}
       {currentView === 'exam' && activeTest && <ExamInterface test={activeTest} onComplete={completeTest} />}
 
       <Modal isOpen={modalInfo.isOpen} title={modalInfo.title} onClose={() => setModalInfo(prev => ({ ...prev, isOpen: false }))}>
