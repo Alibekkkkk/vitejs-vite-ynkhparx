@@ -47,8 +47,8 @@ const isClientAuthorizedTeacher = (firebaseUser) => Boolean(
 );
 
 // The client allowlist controls the UI; Firestore rules independently enforce it.
-const resolveAccountRole = async (profileRef, firebaseUser, storedRole) => {
-  if (isClientAuthorizedTeacher(firebaseUser)) {
+const resolveAccountRole = async (profileRef, firebaseUser, storedRole, requestedRole = 'student') => {
+  if ((storedRole === 'teacher' || requestedRole === 'teacher') && isClientAuthorizedTeacher(firebaseUser)) {
     try {
       await updateDoc(profileRef, { role: 'teacher' });
       return 'teacher';
@@ -57,7 +57,7 @@ const resolveAccountRole = async (profileRef, firebaseUser, storedRole) => {
     }
   }
 
-  if (storedRole === 'teacher') {
+  if (storedRole === 'teacher' && !isClientAuthorizedTeacher(firebaseUser)) {
     try {
       await updateDoc(profileRef, { role: 'student' });
     } catch (error) {
@@ -116,7 +116,7 @@ const LoginScreen = ({ onAuthAction }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
-  const role = 'student';
+  const [role, setRole] = useState('student');
   const [groupCode, setGroupCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -124,6 +124,10 @@ const LoginScreen = ({ onAuthAction }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    if (!isLogin && role === 'teacher') {
+      setError('Teacher registration is available only through Google sign-in for approved accounts.');
+      return;
+    }
     setLoading(true);
     try {
       await onAuthAction(isLogin ? 'login' : 'signup', { email, password, name, role, groupCode });
@@ -138,7 +142,7 @@ const LoginScreen = ({ onAuthAction }) => {
     setError('');
     setLoading(true);
     try {
-      await onAuthAction('google', { role, groupCode });
+      await onAuthAction('google', { role: isLogin ? 'student' : role, groupCode, isSignup: !isLogin });
     } catch (err) {
       console.error(err);
       if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/popup-blocked' || err.message.includes('popup')) {
@@ -170,6 +174,21 @@ const LoginScreen = ({ onAuthAction }) => {
         <form onSubmit={handleSubmit} className="space-y-4 text-left">
           {!isLogin && (
             <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">I am registering as a...</label>
+              <div className="grid grid-cols-2 gap-4">
+                <button type="button" onClick={() => setRole('student')} className={`py-2 px-4 rounded-lg border font-medium flex items-center justify-center gap-2 transition-all ${role === 'student' ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-500 text-blue-700 dark:text-blue-400 ring-1 ring-blue-500' : 'bg-white dark:bg-slate-700 border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-600'}`}>
+                  <User className="w-4 h-4" /> Student
+                </button>
+                <button type="button" onClick={() => setRole('teacher')} className={`py-2 px-4 rounded-lg border font-medium flex items-center justify-center gap-2 transition-all ${role === 'teacher' ? 'bg-purple-50 dark:bg-purple-900/30 border-purple-500 text-purple-700 dark:text-purple-400 ring-1 ring-purple-500' : 'bg-white dark:bg-slate-700 border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-600'}`}>
+                  <Users className="w-4 h-4" /> Teacher
+                </button>
+              </div>
+              {role === 'teacher' && <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">Teacher registration requires Google and one of the four approved accounts.</p>}
+            </div>
+          )}
+
+          {!isLogin && (
+            <div>
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Full Name</label>
               <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. John Doe" className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all" required={!isLogin} />
             </div>
@@ -192,10 +211,6 @@ const LoginScreen = ({ onAuthAction }) => {
             <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Password</label>
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" minLength="6" className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all" required />
           </div>
-
-          {!isLogin && (
-            <p className="text-sm text-slate-500 dark:text-slate-400">New accounts are students. Teacher access is limited to the owner’s approved Google accounts.</p>
-          )}
 
           <button type="submit" disabled={loading} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-70 mt-4 shadow-md">
             {loading ? 'Processing...' : (isLogin ? 'Login with Email' : 'Create Account')} <ArrowRight className="w-5 h-5" />
@@ -221,7 +236,7 @@ const LoginScreen = ({ onAuthAction }) => {
 
         <div className="mt-6 text-center text-sm text-slate-500 dark:text-slate-400">
           {isLogin ? "Don't have an account? " : "Already have an account? "}
-          <button onClick={() => { setIsLogin(!isLogin); setError(''); }} className="text-blue-600 dark:text-blue-400 font-semibold hover:underline">
+          <button onClick={() => { setIsLogin(!isLogin); setRole('student'); setError(''); }} className="text-blue-600 dark:text-blue-400 font-semibold hover:underline">
             {isLogin ? 'Sign up' : 'Login'}
           </button>
         </div>
@@ -1040,7 +1055,14 @@ export default function App() {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
       const userCred = await signInWithPopup(auth, provider);
+
+      if (data.isSignup && data.role === 'teacher' && !isClientAuthorizedTeacher(userCred.user)) {
+        await signOut(auth);
+        throw new Error('This Google account is not approved for teacher access. Choose Student or use one of the four approved Google accounts.');
+      }
+
       const uid = userCred.user.uid;
+      const requestedRole = data.isSignup ? data.role : 'student';
       
       const profileRef = doc(db, 'artifacts', appId, 'users', uid, 'profile', 'info');
       const profileSnap = await getDoc(profileRef);
@@ -1049,12 +1071,12 @@ export default function App() {
         const role = 'student';
         const groupCode = (data.groupCode || '').trim().toLowerCase();
         await setDoc(profileRef, { name: userCred.user.displayName || 'New User', role, groupCode, createdAt: serverTimestamp() });
-        const resolvedRole = await resolveAccountRole(profileRef, userCred.user, role);
+        const resolvedRole = await resolveAccountRole(profileRef, userCred.user, role, requestedRole);
         setUser({ uid, name: userCred.user.displayName, role: resolvedRole, groupCode });
         setCurrentView(resolvedRole === 'teacher' ? 'teacher_dashboard' : 'student_dashboard');
       } else {
         const existingData = profileSnap.data();
-        const role = await resolveAccountRole(profileRef, userCred.user, existingData.role);
+        const role = await resolveAccountRole(profileRef, userCred.user, existingData.role, requestedRole);
         setUser({ uid, ...existingData, role, email: userCred.user.email });
         setCurrentView(role === 'teacher' ? 'teacher_dashboard' : 'student_dashboard');
       }
