@@ -754,7 +754,7 @@ const ExamInterface = ({ test, onComplete }) => {
 
       <div className="w-full bg-amber-50 dark:bg-amber-900/40 border-b border-amber-200 dark:border-amber-800 px-4 py-2 text-center text-sm text-amber-800 dark:text-amber-400 flex items-center justify-center gap-2">
         <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-        Do not refresh this page. The test will auto-submit when time is up.
+        The test submits automatically when the timer runs out. Refreshing resets the timer and discards your answers.
       </div>
 
       <main className="flex-grow max-w-6xl w-full mx-auto p-4 sm:p-8 text-left">
