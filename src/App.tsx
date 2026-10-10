@@ -274,7 +274,7 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
     try {
       const testToSave = {
         ...newTest,
-        groupCode: newTest.groupCode.trim().toLowerCase() || 'all',
+        groupCode: newTest.groupCode.trim().toLowerCase(),
         durationSeconds: newTest.durationMinutes * 60,
         authorId: user.uid,
         authorName: user.name
@@ -376,7 +376,7 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
                   </div>
                   <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2">{test.title}</h3>
                   <p className="text-sm text-slate-600 dark:text-slate-400 mb-4 flex-grow line-clamp-2">{test.description}</p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">Group: {test.groupCode || 'all students'}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">Group: {test.groupCode === 'all' ? 'All students' : test.groupCode || 'Not assigned (hidden from students)'}</p>
                   <div className="flex justify-between items-center text-sm text-slate-500 dark:text-slate-400 border-t border-slate-100 dark:border-slate-700 pt-4 mt-auto">
                     <span className="flex items-center gap-1"><Clock className="w-4 h-4" /> {Math.floor(test.durationSeconds / 60)} mins</span>
                     <span className="flex items-center gap-1"><FileText className="w-4 h-4" /> {test.questions?.length || 0} Qs</span>
@@ -438,8 +438,8 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
                   </div>
                   <div className="col-span-2">
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Student group code</label>
-                    <input type="text" value={newTest.groupCode || ''} onChange={e => setNewTest({...newTest, groupCode: e.target.value})} placeholder="Leave blank to show this exam to everyone" className="w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:ring-2 focus:ring-purple-500 outline-none" />
-                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Use a unique code and give it only to students assigned to this exam. The code is not case-sensitive.</p>
+                    <input type="text" value={newTest.groupCode || ''} onChange={e => setNewTest({...newTest, groupCode: e.target.value})} placeholder="Example: group-a-october" className="w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:ring-2 focus:ring-purple-500 outline-none" />
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Enter the exact code used by the assigned students. Leave blank to keep this exam hidden. Enter <strong>all</strong> to show it to every student. Codes are not case-sensitive.</p>
                   </div>
                 </div>
 
@@ -533,8 +533,8 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onSaveGroupCode, 
 
   const normalizedGroupCode = (user?.groupCode || '').trim().toLowerCase();
   const visibleTests = tests.filter((test) => {
-    const testGroupCode = (test.groupCode || 'all').trim().toLowerCase();
-    return testGroupCode === 'all' || (normalizedGroupCode && testGroupCode === normalizedGroupCode);
+    const testGroupCode = (test.groupCode || '').trim().toLowerCase();
+    return testGroupCode === 'all' || (!!normalizedGroupCode && testGroupCode === normalizedGroupCode);
   });
 
   const saveGroupCode = async () => {
@@ -1033,9 +1033,9 @@ export default function App() {
   };
 
   const startTest = (test) => {
-    const testGroupCode = (test.groupCode || 'all').trim().toLowerCase();
+    const testGroupCode = (test.groupCode || '').trim().toLowerCase();
     const studentGroupCode = (user?.groupCode || '').trim().toLowerCase();
-    if (user?.role === 'student' && testGroupCode !== 'all' && testGroupCode !== studentGroupCode) {
+    if (user?.role === 'student' && (!testGroupCode || (testGroupCode !== 'all' && testGroupCode !== studentGroupCode))) {
       setModalInfo({ isOpen: true, title: 'Exam not available', message: 'This exam is assigned to a different student group.' });
       return;
     }
