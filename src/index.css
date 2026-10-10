@@ -21,14 +21,14 @@ overflow-x: hidden;
 }
 
 #root {
-  font-size: 2rem;
+  font-size: 1.333rem;
 }
 
-/* Double portal text sizes and keep multi-line text readable. */
-#root .text-xs { font-size: 1.5rem !important; line-height: 1.3 !important; }
-#root .text-sm { font-size: 1.75rem !important; line-height: 1.3 !important; }
-#root .text-base { font-size: 2rem !important; line-height: 1.3 !important; }
-#root .text-lg { font-size: 2.25rem !important; line-height: 1.25 !important; }
-#root .text-xl { font-size: 2.5rem !important; line-height: 1.2 !important; }
-#root .text-2xl { font-size: 3rem !important; line-height: 1.15 !important; }
-#root .text-3xl { font-size: 3.75rem !important; line-height: 1.1 !important; }
+/* Reduce the enlarged portal sizes by 1.5x and retain readable line spacing. */
+#root .text-xs { font-size: 1rem !important; line-height: 1.35 !important; }
+#root .text-sm { font-size: 1.167rem !important; line-height: 1.35 !important; }
+#root .text-base { font-size: 1.333rem !important; line-height: 1.35 !important; }
+#root .text-lg { font-size: 1.5rem !important; line-height: 1.3 !important; }
+#root .text-xl { font-size: 1.667rem !important; line-height: 1.25 !important; }
+#root .text-2xl { font-size: 2rem !important; line-height: 1.2 !important; }
+#root .text-3xl { font-size: 2.5rem !important; line-height: 1.15 !important; }
