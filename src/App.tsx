@@ -17,7 +17,7 @@ import {
 } from "firebase/auth";
 import { 
   getFirestore, doc, getDoc, setDoc, addDoc, collection, onSnapshot, 
-  serverTimestamp, deleteDoc, updateDoc 
+  serverTimestamp, deleteDoc, updateDoc, query, where
 } from "firebase/firestore";
 
 const firebaseConfig = {
@@ -34,6 +34,38 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = "exam-portal-71a9b";
+
+const authorizedTeacherEmails = (import.meta.env.VITE_TEACHER_EMAILS || '')
+  .split(',')
+  .map((email) => email.trim().toLowerCase())
+  .filter(Boolean);
+
+const isClientAuthorizedTeacher = (firebaseUser) => Boolean(
+  firebaseUser?.emailVerified
+  && firebaseUser.providerData?.some((provider) => provider.providerId === 'google.com')
+  && authorizedTeacherEmails.includes(firebaseUser.email?.trim().toLowerCase())
+);
+
+// The client allowlist controls the UI; Firestore rules independently enforce it.
+const resolveAccountRole = async (profileRef, firebaseUser, storedRole) => {
+  if (isClientAuthorizedTeacher(firebaseUser)) {
+    try {
+      await updateDoc(profileRef, { role: 'teacher' });
+      return 'teacher';
+    } catch (error) {
+      console.error('Teacher promotion was rejected by Firestore rules:', error);
+    }
+  }
+
+  if (storedRole === 'teacher') {
+    try {
+      await updateDoc(profileRef, { role: 'student' });
+    } catch (error) {
+      console.error('Could not downgrade an unapproved teacher profile:', error);
+    }
+  }
+  return 'student';
+};
 
 const Modal = ({ isOpen, title, children, onClose }) => {
   if (!isOpen) return null;
@@ -84,7 +116,7 @@ const LoginScreen = ({ onAuthAction }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
-  const [role, setRole] = useState('student');
+  const role = 'student';
   const [groupCode, setGroupCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -162,17 +194,7 @@ const LoginScreen = ({ onAuthAction }) => {
           </div>
 
           {!isLogin && (
-            <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1 mt-2">I am a...</label>
-              <div className="grid grid-cols-2 gap-4">
-                <button type="button" onClick={() => setRole('student')} className={`py-2 px-4 rounded-lg border font-medium flex items-center justify-center gap-2 transition-all ${role === 'student' ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-500 text-blue-700 dark:text-blue-400 ring-1 ring-blue-500' : 'bg-white dark:bg-slate-700 border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-600'}`}>
-                  <User className="w-4 h-4" /> Student
-                </button>
-                <button type="button" onClick={() => setRole('teacher')} className={`py-2 px-4 rounded-lg border font-medium flex items-center justify-center gap-2 transition-all ${role === 'teacher' ? 'bg-purple-50 dark:bg-purple-900/30 border-purple-500 text-purple-700 dark:text-purple-400 ring-1 ring-purple-500' : 'bg-white dark:bg-slate-700 border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-600'}`}>
-                  <Users className="w-4 h-4" /> Teacher
-                </button>
-              </div>
-            </div>
+            <p className="text-sm text-slate-500 dark:text-slate-400">New accounts are students. Teacher access is limited to the owner’s approved Google accounts.</p>
           )}
 
           <button type="submit" disabled={loading} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-70 mt-4 shadow-md">
@@ -538,6 +560,7 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onSaveGroupCode, 
   });
 
   const saveGroupCode = async () => {
+    if (user?.groupCode) return;
     setIsSavingGroupCode(true);
     try {
       await onSaveGroupCode(groupCodeInput.trim().toLowerCase());
@@ -597,11 +620,11 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onSaveGroupCode, 
           <div className="mt-4 flex flex-col sm:flex-row sm:items-end gap-2 max-w-xl">
             <div className="flex-grow">
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Your student group code</label>
-              <input type="text" value={groupCodeInput} onChange={e => setGroupCodeInput(e.target.value)} placeholder="Enter the code provided by your teacher" className="w-full p-2.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-blue-500" />
+              <input type="text" value={groupCodeInput} onChange={e => setGroupCodeInput(e.target.value)} disabled={Boolean(user?.groupCode)} placeholder="Enter the code provided by your teacher" className="w-full p-2.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-70" />
             </div>
-            <button onClick={saveGroupCode} disabled={isSavingGroupCode} className="px-4 py-2.5 bg-slate-700 hover:bg-slate-800 text-white rounded-lg font-medium disabled:opacity-60">{isSavingGroupCode ? 'Saving...' : 'Save group'}</button>
+            <button onClick={saveGroupCode} disabled={isSavingGroupCode || Boolean(user?.groupCode)} className="px-4 py-2.5 bg-slate-700 hover:bg-slate-800 text-white rounded-lg font-medium disabled:opacity-60">{isSavingGroupCode ? 'Saving...' : user?.groupCode ? 'Group saved' : 'Save group'}</button>
           </div>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Ask your teacher for the exact code. Leave it blank to see exams shared with everyone.</p>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Ask your teacher for the exact code. Group assignment can only be set once from your account.</p>
         </div>
 
         <div className="flex space-x-4 border-b border-slate-200 dark:border-slate-700 mb-6">
@@ -946,9 +969,11 @@ export default function App() {
           const profileSnap = await getDoc(profileRef);
           
           if (profileSnap.exists()) {
-            const userData = { uid: firebaseUser.uid, ...profileSnap.data() };
+            const profileData = profileSnap.data();
+            const role = await resolveAccountRole(profileRef, firebaseUser, profileData.role);
+            const userData = { uid: firebaseUser.uid, ...profileData, role, email: firebaseUser.email };
             setUser(userData);
-            setCurrentView(userData.role === 'teacher' ? 'teacher_dashboard' : 'student_dashboard');
+            setCurrentView(role === 'teacher' ? 'teacher_dashboard' : 'student_dashboard');
           } else {
             setUser(null);
             setCurrentView('login');
@@ -969,7 +994,15 @@ export default function App() {
   useEffect(() => {
     if (!user || !db) return;
     const testsRef = collection(db, 'artifacts', appId, 'public', 'data', 'tests');
-    const unsubTests = onSnapshot(testsRef, (snapshot) => {
+    const testsQuery = user.role === 'teacher'
+      ? testsRef
+          : query(
+              testsRef,
+              where('groupCode', 'in', user.groupCode
+                ? [...new Set([user.groupCode.trim().toLowerCase(), 'all'])]
+                : ['all'])
+            );
+    const unsubTests = onSnapshot(testsQuery, (snapshot) => {
       const testsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       testsData.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
       setTests(testsData);
@@ -995,10 +1028,12 @@ export default function App() {
       const userCred = await createUserWithEmailAndPassword(auth, data.email, data.password);
       const uid = userCred.user.uid;
       const profileRef = doc(db, 'artifacts', appId, 'users', uid, 'profile', 'info');
-      await setDoc(profileRef, { name: data.name, role: data.role, groupCode: data.role === 'student' ? (data.groupCode || '').trim().toLowerCase() : '', createdAt: serverTimestamp() });
+      const role = 'student';
+      await setDoc(profileRef, { name: data.name, role, groupCode: (data.groupCode || '').trim().toLowerCase(), createdAt: serverTimestamp() });
+      const resolvedRole = await resolveAccountRole(profileRef, userCred.user, role);
       
-      setUser({ uid, name: data.name, role: data.role, groupCode: data.role === 'student' ? (data.groupCode || '').trim().toLowerCase() : '' });
-      setCurrentView(data.role === 'teacher' ? 'teacher_dashboard' : 'student_dashboard');
+      setUser({ uid, name: data.name, role: resolvedRole, groupCode: (data.groupCode || '').trim().toLowerCase() });
+      setCurrentView(resolvedRole === 'teacher' ? 'teacher_dashboard' : 'student_dashboard');
     } else if (action === 'login') {
       await signInWithEmailAndPassword(auth, data.email, data.password);
     } else if (action === 'google') {
@@ -1011,15 +1046,17 @@ export default function App() {
       const profileSnap = await getDoc(profileRef);
       
       if (!profileSnap.exists()) {
-        const role = data.role || 'student';
-        const groupCode = role === 'student' ? (data.groupCode || '').trim().toLowerCase() : '';
+        const role = 'student';
+        const groupCode = (data.groupCode || '').trim().toLowerCase();
         await setDoc(profileRef, { name: userCred.user.displayName || 'New User', role, groupCode, createdAt: serverTimestamp() });
-        setUser({ uid, name: userCred.user.displayName, role, groupCode });
-        setCurrentView((data.role || 'student') === 'teacher' ? 'teacher_dashboard' : 'student_dashboard');
+        const resolvedRole = await resolveAccountRole(profileRef, userCred.user, role);
+        setUser({ uid, name: userCred.user.displayName, role: resolvedRole, groupCode });
+        setCurrentView(resolvedRole === 'teacher' ? 'teacher_dashboard' : 'student_dashboard');
       } else {
         const existingData = profileSnap.data();
-        setUser({ uid, ...existingData });
-        setCurrentView(existingData.role === 'teacher' ? 'teacher_dashboard' : 'student_dashboard');
+        const role = await resolveAccountRole(profileRef, userCred.user, existingData.role);
+        setUser({ uid, ...existingData, role, email: userCred.user.email });
+        setCurrentView(role === 'teacher' ? 'teacher_dashboard' : 'student_dashboard');
       }
     }
   };
