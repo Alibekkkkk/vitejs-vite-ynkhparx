@@ -54,6 +54,10 @@ const resolveAccountRole = async (profileRef, firebaseUser, storedRole, requeste
       return 'teacher';
     } catch (error) {
       console.error('Teacher promotion was rejected by Firestore rules:', error);
+      if (requestedRole === 'teacher') {
+        await signOut(auth);
+        throw new Error('Your Google account is approved, but Firestore blocked teacher access. Publish the teacher authorization rules in Firebase Console, then try again.');
+      }
     }
   }
 
