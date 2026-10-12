@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Clock, BookOpen, FileText, CheckCircle, LogOut, User, Play, AlertTriangle, 
   ArrowRight, LayoutDashboard, History, Check, Plus, Trash2, Edit3, Users, 
-  Lock, Image as ImageIcon, Sun, Moon, X
+  Lock, Image as ImageIcon, Sun, Moon, X, Copy
 } from 'lucide-react';
 
 import { initializeApp } from "firebase/app";
@@ -115,6 +115,22 @@ const extractImageUrl = (input) => {
   return input.trim();
 };
 
+const createEmptyTest = () => ({
+  title: '',
+  type: 'IELTS',
+  category: 'Exam',
+  durationMinutes: 30,
+  description: '',
+  questions: [],
+  pin: '',
+  groupCode: '',
+  sections: {
+    listening: { instructions: '', audioUrl: '' },
+    reading: { instructions: '', passage: '' },
+    writing: { instructions: '' }
+  }
+});
+
 const LoginScreen = ({ onAuthAction }) => {
   const [isLogin, setIsLogin] = useState(false);
   const [email, setEmail] = useState('');
@@ -194,7 +210,7 @@ const LoginScreen = ({ onAuthAction }) => {
           {!isLogin && (
             <div>
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Full Name</label>
-              <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. John Doe" className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all" required={!isLogin} />
+              <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Naruto Uzumaki" className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all" required={!isLogin} />
             </div>
           )}
 
@@ -252,23 +268,64 @@ const LoginScreen = ({ onAuthAction }) => {
 const TeacherDashboard = ({ user, tests, onLogout }) => {
   const [isBuildingTest, setIsBuildingTest] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  const [newTest, setNewTest] = useState({
-    title: '', type: 'IELTS', category: 'Exam', durationMinutes: 30, description: '', questions: [], pin: '', groupCode: ''
-  });
+  const [newTest, setNewTest] = useState(createEmptyTest);
+  const [activeQuestionSection, setActiveQuestionSection] = useState('listening');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleAddQuestion = (type) => {
+  const handleAddQuestion = (type, section = activeQuestionSection) => {
     setNewTest(prev => ({
       ...prev,
       questions: [...prev.questions, {
         id: `q_${Date.now()}`,
         type,
+        ...(section === 'general' ? {} : { section }),
         text: '',
         imageUrl: '',
         options: type === 'mcq' ? ['', '', '', ''] : undefined,
         correctAnswer: ''
       }]
     }));
+  };
+
+  const updateSection = (sectionId, field, value) => {
+    setNewTest(prev => ({
+      ...prev,
+      sections: {
+        ...(prev.sections || {}),
+        [sectionId]: {
+          ...(prev.sections?.[sectionId] || {}),
+          [field]: value
+        }
+      }
+    }));
+  };
+
+  const duplicateTest = async (test) => {
+    try {
+      const sourceTest = { ...test };
+      delete sourceTest.id;
+      delete sourceTest.createdAt;
+      delete sourceTest.updatedAt;
+      const copiedTest = {
+        ...sourceTest,
+        title: `${test.title} (Copy)`,
+        authorId: user.uid,
+        authorName: user.name,
+        createdAt: new Date().toISOString(),
+        questions: (test.questions || []).map((question, index) => ({
+          ...question,
+          id: `q_${Date.now()}_${index}`,
+          ...(question.options ? { options: [...question.options] } : {})
+        })),
+        ...(test.sections ? {
+          sections: Object.fromEntries(Object.entries(test.sections).map(([sectionId, section]) => [sectionId, { ...section }]))
+        } : {})
+      };
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'tests'), copiedTest);
+    } catch (err) {
+      console.error(err);
+      alert('Failed to duplicate this assessment.');
+    }
   };
 
   const handleUpdateQuestion = (index, field, value) => {
@@ -315,6 +372,12 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
     try {
       const testToSave = {
         ...newTest,
+        questions: newTest.type === 'IELTS'
+          ? [...newTest.questions].sort((a, b) => {
+              const order = { listening: 0, reading: 1, writing: 2, general: 3 };
+              return (order[a.section || 'general'] ?? 3) - (order[b.section || 'general'] ?? 3);
+            })
+          : newTest.questions,
         groupCode: newTest.groupCode.trim().toLowerCase(),
         durationSeconds: newTest.durationMinutes * 60,
         authorId: user.uid,
@@ -333,7 +396,8 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
       
       setIsBuildingTest(false);
       setEditingId(null);
-      setNewTest({ title: '', type: 'IELTS', category: 'Exam', durationMinutes: 30, description: '', questions: [], pin: '', groupCode: '' });
+      setNewTest(createEmptyTest());
+      setActiveQuestionSection('listening');
     } catch (err) {
       console.error(err);
       alert("Failed to save test.");
@@ -352,10 +416,21 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
 
   const handleEditTest = (test) => {
     setNewTest({
+      ...createEmptyTest(),
       ...test,
+      sections: {
+        ...createEmptyTest().sections,
+        ...(test.sections || {}),
+        listening: { ...createEmptyTest().sections.listening, ...(test.sections?.listening || {}) },
+        reading: { ...createEmptyTest().sections.reading, ...(test.sections?.reading || {}) },
+        writing: { ...createEmptyTest().sections.writing, ...(test.sections?.writing || {}) }
+      },
+      questions: test.questions || [],
       groupCode: test.groupCode || '',
       durationMinutes: Math.floor(test.durationSeconds / 60)
     });
+    const firstTaggedSection = test.questions?.find(question => question.section)?.section;
+    setActiveQuestionSection(firstTaggedSection || (test.questions?.length ? 'general' : (test.type === 'IELTS' ? 'listening' : 'general')));
     setEditingId(test.id);
     setIsBuildingTest(true);
   };
@@ -363,7 +438,8 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
   const cancelEdit = () => {
     setIsBuildingTest(false);
     setEditingId(null);
-    setNewTest({ title: '', type: 'IELTS', category: 'Exam', durationMinutes: 30, description: '', questions: [], pin: '', groupCode: '' });
+    setNewTest(createEmptyTest());
+    setActiveQuestionSection('listening');
   };
 
   return (
@@ -407,6 +483,9 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
                     </span>
                     <div className="flex items-center gap-2">
                       {test.pin && <Lock className="w-4 h-4 text-amber-500" title="PIN Protected" />}
+                      <button onClick={() => duplicateTest(test)} className="text-slate-400 dark:text-slate-500 hover:text-purple-500 ml-2" title="Duplicate Assessment">
+                        <Copy className="w-4 h-4" />
+                      </button>
                       <button onClick={() => handleEditTest(test)} className="text-slate-400 dark:text-slate-500 hover:text-blue-500 ml-2" title="Edit Assessment">
                         <Edit3 className="w-4 h-4" />
                       </button>
@@ -460,7 +539,7 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Type</label>
-                    <select value={newTest.type} onChange={e => setNewTest({...newTest, type: e.target.value})} className="w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:ring-2 focus:ring-purple-500 outline-none">
+                    <select value={newTest.type} onChange={e => { const type = e.target.value; setNewTest({...newTest, type}); setActiveQuestionSection(type === 'IELTS' ? 'listening' : 'general'); }} className="w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:ring-2 focus:ring-purple-500 outline-none">
                       <option value="IELTS">IELTS</option>
                       <option value="SAT">SAT</option>
                       <option value="NUET">NUET</option>
@@ -485,12 +564,78 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
                 </div>
 
                 <div className="pt-6 border-t border-slate-200 dark:border-slate-700">
-                  <h3 className="font-bold text-slate-800 dark:text-white mb-4">Questions</h3>
-                  
-                  {newTest.questions.map((q, qIndex) => (
+                  <h3 className="font-bold text-slate-800 dark:text-white mb-4">{newTest.type === 'IELTS' ? 'IELTS Sections' : 'Questions'}</h3>
+
+                  <div className="flex flex-wrap gap-2 mb-5" role="tablist" aria-label="Question section">
+                    {(newTest.type === 'IELTS'
+                      ? [
+                          ...(newTest.questions.some(question => !['listening', 'reading', 'writing'].includes(question.section)) ? [{ id: 'general', label: 'General / Existing Questions' }] : []),
+                          { id: 'listening', label: 'Listening' },
+                          { id: 'reading', label: 'Reading' },
+                          { id: 'writing', label: 'Writing' }
+                        ]
+                      : [{ id: 'general', label: 'Questions' }]
+                    ).map(section => (
+                      <button
+                        key={section.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={activeQuestionSection === section.id}
+                        onClick={() => setActiveQuestionSection(section.id)}
+                        className={`px-4 py-2 rounded-lg border text-sm font-semibold transition-colors ${activeQuestionSection === section.id ? 'bg-purple-600 text-white border-purple-600' : 'bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-600 hover:bg-purple-50 dark:hover:bg-slate-600'}`}
+                      >
+                        {section.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {newTest.type === 'IELTS' && activeQuestionSection !== 'general' && (
+                    <div className="mb-5 p-4 rounded-lg border border-purple-200 dark:border-purple-800 bg-purple-50/70 dark:bg-purple-900/20 space-y-3">
+                      <h4 className="font-semibold text-slate-800 dark:text-white">{activeQuestionSection[0].toUpperCase() + activeQuestionSection.slice(1)} section material</h4>
+                      <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+                        Section instructions
+                        <textarea
+                          value={newTest.sections?.[activeQuestionSection]?.instructions || ''}
+                          onChange={event => updateSection(activeQuestionSection, 'instructions', event.target.value)}
+                          rows="2"
+                          placeholder={`Instructions shown to students for ${activeQuestionSection}`}
+                          className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-purple-500"
+                        />
+                      </label>
+                      {activeQuestionSection === 'listening' && (
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+                          Listening audio URL (optional)
+                          <input
+                            type="url"
+                            value={newTest.sections?.listening?.audioUrl || ''}
+                            onChange={event => updateSection('listening', 'audioUrl', event.target.value)}
+                            placeholder="Paste a direct link to a browser-playable audio file"
+                            className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-purple-500"
+                          />
+                        </label>
+                      )}
+                      {activeQuestionSection === 'reading' && (
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+                          Reading passage (optional)
+                          <textarea
+                            value={newTest.sections?.reading?.passage || ''}
+                            onChange={event => updateSection('reading', 'passage', event.target.value)}
+                            rows="6"
+                            placeholder="Paste the passage students should read before answering"
+                            className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-purple-500"
+                          />
+                        </label>
+                      )}
+                    </div>
+                  )}
+
+                  {newTest.questions
+                    .map((question, index) => ({ question, index }))
+                    .filter(({ question }) => (question.section || 'general') === activeQuestionSection)
+                    .map(({ question: q, index: qIndex }, sectionQuestionIndex) => (
                     <div key={q.id} className="bg-slate-50 dark:bg-slate-700/50 p-4 rounded-lg border border-slate-200 dark:border-slate-600 mb-4 transition-colors text-left">
                        <div className="flex justify-between mb-2">
-                          <span className="font-semibold text-slate-700 dark:text-slate-200">Question {qIndex + 1} ({q.type.toUpperCase()})</span>
+                          <span className="font-semibold text-slate-700 dark:text-slate-200">{newTest.type === 'IELTS' ? `${activeQuestionSection[0].toUpperCase() + activeQuestionSection.slice(1)} ` : ''}Question {sectionQuestionIndex + 1} ({q.type.toUpperCase()})</span>
                           <button onClick={() => handleRemoveQuestion(qIndex)} className="text-red-500 dark:text-red-400 text-sm hover:underline">Remove</button>
                        </div>
                        
@@ -543,12 +688,12 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
                     </div>
                   ))}
 
-                  <div className="flex gap-3 mt-4">
-                    <button onClick={() => handleAddQuestion('mcq')} className="px-4 py-2 bg-white dark:bg-slate-700 border border-purple-300 dark:border-purple-600 text-purple-700 dark:text-purple-300 rounded-lg hover:bg-purple-50 dark:hover:bg-slate-600 text-sm font-medium transition-colors">
+                  <div className="flex flex-wrap gap-3 mt-4">
+                    {activeQuestionSection !== 'writing' && <button onClick={() => handleAddQuestion('mcq', activeQuestionSection)} className="px-4 py-2 bg-white dark:bg-slate-700 border border-purple-300 dark:border-purple-600 text-purple-700 dark:text-purple-300 rounded-lg hover:bg-purple-50 dark:hover:bg-slate-600 text-sm font-medium transition-colors">
                       + Add Multiple Choice
-                    </button>
-                    <button onClick={() => handleAddQuestion('text')} className="px-4 py-2 bg-white dark:bg-slate-700 border border-purple-300 dark:border-purple-600 text-purple-700 dark:text-purple-300 rounded-lg hover:bg-purple-50 dark:hover:bg-slate-600 text-sm font-medium transition-colors">
-                      + Add Written Response
+                    </button>}
+                    <button onClick={() => handleAddQuestion('text', activeQuestionSection)} className="px-4 py-2 bg-white dark:bg-slate-700 border border-purple-300 dark:border-purple-600 text-purple-700 dark:text-purple-300 rounded-lg hover:bg-purple-50 dark:hover:bg-slate-600 text-sm font-medium transition-colors">
+                      {activeQuestionSection === 'writing' ? '+ Add Writing Task' : '+ Add Written Response'}
                     </button>
                   </div>
                 </div>
@@ -818,6 +963,9 @@ const ExamInterface = ({ test, onComplete }) => {
 
   const isWarningTime = timeLeft <= 60;
   const currentQuestion = test.questions && test.questions[currentQuestionIndex];
+  const currentSectionId = currentQuestion?.section;
+  const currentSection = currentSectionId && currentSectionId !== 'general' ? test.sections?.[currentSectionId] : null;
+  const currentSectionTitle = currentSectionId ? `${currentSectionId[0].toUpperCase()}${currentSectionId.slice(1)}` : '';
   const unansweredQuestions = ((test.questions || []) as Array<{ id: string }>).reduce<number[]>((unanswered, question, index) => {
       const answer = answers[question.id];
       if (answer == null || answer.trim() === '') unanswered.push(index + 1);
@@ -852,6 +1000,20 @@ const ExamInterface = ({ test, onComplete }) => {
                <h3 className="font-bold text-slate-800 dark:text-white mb-2 border-b border-slate-100 dark:border-slate-700 pb-2">Instructions / Reading Material</h3>
                <p className="whitespace-pre-wrap text-slate-700 dark:text-slate-300 leading-relaxed text-sm text-left">{test.description}</p>
             </div>
+          )}
+
+          {currentSection && (
+            <section className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-purple-200 dark:border-purple-800 p-5 sm:p-8 text-left">
+              <h3 className="font-bold text-slate-800 dark:text-white mb-3">IELTS {currentSectionTitle}</h3>
+              {currentSection.instructions && <p className="whitespace-pre-wrap text-slate-700 dark:text-slate-300 leading-relaxed mb-4">{currentSection.instructions}</p>}
+              {currentSection.passage && <div className="whitespace-pre-wrap text-slate-700 dark:text-slate-300 leading-relaxed border-t border-slate-100 dark:border-slate-700 pt-4">{currentSection.passage}</div>}
+              {currentSection.audioUrl && (
+                <audio controls preload="metadata" className="w-full mt-2">
+                  <source src={currentSection.audioUrl} />
+                  Your browser does not support audio playback.
+                </audio>
+              )}
+            </section>
           )}
 
           {currentQuestion && (
