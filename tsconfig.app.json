@@ -16,6 +16,12 @@
     "noEmit": true,
     "jsx": "react-jsx",
 
+    /* App.tsx is the existing JavaScript-style TSX application. Keep its
+       historical implicit-any behavior explicit under TypeScript 6. */
+    "noImplicitAny": false,
+    "strictNullChecks": false,
+    "useUnknownInCatchVariables": false,
+
     /* Linting */
     "noUnusedLocals": true,
     "noUnusedParameters": true,
