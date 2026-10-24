@@ -19,6 +19,7 @@ import {
   getFirestore, doc, getDoc, setDoc, addDoc, collection, onSnapshot, 
   serverTimestamp, deleteDoc, updateDoc, query, where
 } from "firebase/firestore";
+import { getFunctions, httpsCallable } from "firebase/functions";
 
 const firebaseConfig = {
   apiKey: "AIzaSyBj6nrhP7w-KbMeYHV7wtEMk-yHftG8H4c",
@@ -33,6 +34,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const functions = getFunctions(app);
 const appId = "exam-portal-71a9b";
 
 const authorizedTeacherEmails = (import.meta.env.VITE_TEACHER_EMAILS || '')
@@ -125,11 +127,123 @@ const createEmptyTest = () => ({
   pin: '',
   groupCode: '',
   sections: {
-    listening: { instructions: '', audioUrl: '' },
-    reading: { instructions: '', passage: '' },
+    listening: {
+      instructions: '',
+      audioUrl: '',
+      parts: [1, 2, 3, 4].map(sectionNumber => ({ sectionNumber, instructions: '', audioUrl: '' }))
+    },
+    reading: {
+      instructions: '',
+      passage: '',
+      passages: [1, 2, 3].map(passageNumber => ({ passageNumber, title: `Passage ${passageNumber}`, content: '' }))
+    },
     writing: { instructions: '' }
   }
 });
+
+type IELTSQuestionFormat =
+  | 'multiple-choice'
+  | 'true-false-not-given'
+  | 'yes-no-not-given'
+  | 'matching-headings'
+  | 'matching-information'
+  | 'matching-features'
+  | 'sentence-endings'
+  | 'completion'
+  | 'map-labeling'
+  | 'short-answer'
+  | 'writing-task'
+  | 'sat-student-produced-response';
+
+type AssessmentQuestion = {
+  id: string;
+  type: 'mcq' | 'select' | 'text' | 'number' | string;
+  section?: 'listening' | 'reading' | 'writing' | 'general';
+  questionType?: IELTSQuestionFormat;
+  passageNumber?: 1 | 2 | 3;
+  listeningSectionNumber?: 1 | 2 | 3 | 4;
+  satDomain?: string;
+  satSkill?: string;
+  correctAnswer?: string | number;
+  acceptedAnswers?: Array<string | number>;
+  explanation?: string;
+  difficulty?: 'easy' | 'medium' | 'hard';
+  points?: number;
+  writingTaskType?: 1 | 2;
+  writingFormat?: string;
+  options?: string[];
+  text?: string;
+  imageUrl?: string;
+};
+
+type AssessmentRecord = {
+  id?: string;
+  title?: string;
+  type?: string;
+  durationSeconds?: number;
+  groupCode?: string;
+  questions?: AssessmentQuestion[];
+  sections?: {
+    listening?: { instructions?: string; audioUrl?: string; parts?: Array<{ sectionNumber: number; instructions?: string; audioUrl?: string }> };
+    reading?: { instructions?: string; passage?: string; passages?: Array<{ passageNumber: number; title?: string; content?: string }> };
+    writing?: { instructions?: string };
+  };
+};
+
+const SAT_SKILLS: Record<string, string[]> = {
+  'Information and Ideas': ['Central Ideas and Details', 'Inferences', 'Command of Evidence'],
+  'Craft and Structure': ['Words in Context', 'Text Structure and Purpose', 'Cross-Text Connections'],
+  'Expression of Ideas': ['Rhetorical Synthesis', 'Transitions'],
+  'Standard English Conventions': ['Boundaries', 'Form, Structure, and Sense'],
+  Algebra: ['Linear equations', 'Linear inequalities', 'Systems of linear equations', 'Linear functions'],
+  'Advanced Math': ['Equivalent expressions', 'Nonlinear equations', 'Nonlinear functions'],
+  'Problem-Solving and Data Analysis': ['Ratios, rates, and units', 'Percentages', 'Data and statistics', 'Probability'],
+  'Geometry and Trigonometry': ['Area and volume', 'Lines and angles', 'Right triangles', 'Circles']
+};
+
+const IELTS_QUESTION_FORMATS = [
+  ['multiple-choice', 'Multiple choice'],
+  ['true-false-not-given', 'True / False / Not Given'],
+  ['yes-no-not-given', 'Yes / No / Not Given'],
+  ['matching-headings', 'Matching headings'],
+  ['matching-information', 'Matching information'],
+  ['matching-features', 'Matching features'],
+  ['sentence-endings', 'Matching sentence endings'],
+  ['completion', 'Form / note / table / summary completion'],
+  ['map-labeling', 'Map / plan labelling'],
+  ['short-answer', 'Short answer'],
+  ['writing-task', 'Writing task'],
+  ['sat-student-produced-response', 'Numerical response']
+];
+
+const normalizeAnswer = (value: unknown) => String(value ?? '').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+
+const acceptedAnswerValues = (question: AssessmentQuestion) => [question.correctAnswer, ...(question.acceptedAnswers || [])]
+  .filter(answer => answer !== null && answer !== undefined && String(answer).trim() !== '')
+  .map(normalizeAnswer);
+
+const isQuestionCorrect = (question: AssessmentQuestion, answer: unknown) => {
+  const accepted = acceptedAnswerValues(question);
+  return accepted.length > 0 && accepted.includes(normalizeAnswer(answer));
+};
+
+const getSelectOptions = (question): any[] => question.options || (
+  question.questionType === 'true-false-not-given' ? ['True', 'False', 'Not Given']
+    : question.questionType === 'yes-no-not-given' ? ['Yes', 'No', 'Not Given']
+    : []
+);
+
+const getListeningAudioUrl = (test: AssessmentRecord, sectionNumber: number) => {
+  const section = test?.sections?.listening;
+  const part = section?.parts?.find(item => item.sectionNumber === sectionNumber);
+  return part?.audioUrl || (sectionNumber === 1 ? section?.audioUrl || '' : '');
+};
+
+const getReadingPassage = (test: AssessmentRecord, passageNumber: number) => {
+  const reading = test?.sections?.reading;
+  const passage = reading?.passages?.find(item => item.passageNumber === passageNumber);
+  return passage?.content || (passageNumber === 1 ? reading?.passage || '' : '');
+};
 
 const LoginScreen = ({ onAuthAction }) => {
   const [isLogin, setIsLogin] = useState(false);
@@ -229,7 +343,7 @@ const LoginScreen = ({ onAuthAction }) => {
 
           <div>
             <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Password</label>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" minLength="6" className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all" required />
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" minLength={6} className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all" required />
           </div>
 
           <button type="submit" disabled={loading} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-70 mt-4 shadow-md">
@@ -268,8 +382,10 @@ const LoginScreen = ({ onAuthAction }) => {
 const TeacherDashboard = ({ user, tests, onLogout }) => {
   const [isBuildingTest, setIsBuildingTest] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  const [newTest, setNewTest] = useState(createEmptyTest);
+  const [newTest, setNewTest] = useState<any>(createEmptyTest);
   const [activeQuestionSection, setActiveQuestionSection] = useState('listening');
+  const [activeListeningSection, setActiveListeningSection] = useState(1);
+  const [activeReadingPassage, setActiveReadingPassage] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleAddQuestion = (type, section = activeQuestionSection) => {
@@ -279,6 +395,9 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
         id: `q_${Date.now()}`,
         type,
         ...(section === 'general' ? {} : { section }),
+        ...(section === 'listening' ? { listeningSectionNumber: activeListeningSection } : {}),
+        ...(section === 'reading' ? { passageNumber: activeReadingPassage } : {}),
+        questionType: type === 'mcq' ? 'multiple-choice' : 'short-answer',
         text: '',
         imageUrl: '',
         options: type === 'mcq' ? ['', '', '', ''] : undefined,
@@ -291,13 +410,49 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
     setNewTest(prev => ({
       ...prev,
       sections: {
-        ...(prev.sections || {}),
+        ...prev.sections,
         [sectionId]: {
-          ...(prev.sections?.[sectionId] || {}),
+          ...prev.sections?.[sectionId],
           [field]: value
         }
       }
     }));
+  };
+
+  const updateListeningPart = (sectionNumber, field, value) => {
+    setNewTest(prev => {
+      const listening = prev.sections?.listening || {};
+      const parts = listening.parts || [1, 2, 3, 4].map(number => ({ sectionNumber: number, instructions: '', audioUrl: '' }));
+      return {
+        ...prev,
+        sections: {
+          ...prev.sections,
+          listening: {
+            ...listening,
+            ...(sectionNumber === 1 && field === 'audioUrl' ? { audioUrl: value } : {}),
+            parts: parts.map(part => part.sectionNumber === sectionNumber ? { ...part, [field]: value } : part)
+          }
+        }
+      };
+    });
+  };
+
+  const updateReadingPassage = (passageNumber, field, value) => {
+    setNewTest(prev => {
+      const reading = prev.sections?.reading || {};
+      const passages = reading.passages || [1, 2, 3].map(number => ({ passageNumber: number, title: `Passage ${number}`, content: '' }));
+      return {
+        ...prev,
+        sections: {
+          ...prev.sections,
+          reading: {
+            ...reading,
+            ...(passageNumber === 1 && field === 'content' ? { passage: value } : {}),
+            passages: passages.map(passage => passage.passageNumber === passageNumber ? { ...passage, [field]: value } : passage)
+          }
+        }
+      };
+    });
   };
 
   const duplicateTest = async (test) => {
@@ -318,7 +473,7 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
           ...(question.options ? { options: [...question.options] } : {})
         })),
         ...(test.sections ? {
-          sections: Object.fromEntries(Object.entries(test.sections).map(([sectionId, section]) => [sectionId, { ...section }]))
+          sections: Object.fromEntries(Object.entries(test.sections).map(([sectionId, section]) => [sectionId, { ...(section as Record<string, any>) }]))
         } : {})
       };
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'tests'), copiedTest);
@@ -329,48 +484,67 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
   };
 
   const handleUpdateQuestion = (index, field, value) => {
-    const updated = [...newTest.questions];
+    setNewTest(prev => {
+      const updated = [...prev.questions];
+      updated[index] = { ...updated[index] };
     if (field === 'imageUrl') {
       updated[index][field] = extractImageUrl(value);
+    } else if (field === 'questionType') {
+      updated[index][field] = value;
+      updated[index].type = value === 'multiple-choice' ? 'mcq'
+        : ['true-false-not-given', 'yes-no-not-given', 'matching-headings', 'matching-features', 'sentence-endings', 'map-labeling'].includes(value) ? 'select'
+        : value === 'sat-student-produced-response' ? 'number'
+        : 'text';
+      if (value === 'true-false-not-given') updated[index].options = ['True', 'False', 'Not Given'];
+      else if (value === 'yes-no-not-given') updated[index].options = ['Yes', 'No', 'Not Given'];
+      else if (['matching-headings', 'matching-features', 'sentence-endings', 'map-labeling'].includes(value)) updated[index].options = [];
+      else delete updated[index].options;
+    } else if (field === 'writingTaskType') {
+      updated[index].writingTaskType = value;
+      updated[index].writingFormat = value === 1 ? 'chart' : 'essay';
     } else {
       updated[index][field] = value;
     }
-    setNewTest({ ...newTest, questions: updated });
+      return { ...prev, questions: updated };
+    });
   };
 
   const handleUpdateOption = (qIndex, optIndex, value) => {
-    const updated = [...newTest.questions];
-    updated[qIndex].options[optIndex] = extractImageUrl(value);
-    setNewTest({ ...newTest, questions: updated });
+    setNewTest(prev => {
+      const updated = [...prev.questions];
+      updated[qIndex] = { ...updated[qIndex], options: [...(updated[qIndex].options || [])] };
+      updated[qIndex].options[optIndex] = extractImageUrl(value);
+      return { ...prev, questions: updated };
+    });
   };
 
   const handleAddOption = (qIndex) => {
-    const updated = [...newTest.questions];
-    updated[qIndex].options.push('');
-    setNewTest({ ...newTest, questions: updated });
+    setNewTest(prev => {
+      const updated = [...prev.questions];
+      updated[qIndex] = { ...updated[qIndex], options: [...(updated[qIndex].options || []), ''] };
+      return { ...prev, questions: updated };
+    });
   };
 
   const handleRemoveOption = (qIndex, optIndex) => {
-    const updated = [...newTest.questions];
-    const removedOption = updated[qIndex].options[optIndex];
-    updated[qIndex].options.splice(optIndex, 1);
-    if (updated[qIndex].correctAnswer === removedOption) {
-      updated[qIndex].correctAnswer = '';
-    }
-    setNewTest({ ...newTest, questions: updated });
+    setNewTest(prev => {
+      const updated = [...prev.questions];
+      const options = [...(updated[qIndex].options || [])];
+      const removedOption = options.splice(optIndex, 1)[0];
+      updated[qIndex] = { ...updated[qIndex], options, correctAnswer: updated[qIndex].correctAnswer === removedOption ? '' : updated[qIndex].correctAnswer };
+      return { ...prev, questions: updated };
+    });
   };
 
   const handleRemoveQuestion = (index) => {
-    const updated = [...newTest.questions];
-    updated.splice(index, 1);
-    setNewTest({ ...newTest, questions: updated });
+    setNewTest(prev => ({ ...prev, questions: prev.questions.filter((_, questionIndex) => questionIndex !== index) }));
   };
 
   const saveTest = async () => {
     if (!newTest.title || newTest.questions.length === 0) return alert("Title and at least 1 question required.");
     setIsSubmitting(true);
     try {
-      const testToSave = {
+      const testToSave: any = {
         ...newTest,
         questions: newTest.type === 'IELTS'
           ? [...newTest.questions].sort((a, b) => {
@@ -415,15 +589,27 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
   }
 
   const handleEditTest = (test) => {
+    const defaults = createEmptyTest();
+    const oldListening = test.sections?.listening || {};
+    const oldReading = test.sections?.reading || {};
+    const normalizedParts = oldListening.parts || [
+      { sectionNumber: 1, instructions: oldListening.instructions || '', audioUrl: oldListening.audioUrl || '' },
+      ...[2, 3, 4].map(sectionNumber => ({ sectionNumber, instructions: '', audioUrl: '' }))
+    ];
+    const normalizedPassages = oldReading.passages || [
+      { passageNumber: 1, title: 'Passage 1', content: oldReading.passage || '' },
+      { passageNumber: 2, title: 'Passage 2', content: '' },
+      { passageNumber: 3, title: 'Passage 3', content: '' }
+    ];
     setNewTest({
-      ...createEmptyTest(),
+      ...defaults,
       ...test,
       sections: {
-        ...createEmptyTest().sections,
-        ...(test.sections || {}),
-        listening: { ...createEmptyTest().sections.listening, ...(test.sections?.listening || {}) },
-        reading: { ...createEmptyTest().sections.reading, ...(test.sections?.reading || {}) },
-        writing: { ...createEmptyTest().sections.writing, ...(test.sections?.writing || {}) }
+        ...defaults.sections,
+        ...test.sections,
+        listening: { ...defaults.sections.listening, ...oldListening, parts: normalizedParts },
+        reading: { ...defaults.sections.reading, ...oldReading, passages: normalizedPassages },
+        writing: { ...defaults.sections.writing, ...test.sections?.writing }
       },
       questions: test.questions || [],
       groupCode: test.groupCode || '',
@@ -431,6 +617,8 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
     });
     const firstTaggedSection = test.questions?.find(question => question.section)?.section;
     setActiveQuestionSection(firstTaggedSection || (test.questions?.length ? 'general' : (test.type === 'IELTS' ? 'listening' : 'general')));
+    setActiveListeningSection(test.questions?.find(question => question.listeningSectionNumber)?.listeningSectionNumber || 1);
+    setActiveReadingPassage(test.questions?.find(question => question.passageNumber)?.passageNumber || 1);
     setEditingId(test.id);
     setIsBuildingTest(true);
   };
@@ -482,7 +670,7 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
                       {test.category} • {test.type}
                     </span>
                     <div className="flex items-center gap-2">
-                      {test.pin && <Lock className="w-4 h-4 text-amber-500" title="PIN Protected" />}
+                      {test.pin && <Lock className="w-4 h-4 text-amber-500" aria-label="PIN protected" />}
                       <button onClick={() => duplicateTest(test)} className="text-slate-400 dark:text-slate-500 hover:text-purple-500 ml-2" title="Duplicate Assessment">
                         <Copy className="w-4 h-4" />
                       </button>
@@ -527,7 +715,7 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
                   </div>
                   <div className="col-span-2">
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Description / Instructions</label>
-                    <textarea value={newTest.description} onChange={e => setNewTest({...newTest, description: e.target.value})} placeholder="Paste instructions or reading materials from your PDF here..." rows="3" className="w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:ring-2 focus:ring-purple-500 outline-none"></textarea>
+                  <textarea value={newTest.description} onChange={e => setNewTest({...newTest, description: e.target.value})} placeholder="Paste instructions or reading materials from your PDF here..." rows={3} className="w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:ring-2 focus:ring-purple-500 outline-none"></textarea>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Category</label>
@@ -592,38 +780,35 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
                   {newTest.type === 'IELTS' && activeQuestionSection !== 'general' && (
                     <div className="mb-5 p-4 rounded-lg border border-purple-200 dark:border-purple-800 bg-purple-50/70 dark:bg-purple-900/20 space-y-3">
                       <h4 className="font-semibold text-slate-800 dark:text-white">{activeQuestionSection[0].toUpperCase() + activeQuestionSection.slice(1)} section material</h4>
-                      <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
-                        Section instructions
-                        <textarea
-                          value={newTest.sections?.[activeQuestionSection]?.instructions || ''}
-                          onChange={event => updateSection(activeQuestionSection, 'instructions', event.target.value)}
-                          rows="2"
-                          placeholder={`Instructions shown to students for ${activeQuestionSection}`}
-                          className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-purple-500"
-                        />
-                      </label>
                       {activeQuestionSection === 'listening' && (
-                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
-                          Listening audio URL (optional)
-                          <input
-                            type="url"
-                            value={newTest.sections?.listening?.audioUrl || ''}
-                            onChange={event => updateSection('listening', 'audioUrl', event.target.value)}
-                            placeholder="Paste a direct link to a browser-playable audio file"
-                            className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-purple-500"
-                          />
-                        </label>
+                        <div className="space-y-3">
+                          <div className="flex flex-wrap gap-2" aria-label="Listening section number">
+                            {[1, 2, 3, 4].map(number => <button key={number} type="button" onClick={() => setActiveListeningSection(number)} className={`px-3 py-1.5 rounded border text-sm ${activeListeningSection === number ? 'bg-purple-600 text-white border-purple-600' : 'bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-600'}`}>Section {number}</button>)}
+                          </div>
+                          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Section instructions
+                            <textarea value={newTest.sections?.listening?.parts?.find(part => part.sectionNumber === activeListeningSection)?.instructions || ''} onChange={event => updateListeningPart(activeListeningSection, 'instructions', event.target.value)} rows={2} placeholder={`Instructions for Listening Section ${activeListeningSection}`} className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-purple-500" />
+                          </label>
+                          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Audio URL (optional)
+                            <input type="url" value={newTest.sections?.listening?.parts?.find(part => part.sectionNumber === activeListeningSection)?.audioUrl || ''} onChange={event => updateListeningPart(activeListeningSection, 'audioUrl', event.target.value)} placeholder="Paste a direct link to a browser-playable audio file" className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-purple-500" />
+                          </label>
+                        </div>
                       )}
                       {activeQuestionSection === 'reading' && (
-                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
-                          Reading passage (optional)
-                          <textarea
-                            value={newTest.sections?.reading?.passage || ''}
-                            onChange={event => updateSection('reading', 'passage', event.target.value)}
-                            rows="6"
-                            placeholder="Paste the passage students should read before answering"
-                            className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-purple-500"
-                          />
+                        <div className="space-y-3">
+                          <div className="flex flex-wrap gap-2" aria-label="Reading passage number">
+                            {[1, 2, 3].map(number => <button key={number} type="button" onClick={() => setActiveReadingPassage(number)} className={`px-3 py-1.5 rounded border text-sm ${activeReadingPassage === number ? 'bg-purple-600 text-white border-purple-600' : 'bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-600'}`}>Passage {number}</button>)}
+                          </div>
+                          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Passage title
+                            <input type="text" value={newTest.sections?.reading?.passages?.find(passage => passage.passageNumber === activeReadingPassage)?.title || `Passage ${activeReadingPassage}`} onChange={event => updateReadingPassage(activeReadingPassage, 'title', event.target.value)} className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-purple-500" />
+                          </label>
+                          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Reading passage
+                            <textarea value={newTest.sections?.reading?.passages?.find(passage => passage.passageNumber === activeReadingPassage)?.content || ''} onChange={event => updateReadingPassage(activeReadingPassage, 'content', event.target.value)} rows={6} placeholder="Paste this passage's text" className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-purple-500" />
+                          </label>
+                        </div>
+                      )}
+                      {activeQuestionSection === 'writing' && (
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Writing section instructions
+                          <textarea value={newTest.sections?.writing?.instructions || ''} onChange={event => updateSection('writing', 'instructions', event.target.value)} rows={3} placeholder="Instructions displayed before the writing tasks" className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-purple-500" />
                         </label>
                       )}
                     </div>
@@ -632,6 +817,8 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
                   {newTest.questions
                     .map((question, index) => ({ question, index }))
                     .filter(({ question }) => (question.section || 'general') === activeQuestionSection)
+                    .filter(({ question }) => activeQuestionSection !== 'listening' || (question.listeningSectionNumber || 1) === activeListeningSection)
+                    .filter(({ question }) => activeQuestionSection !== 'reading' || (question.passageNumber || 1) === activeReadingPassage)
                     .map(({ question: q, index: qIndex }, sectionQuestionIndex) => (
                     <div key={q.id} className="bg-slate-50 dark:bg-slate-700/50 p-4 rounded-lg border border-slate-200 dark:border-slate-600 mb-4 transition-colors text-left">
                        <div className="flex justify-between mb-2">
@@ -639,7 +826,84 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
                           <button onClick={() => handleRemoveQuestion(qIndex)} className="text-red-500 dark:text-red-400 text-sm hover:underline">Remove</button>
                        </div>
                        
-                       <textarea value={q.text} onChange={e => handleUpdateQuestion(qIndex, 'text', e.target.value)} placeholder="Type the question text here..." rows="2" className="w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white mb-3 outline-none"></textarea>
+                       <textarea value={q.text} onChange={e => handleUpdateQuestion(qIndex, 'text', e.target.value)} placeholder="Type the question text here..." rows={2} className="w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white mb-3 outline-none"></textarea>
+
+                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                         <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Question format
+                           <select value={q.questionType || (q.type === 'mcq' ? 'multiple-choice' : 'short-answer')} onChange={event => handleUpdateQuestion(qIndex, 'questionType', event.target.value)} className="mt-1 w-full p-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white">
+                             {(newTest.type === 'IELTS' ? IELTS_QUESTION_FORMATS.filter(([value]) => activeQuestionSection === 'writing' ? value === 'writing-task' : value !== 'writing-task' && value !== 'sat-student-produced-response') : [['multiple-choice', 'Multiple choice'], ['short-answer', 'Short answer'], ['sat-student-produced-response', 'Numerical response']]).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                           </select>
+                         </label>
+                         <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Difficulty
+                           <select value={q.difficulty || ''} onChange={event => handleUpdateQuestion(qIndex, 'difficulty', event.target.value)} className="mt-1 w-full p-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white">
+                             <option value="">Not set</option><option value="easy">Easy</option><option value="medium">Medium</option><option value="hard">Hard</option>
+                           </select>
+                         </label>
+                         {newTest.type === 'IELTS' && activeQuestionSection === 'reading' && (
+                           <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Reading passage
+                             <select value={q.passageNumber || activeReadingPassage} onChange={event => handleUpdateQuestion(qIndex, 'passageNumber', Number(event.target.value))} className="mt-1 w-full p-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white">
+                               {[1, 2, 3].map(number => <option key={number} value={number}>Passage {number}</option>)}
+                             </select>
+                           </label>
+                         )}
+                         {newTest.type === 'IELTS' && activeQuestionSection === 'writing' && (
+                           <>
+                             <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Writing task
+                               <select value={q.writingTaskType || 2} onChange={event => handleUpdateQuestion(qIndex, 'writingTaskType', Number(event.target.value))} className="mt-1 w-full p-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white">
+                                 <option value={1}>Task 1</option><option value={2}>Task 2</option>
+                               </select>
+                             </label>
+                             <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Task format
+                               <select value={q.writingFormat || (q.writingTaskType === 1 ? 'chart' : 'essay')} onChange={event => handleUpdateQuestion(qIndex, 'writingFormat', event.target.value)} className="mt-1 w-full p-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white">
+                                 {(Number(q.writingTaskType || 2) === 1 ? ['chart', 'table', 'graph', 'process', 'map', 'other visual'] : ['agree / disagree', 'discussion', 'advantages / disadvantages', 'problem / solution', 'two-part question', 'other essay']).map(format => <option key={format} value={format}>{format}</option>)}
+                               </select>
+                             </label>
+                           </>
+                         )}
+                         {newTest.type === 'SAT' && (
+                           <>
+                             <label className="text-sm font-medium text-slate-700 dark:text-slate-300">SAT domain
+                               <select value={q.satDomain || ''} onChange={event => { handleUpdateQuestion(qIndex, 'satDomain', event.target.value); handleUpdateQuestion(qIndex, 'satSkill', ''); }} className="mt-1 w-full p-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white">
+                                 <option value="">Choose a domain</option>{Object.keys(SAT_SKILLS).map(domain => <option key={domain} value={domain}>{domain}</option>)}
+                               </select>
+                             </label>
+                             <label className="text-sm font-medium text-slate-700 dark:text-slate-300">SAT skill
+                               <select value={q.satSkill || ''} onChange={event => handleUpdateQuestion(qIndex, 'satSkill', event.target.value)} disabled={!q.satDomain} className="mt-1 w-full p-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white disabled:opacity-60">
+                                 <option value="">Choose a skill</option>{(SAT_SKILLS[q.satDomain] || []).map(skill => <option key={skill} value={skill}>{skill}</option>)}
+                               </select>
+                             </label>
+                           </>
+                         )}
+                         <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Points
+                           <input type="number" min="0" value={q.points ?? 1} onChange={event => handleUpdateQuestion(qIndex, 'points', Number(event.target.value))} className="mt-1 w-full p-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white" />
+                         </label>
+                       </div>
+                       {q.type !== 'mcq' && q.type !== 'select' && (
+                         <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">Correct answer
+                           <input type={q.type === 'number' ? 'number' : 'text'} value={q.correctAnswer || ''} onChange={event => handleUpdateQuestion(qIndex, 'correctAnswer', event.target.value)} placeholder="Leave blank for a manually reviewed writing response" className="mt-1 w-full p-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white" />
+                         </label>
+                       )}
+                       {q.type === 'select' && (
+                         <div className="space-y-2 ml-1 mb-3 text-sm text-slate-700 dark:text-slate-300">
+                           <p className="font-medium">Answer choices — select the correct answer.</p>
+                           {getSelectOptions(q).map((option, optionIndex) => (
+                             <div key={`${q.id}-choice-${optionIndex}`} className="flex items-center gap-2">
+                               <input type="radio" name={`correct_${q.id}`} checked={q.correctAnswer === option && option !== ''} onChange={() => handleUpdateQuestion(qIndex, 'correctAnswer', option)} aria-label={`Set option ${optionIndex + 1} as correct`} />
+                               <input type="text" value={option} onChange={event => handleUpdateOption(qIndex, optionIndex, event.target.value)} placeholder={`Choice ${optionIndex + 1}`} className="flex-grow p-2 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white" />
+                               {q.questionType !== 'true-false-not-given' && q.questionType !== 'yes-no-not-given' && getSelectOptions(q).length > 2 && <button onClick={() => handleRemoveOption(qIndex, optionIndex)} className="text-red-500" aria-label={`Remove choice ${optionIndex + 1}`}>Remove</button>}
+                             </div>
+                           ))}
+                           {!['true-false-not-given', 'yes-no-not-given'].includes(q.questionType) && <button onClick={() => handleAddOption(qIndex)} className="text-blue-600 dark:text-blue-400 hover:underline">+ Add choice</button>}
+                         </div>
+                       )}
+                       {q.type !== 'mcq' && q.type !== 'select' && (
+                         <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">Accepted answer alternatives (one per line)
+                           <textarea value={(q.acceptedAnswers || []).join('\n')} onChange={event => handleUpdateQuestion(qIndex, 'acceptedAnswers', event.target.value.split('\n').map(answer => answer.trim()).filter(Boolean))} rows={2} className="mt-1 w-full p-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white" />
+                         </label>
+                       )}
+                       <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">Answer explanation (optional)
+                         <textarea value={q.explanation || ''} onChange={event => handleUpdateQuestion(qIndex, 'explanation', event.target.value)} rows={2} className="mt-1 w-full p-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white" />
+                       </label>
 
                        <div className="mb-4 bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg border border-blue-200 dark:border-blue-800 shadow-sm text-left">
                           <label className="flex items-center gap-2 text-sm font-medium text-blue-800 dark:text-blue-300 mb-1">
@@ -710,6 +974,354 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
     </div>
   )
 }
+
+const WritingPractice = ({ tests, userId, onBack }) => {
+  const [taskType, setTaskType] = useState(1);
+  const [selectedPromptId, setSelectedPromptId] = useState('');
+  const [draft, setDraft] = useState('');
+  const [checklist, setChecklist] = useState({});
+  const [secondsLeft, setSecondsLeft] = useState(20 * 60);
+  const [timerRunning, setTimerRunning] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiMessage, setAiMessage] = useState('');
+  const [aiError, setAiError] = useState('');
+  const textareaRef = React.useRef(null);
+  const responseCache = React.useRef(new Map());
+
+  const prompts = tests.flatMap(test => (test.questions || [])
+    .filter(question => question.section === 'writing' && Number(question.writingTaskType || 2) === taskType)
+    .map(question => ({ id: `${test.id}_${question.id}`, test, question })));
+  const getDraftStorageKey = (promptId, task = taskType) => `ieltsWritingDraft:${userId}:${task}:${promptId}`;
+  const loadDraft = (promptId, task = taskType) => {
+    try { return localStorage.getItem(getDraftStorageKey(promptId, task)) || ''; } catch { return ''; }
+  };
+  const selectedPrompt = prompts.find(prompt => prompt.id === selectedPromptId) || prompts[0];
+  const wordCount = draft.trim() ? draft.trim().split(/\s+/).length : 0;
+  const checklistItems = taskType === 1
+    ? ['Paraphrase the task in an introduction', 'Write a clear overview', 'Select key details for comparison', 'Check figures, units, and tense']
+    : ['Identify the question and choose an approach', 'State a clear position', 'Develop each body paragraph with support', 'Connect ideas and write a conclusion'];
+
+  useEffect(() => {
+    setSelectedPromptId(prompts[0]?.id || '');
+    setDraft(prompts[0] ? loadDraft(prompts[0].id, taskType) : '');
+    setChecklist({});
+    setSecondsLeft(taskType === 1 ? 20 * 60 : 40 * 60);
+    setTimerRunning(false);
+    setAiMessage('');
+    setAiError('');
+  }, [taskType]);
+
+  useEffect(() => {
+    if (!timerRunning) return undefined;
+    const timer = window.setInterval(() => setSecondsLeft(previous => {
+      if (previous <= 1) {
+        setTimerRunning(false);
+        return 0;
+      }
+      return previous - 1;
+    }), 1000);
+    return () => window.clearInterval(timer);
+  }, [timerRunning]);
+
+  const localSuggestions = taskType === 1
+    ? (wordCount < 25
+        ? [
+            { phrase: 'The chart illustrates…', why: 'A concise opening to paraphrase the visual.' },
+            { phrase: 'Overall, …', why: 'Introduce the main trend before details.' }
+          ]
+        : draft.toLowerCase().includes('overall')
+          ? [
+              { phrase: 'By contrast, …', why: 'Use this to compare a different category or period.' },
+              { phrase: 'The most notable change was…', why: 'Bring attention to a key feature without listing every figure.' }
+            ]
+          : [
+              { phrase: 'increased steadily', why: 'A precise description for a gradual upward trend.' },
+              { phrase: 'remained relatively stable', why: 'Describe a category with little overall change.' }
+            ])
+    : (wordCount < 40
+        ? [
+            { phrase: 'This essay will argue that…', why: 'State your position directly after interpreting the prompt.' },
+            { phrase: 'Although…, I believe…', why: 'Use this structure to acknowledge a counterpoint and state your view.' }
+          ]
+        : [
+            { phrase: 'One reason for this is that…', why: 'Start a body paragraph with a clear supporting reason.' },
+            { phrase: 'For example, …', why: 'Connect a specific example to the paragraph’s claim.' },
+            { phrase: 'As a result, …', why: 'Make the consequence of your reasoning explicit.' }
+          ]);
+
+  const insertPhrase = (phrase) => {
+    const textarea = textareaRef.current;
+    const start = textarea?.selectionStart ?? draft.length;
+    const end = textarea?.selectionEnd ?? draft.length;
+    const updated = `${draft.slice(0, start)}${phrase}${draft.slice(end)}`;
+    setDraft(updated);
+    requestAnimationFrame(() => {
+      textarea?.focus();
+      textarea?.setSelectionRange(start + phrase.length, start + phrase.length);
+    });
+  };
+
+  const requestCoach = async (kind) => {
+    if (!selectedPrompt || !draft.trim()) return;
+    const cacheKey = `${kind}:${taskType}:${selectedPrompt.question.text}:${draft.trim()}`;
+    if (responseCache.current.has(cacheKey)) {
+      setAiMessage(responseCache.current.get(cacheKey));
+      return;
+    }
+    setAiBusy(true);
+    setAiError('');
+    setAiMessage('');
+    try {
+      const coach = httpsCallable<any, { message: string }>(functions, 'writingCoach');
+      const response = await coach({
+        kind,
+        taskType,
+        prompt: selectedPrompt.question.text.slice(0, 1500),
+        taskFormat: selectedPrompt.question.writingFormat || (taskType === 1 ? 'chart or visual report' : 'essay'),
+        writing: draft.slice(0, 5000)
+      });
+      const message = response.data?.message;
+      if (typeof message !== 'string' || !message.trim()) throw new Error('The coaching service returned no feedback.');
+      responseCache.current.set(cacheKey, message);
+      setAiMessage(message);
+    } catch (error) {
+      console.error('Writing coach request failed:', error);
+      const code = String(error?.code || '');
+      setAiError(code.endsWith('/failed-precondition')
+        ? 'The secure AI coach is not configured yet. Your draft is safe, and local phrase suggestions still work.'
+        : code.endsWith('/resource-exhausted')
+          ? String(error?.message || 'AI coaching is temporarily rate limited. Your draft is safe.')
+          : 'AI coaching is temporarily unavailable. Your draft is safe; local phrase suggestions remain available.');
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-5 text-left">
+      <div className="flex items-center justify-between gap-3">
+        <div><h2 className="text-xl font-bold text-slate-800 dark:text-white">IELTS Writing Practice</h2><p className="text-sm text-slate-500 dark:text-slate-400">Suggestions are optional. Your writing is never replaced automatically.</p></div>
+        <button onClick={onBack} className="px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200">Back</button>
+      </div>
+      <div className="flex gap-2" role="tablist" aria-label="Writing task">
+        {[1, 2].map(task => <button key={task} role="tab" aria-selected={taskType === task} onClick={() => setTaskType(task)} className={`px-4 py-2 rounded-lg font-semibold ${taskType === task ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-600'}`}>Task {task}</button>)}
+      </div>
+      {!selectedPrompt ? (
+        <div className="p-6 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300">
+          No Task {taskType} prompt is available yet. Ask your teacher to publish an IELTS Writing question and label it Task {taskType}.
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,2fr)_minmax(260px,1fr)] gap-5">
+          <div className="space-y-4">
+            <div className="p-5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Prompt
+                <select value={selectedPromptId || selectedPrompt.id} onChange={event => { setSelectedPromptId(event.target.value); setDraft(loadDraft(event.target.value)); setAiMessage(''); }} className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white">
+                  {prompts.map(prompt => <option key={prompt.id} value={prompt.id}>{prompt.test.title}: {prompt.question.text.slice(0, 90)}</option>)}
+                </select>
+              </label>
+              <p className="mt-4 whitespace-pre-wrap text-slate-800 dark:text-slate-100">{selectedPrompt.question.text}</p>
+              {selectedPrompt.question.imageUrl && <img src={selectedPrompt.question.imageUrl} alt="Writing prompt figure" className="mt-4 max-w-full rounded-lg" />}
+              <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">Suggested practice length: {taskType === 1 ? 'about 150 words' : 'about 250 words'}. This is guidance, not scoring.</p>
+            </div>
+            <div className="p-5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <h3 className="font-semibold text-slate-800 dark:text-white">Your draft</h3>
+                <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+                  <span aria-live="polite">{wordCount} words</span>
+                  <span className="font-mono">{formatTime(secondsLeft)}</span>
+                  <button onClick={() => setTimerRunning(previous => !previous)} className="px-2 py-1 rounded border border-slate-300 dark:border-slate-600">{timerRunning ? 'Pause' : 'Start'}</button>
+                </div>
+              </div>
+              <textarea ref={textareaRef} value={draft} onChange={event => { const value = event.target.value; setDraft(value); try { if (selectedPrompt) localStorage.setItem(getDraftStorageKey(selectedPrompt.id), value); } catch { /* Storage may be unavailable in private browsing. */ } }} rows={16} maxLength={12000} placeholder="Write your response here. Your text stays on this device unless you explicitly request AI feedback." className="w-full p-4 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white leading-relaxed" />
+            </div>
+          </div>
+          <aside className="space-y-4">
+            <div className="p-5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+              <h3 className="font-semibold text-slate-800 dark:text-white mb-3">Structure checklist</h3>
+              {checklistItems.map(item => <label key={item} className="flex gap-2 items-start text-sm text-slate-700 dark:text-slate-300 mb-3"><input type="checkbox" checked={Boolean(checklist[item])} onChange={event => setChecklist(previous => ({ ...previous, [item]: event.target.checked }))} /><span>{item}</span></label>)}
+            </div>
+            <div className="p-5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+              <h3 className="font-semibold text-slate-800 dark:text-white mb-3">Phrase suggestions</h3>
+              <div className="space-y-2">{localSuggestions.map(suggestion => <div key={suggestion.phrase} className="p-3 rounded-lg bg-slate-50 dark:bg-slate-700"><button onClick={() => insertPhrase(suggestion.phrase)} className="text-left font-semibold text-blue-700 dark:text-blue-300 underline">{suggestion.phrase}</button><p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{suggestion.why}</p></div>)}</div>
+              <button onClick={() => requestCoach('hint')} disabled={aiBusy || !draft.trim()} className="w-full mt-4 px-3 py-2 rounded-lg bg-blue-600 text-white font-semibold disabled:opacity-50">{aiBusy ? 'Getting hint…' : 'Ask for a focused AI hint'}</button>
+              <button onClick={() => requestCoach('feedback')} disabled={aiBusy || !draft.trim()} className="w-full mt-2 px-3 py-2 rounded-lg border border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 font-semibold disabled:opacity-50">Request feedback</button>
+              {aiError && <p role="status" className="text-sm text-amber-700 dark:text-amber-300 mt-3">{aiError}</p>}
+              {aiMessage && <div role="status" className="mt-3 p-3 rounded-lg bg-blue-50 dark:bg-blue-900/30 text-sm text-slate-800 dark:text-slate-200 whitespace-pre-wrap"><p className="font-semibold mb-1">Formative coaching (not an official IELTS band score)</p>{aiMessage}</div>}
+            </div>
+          </aside>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const PracticeHub = ({ tests, user, onStartTest }) => {
+  const [subject, setSubject] = useState('');
+  const [sourceId, setSourceId] = useState('');
+  const [readingMode, setReadingMode] = useState('question-type');
+  const [readingType, setReadingType] = useState('');
+  const [passageNumber, setPassageNumber] = useState(1);
+  const [listeningSection, setListeningSection] = useState('all');
+  const [satDomain, setSatDomain] = useState('');
+  const [satSkill, setSatSkill] = useState('');
+  const [satDifficulty, setSatDifficulty] = useState('all');
+  const [satQuestionCount, setSatQuestionCount] = useState('all');
+
+  const ieltsTests = tests.filter(test => test.type === 'IELTS' && (test.questions || []).length > 0);
+  const satTests = tests.filter(test => test.type === 'SAT' && (test.questions || []).length > 0);
+  const sourceTests = subject === 'sat' ? satTests : ieltsTests;
+  const selectedTest = sourceTests.find(test => test.id === sourceId) || sourceTests[0];
+
+  useEffect(() => {
+    setSourceId('');
+    setReadingType('');
+    setSatDomain('');
+    setSatSkill('');
+    setSatDifficulty('all');
+    setSatQuestionCount('all');
+  }, [subject]);
+
+  const readingQuestions = (test) => (test?.questions || []).filter(question => {
+    if (question.section) return question.section === 'reading';
+    return Boolean(test.sections?.reading?.passage || test.sections?.reading?.passages?.some(passage => passage.content));
+  });
+  const listeningQuestions = (test) => (test?.questions || []).filter(question => {
+    if (question.section) return question.section === 'listening';
+    return Boolean(test.sections?.listening?.audioUrl || test.sections?.listening?.parts?.some(part => part.audioUrl));
+  });
+  const distinct = (values: any[]): any[] => [...new Set(values.filter(Boolean))];
+  const readingTypes = distinct(readingQuestions(selectedTest).map(question => question.questionType));
+  const readingQuestionsForMode = readingQuestions(selectedTest).filter(question => {
+    if (readingMode === 'question-type') return Boolean(readingType) && question.questionType === readingType;
+    if (readingMode === 'passage') return (question.passageNumber || 1) === passageNumber;
+    return [1, 2, 3].includes(question.passageNumber || 1);
+  });
+  const readingFullReady = [1, 2, 3].every(number => getReadingPassage(selectedTest, number).trim() && readingQuestions(selectedTest).some(question => (question.passageNumber || 1) === number));
+  const listeningQuestionsForMode = listeningQuestions(selectedTest).filter(question => listeningSection === 'all' || (question.listeningSectionNumber || 1) === Number(listeningSection));
+  const listeningFullReady = [1, 2, 3, 4].every(number => getListeningAudioUrl(selectedTest, number) && listeningQuestions(selectedTest).some(question => (question.listeningSectionNumber || 1) === number));
+
+  const launchPractice = (test, questions, durationSeconds, title, practiceMetadata) => {
+    if (!test || questions.length === 0) return;
+    const orderedQuestions = [...questions].sort((a, b) => {
+      if (practiceMetadata.kind === 'reading') return (a.passageNumber || 1) - (b.passageNumber || 1);
+      if (practiceMetadata.kind === 'listening') return (a.listeningSectionNumber || 1) - (b.listeningSectionNumber || 1);
+      return 0;
+    });
+    onStartTest({
+      ...test,
+      id: `practice-${test.id}-${Date.now()}`,
+      title,
+      durationSeconds,
+      questions: orderedQuestions,
+      isPractice: true,
+      practiceMetadata
+    });
+  };
+
+  if (subject === 'writing') return <WritingPractice tests={ieltsTests} userId={user?.uid} onBack={() => setSubject('')} />;
+
+  if (!subject) {
+    return (
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        {[
+          ['reading', 'IELTS Reading', 'Practice by question type, passage, or all three passages.'],
+          ['listening', 'IELTS Listening', 'Practice one listening section or all four continuously.'],
+          ['writing', 'IELTS Writing', 'Work on Task 1 or Task 2 with a checklist and optional coaching.'],
+          ['sat', 'SAT Skills', 'Practice Reading and Writing or Math by domain and skill.']
+        ].map(([id, title, description]) => <button key={id} onClick={() => setSubject(id)} className="p-6 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-left hover:border-blue-400"><h3 className="font-bold text-slate-800 dark:text-white">{title}</h3><p className="text-sm text-slate-500 dark:text-slate-400 mt-2">{description}</p></button>)}
+      </div>
+    );
+  }
+
+  const startReading = () => {
+    const allQuestions = readingQuestions(selectedTest);
+    let matching = allQuestions;
+    let title = `${selectedTest?.title || 'IELTS Reading'} — Practice`;
+    let duration = selectedTest?.durationSeconds || 20 * 60;
+    if (readingMode === 'question-type') {
+      matching = allQuestions.filter(question => question.questionType === readingType);
+      title += ` — ${readingType}`;
+      duration = 20 * 60;
+    } else if (readingMode === 'passage') {
+      matching = allQuestions.filter(question => (question.passageNumber || 1) === passageNumber);
+      title += ` — Passage ${passageNumber}`;
+      duration = 20 * 60;
+    } else {
+      matching = readingQuestionsForMode;
+      title += ' — Full Reading Practice';
+      duration = 60 * 60;
+    }
+    launchPractice(selectedTest, matching, duration, title, { kind: 'reading', mode: readingMode, questionType: readingType, passageNumber: readingMode === 'passage' ? passageNumber : null });
+  };
+
+  const startListening = () => {
+    const matching = listeningQuestionsForMode;
+    const duration = listeningSection === 'all'
+      ? (selectedTest?.durationSeconds || 30 * 60)
+      : Math.ceil((selectedTest?.durationSeconds || 30 * 60) / 4);
+    launchPractice(selectedTest, matching, duration, `${selectedTest?.title || 'IELTS Listening'} — ${listeningSection === 'all' ? 'All Sections' : `Section ${listeningSection}`}`, { kind: 'listening', section: listeningSection });
+  };
+
+  const startSat = () => {
+    const available = satMatchingQuestions;
+    const matching = satQuestionCount === 'all' ? available : available.slice(0, Number(satQuestionCount));
+    launchPractice(selectedTest, matching, selectedTest?.durationSeconds || 15 * 60, `${selectedTest?.title || 'SAT'} — ${satSkill}`, { kind: 'sat', domain: satDomain, skill: satSkill });
+  };
+
+  const emptyBank = subject === 'reading' ? readingQuestions(selectedTest).length === 0
+      : subject === 'listening' ? listeningQuestions(selectedTest).length === 0
+    : subject === 'sat' ? (selectedTest?.questions || []).filter(question => question.satDomain && question.satSkill).length === 0
+    : false;
+  const satMatchingQuestions = (selectedTest?.questions || []).filter(question => question.satDomain === satDomain && question.satSkill === satSkill && (satDifficulty === 'all' || question.difficulty === satDifficulty));
+
+  return (
+    <div className="space-y-5 text-left">
+      <div className="flex items-center justify-between"><div><h2 className="text-xl font-bold text-slate-800 dark:text-white">{subject === 'sat' ? 'SAT Skill Practice' : `IELTS ${subject[0].toUpperCase()}${subject.slice(1)} Practice`}</h2><p className="text-sm text-slate-500 dark:text-slate-400">Choose from published assessments available to your student group.</p></div><button onClick={() => setSubject('')} className="px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200">Back</button></div>
+      <label className="block max-w-2xl text-sm font-medium text-slate-700 dark:text-slate-300">Question bank
+        <select value={selectedTest?.id || ''} onChange={event => setSourceId(event.target.value)} className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white">
+          {sourceTests.map(test => <option key={test.id} value={test.id}>{test.title}</option>)}
+        </select>
+      </label>
+      {sourceTests.length === 0 ? <p className="p-5 rounded-xl bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-200">No published {subject === 'sat' ? 'SAT' : 'IELTS'} question bank is available for your group yet.</p> : (
+        <>
+          {subject === 'reading' && <div className="space-y-4">
+            <label className="block max-w-2xl text-sm font-medium text-slate-700 dark:text-slate-300">Practice mode
+              <select value={readingMode} onChange={event => setReadingMode(event.target.value)} className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white"><option value="question-type">By question type</option><option value="passage">By passage</option><option value="full">Full Reading (60 minutes)</option></select>
+            </label>
+            {readingMode === 'question-type' && <label className="block max-w-2xl text-sm font-medium text-slate-700 dark:text-slate-300">Question type
+              <select value={readingType} onChange={event => setReadingType(event.target.value)} className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white"><option value="">Select a type</option>{readingTypes.map(type => <option key={type} value={type}>{IELTS_QUESTION_FORMATS.find(item => item[0] === type)?.[1] || type}</option>)}</select>
+            </label>}
+            {readingMode === 'passage' && <label className="block max-w-2xl text-sm font-medium text-slate-700 dark:text-slate-300">Passage<select value={passageNumber} onChange={event => setPassageNumber(Number(event.target.value))} className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white">{[1, 2, 3].map(number => <option key={number} value={number}>Passage {number}</option>)}</select></label>}
+            {emptyBank && <p className="text-amber-700 dark:text-amber-300">This assessment has no tagged Reading questions yet. A teacher can add them in IELTS Reading and assign a question type and passage number.</p>}
+            {readingMode === 'question-type' && !readingTypes.length && !emptyBank && <p className="text-amber-700 dark:text-amber-300">Question-type practice needs published Reading questions with a question-format tag.</p>}
+            {readingMode === 'full' && !readingFullReady && <p className="text-amber-700 dark:text-amber-300">Full Reading needs a passage and tagged questions for each of Passages 1, 2, and 3. Complete those in the assessment editor first.</p>}
+            {readingMode !== 'full' && selectedTest && readingMode !== 'question-type' && readingQuestionsForMode.length === 0 && <p className="text-amber-700 dark:text-amber-300">No questions are tagged for Passage {passageNumber} in this assessment yet.</p>}
+            <button onClick={startReading} disabled={!selectedTest || emptyBank || readingQuestionsForMode.length === 0 || (readingMode === 'question-type' && !readingType) || (readingMode === 'full' && !readingFullReady)} className="px-5 py-3 rounded-lg bg-blue-600 text-white font-semibold disabled:opacity-50">Start Reading Practice</button>
+          </div>}
+          {subject === 'listening' && <div className="space-y-4">
+            <label className="block max-w-2xl text-sm font-medium text-slate-700 dark:text-slate-300">Practice mode<select value={listeningSection} onChange={event => setListeningSection(event.target.value)} className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white"><option value="all">All four sections</option>{[1, 2, 3, 4].map(number => <option key={number} value={number}>Section {number}</option>)}</select></label>
+            {emptyBank && <p className="text-amber-700 dark:text-amber-300">This assessment has no tagged Listening questions yet. Add audio and questions to one or more Listening sections in the teacher editor.</p>}
+            {selectedTest && listeningSection !== 'all' && listeningQuestionsForMode.length === 0 && <p className="text-amber-700 dark:text-amber-300">No questions are tagged for Listening Section {listeningSection} yet.</p>}
+            {selectedTest && listeningSection !== 'all' && listeningQuestionsForMode.length > 0 && !getListeningAudioUrl(selectedTest, Number(listeningSection)) && <p className="text-amber-700 dark:text-amber-300">Add audio for this Listening section before starting practice.</p>}
+            {selectedTest && listeningSection === 'all' && !listeningFullReady && <p className="text-amber-700 dark:text-amber-300">Full Listening needs audio and tagged questions in all four sections. You can start a complete individual section while the rest is being prepared.</p>}
+            <button onClick={startListening} disabled={!selectedTest || emptyBank || listeningQuestionsForMode.length === 0 || (listeningSection === 'all' ? !listeningFullReady : !getListeningAudioUrl(selectedTest, Number(listeningSection)))} className="px-5 py-3 rounded-lg bg-blue-600 text-white font-semibold disabled:opacity-50">Start Listening Practice</button>
+          </div>}
+          {subject === 'sat' && <div className="space-y-4">
+            <label className="block max-w-2xl text-sm font-medium text-slate-700 dark:text-slate-300">Domain<select value={satDomain} onChange={event => { setSatDomain(event.target.value); setSatSkill(''); }} className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white"><option value="">Choose a domain</option>{Object.keys(SAT_SKILLS).map(domain => <option key={domain} value={domain}>{domain}</option>)}</select></label>
+            <label className="block max-w-2xl text-sm font-medium text-slate-700 dark:text-slate-300">Skill<select value={satSkill} onChange={event => setSatSkill(event.target.value)} disabled={!satDomain} className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white disabled:opacity-50"><option value="">Choose a skill</option>{(SAT_SKILLS[satDomain] || []).map(skill => <option key={skill} value={skill}>{skill}</option>)}</select></label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
+              <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Difficulty<select value={satDifficulty} onChange={event => setSatDifficulty(event.target.value)} className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white"><option value="all">Any difficulty</option><option value="easy">Easy</option><option value="medium">Medium</option><option value="hard">Hard</option></select></label>
+              <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Question count<select value={satQuestionCount} onChange={event => setSatQuestionCount(event.target.value)} className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white"><option value="all">All matching questions</option><option value="5">5 questions</option><option value="10">10 questions</option><option value="20">20 questions</option></select></label>
+            </div>
+            {emptyBank && <p className="text-amber-700 dark:text-amber-300">No SAT questions with domain and skill tags are available yet. Ask a teacher to classify SAT questions in the assessment editor.</p>}
+            {!emptyBank && satDomain && satSkill && satMatchingQuestions.length === 0 && <p className="text-amber-700 dark:text-amber-300">No questions match that domain, skill, and difficulty. Choose another filter or ask a teacher to add matching content.</p>}
+            <button onClick={startSat} disabled={!selectedTest || !satDomain || !satSkill || satMatchingQuestions.length === 0} className="px-5 py-3 rounded-lg bg-blue-600 text-white font-semibold disabled:opacity-50">Start SAT Skill Practice</button>
+          </div>}
+        </>
+      )}
+    </div>
+  );
+};
 
 const StudentDashboard = ({ user, tests, results, onStartTest, onSaveGroupCode, onLogout }) => {
   const [activeTab, setActiveTab] = useState('tests');
@@ -791,14 +1403,19 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onSaveGroupCode, 
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Ask your teacher for the exact code. Group assignment can only be set once from your account.</p>
         </div>
 
-        <div className="flex space-x-4 border-b border-slate-200 dark:border-slate-700 mb-6">
+        <div className="flex flex-wrap gap-x-4 border-b border-slate-200 dark:border-slate-700 mb-6">
           <button onClick={() => setActiveTab('tests')} className={`pb-4 px-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'tests' ? 'border-blue-600 dark:border-blue-400 text-blue-600 dark:text-blue-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'}`}>
             <LayoutDashboard className="w-4 h-4" /> Available Tasks
           </button>
           <button onClick={() => setActiveTab('results')} className={`pb-4 px-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'results' ? 'border-blue-600 dark:border-blue-400 text-blue-600 dark:text-blue-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'}`}>
             <History className="w-4 h-4" /> Past Results
           </button>
+          <button onClick={() => setActiveTab('practice')} className={`pb-4 px-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'practice' ? 'border-blue-600 dark:border-blue-400 text-blue-600 dark:text-blue-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'}`}>
+            <Play className="w-4 h-4" /> Practice
+          </button>
         </div>
+
+        {activeTab === 'practice' && <PracticeHub tests={visibleTests} user={user} onStartTest={onStartTest} />}
 
         {activeTab === 'tests' && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
@@ -821,7 +1438,7 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onSaveGroupCode, 
                   </div>
                   
                   <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2 flex items-center gap-2">
-                    {test.pin && <Lock className="w-4 h-4 text-slate-400 dark:text-slate-500" title="PIN Required" />} {test.title}
+                      {test.pin && <Lock className="w-4 h-4 text-slate-400 dark:text-slate-500" aria-label="PIN required" />} {test.title}
                   </h3>
                   <p className="text-sm text-slate-600 dark:text-slate-400 mb-6 flex-grow line-clamp-3">{test.description}</p>
                   
@@ -852,7 +1469,7 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onSaveGroupCode, 
             ) : (
               <div className="divide-y divide-slate-200 dark:divide-slate-700">
                 {results.map((result, idx) => {
-                   const testInfo = tests.find(t => t.id === result.testId) || { title: 'Unknown Test', type: 'Unknown' };
+                   const testInfo = tests.find(t => t.id === result.testId) || { title: result.displayTitle || 'Practice Session', type: result.practiceMetadata?.kind || 'Unknown' };
                    return (
                      <div key={idx} className="p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
                        <div className="text-left">
@@ -865,6 +1482,16 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onSaveGroupCode, 
                          <p className="text-sm text-slate-500 dark:text-slate-400">
                            Submitted on: {new Date(result.submittedAt).toLocaleDateString()} at {new Date(result.submittedAt).toLocaleTimeString()}
                          </p>
+                         {result.practiceMetadata && <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">Practice: {[result.practiceMetadata.domain, result.practiceMetadata.skill, result.practiceMetadata.mode, result.practiceMetadata.questionType].filter(Boolean).join(' • ') || result.practiceMetadata.kind}</p>}
+                         {result.questionReviews?.length > 0 && <details className="mt-3 text-sm text-slate-700 dark:text-slate-300">
+                           <summary className="cursor-pointer font-medium">Review answers and explanations</summary>
+                           <div className="space-y-3 mt-3">{result.questionReviews.map((review, reviewIndex) => <div key={review.questionId || reviewIndex} className="p-3 rounded-lg bg-slate-50 dark:bg-slate-900">
+                             <p className="font-medium">{reviewIndex + 1}. {review.questionText}</p>
+                             <p className="mt-1">Your answer: {review.studentAnswer || 'No answer'}</p>
+                             {review.graded ? <p className={review.isCorrect ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'}>{review.isCorrect ? 'Correct' : `Correct answer: ${review.correctAnswer}${review.acceptedAnswers?.length ? ` (also accepted: ${review.acceptedAnswers.join(', ')})` : ''}`}</p> : <p>Not automatically graded.</p>}
+                             {review.explanation && <p className="mt-1">{review.explanation}</p>}
+                           </div>)}</div>
+                         </details>}
                        </div>
                        <div className="flex items-center gap-4 bg-slate-50 dark:bg-slate-900 px-4 py-2 rounded-lg border border-slate-100 dark:border-slate-700 shadow-sm">
                          <div className="text-center">
@@ -909,20 +1536,36 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onSaveGroupCode, 
   );
 };
 
-const ExamInterface = ({ test, onComplete }) => {
-  const [timeLeft, setTimeLeft] = useState(test.durationSeconds);
-  const [answers, setAnswers] = useState<Record<string, string>>({});
+const ExamInterface = ({ test, user, onComplete }) => {
+  const storageKey = `examAttempt:${user.uid}:${test.id}`;
+  const [initialAttempt] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(storageKey) || 'null'); } catch { return null; }
+  });
+  const [deadlineTimestamp] = useState(initialAttempt?.deadlineTimestamp || Date.now() + test.durationSeconds * 1000);
+  const [timeLeft, setTimeLeft] = useState(Math.max(0, Math.ceil((deadlineTimestamp - Date.now()) / 1000)));
+  const [answers, setAnswers] = useState<Record<string, string>>(initialAttempt?.answers || {});
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(initialAttempt?.currentQuestionIndex || 0);
+  const [flaggedQuestions, setFlaggedQuestions] = useState<number[]>(initialAttempt?.flaggedQuestions || []);
   const [isConfirmSubmitOpen, setIsConfirmSubmitOpen] = useState(false);
 
   useEffect(() => {
-    if (timeLeft <= 0) {
-      handleAutoSubmit();
-      return;
-    }
-    const timer = setInterval(() => setTimeLeft(prev => prev - 1), 1000);
+    const updateRemaining = () => setTimeLeft(Math.max(0, Math.ceil((deadlineTimestamp - Date.now()) / 1000)));
+    updateRemaining();
+    const timer = setInterval(updateRemaining, 500);
     return () => clearInterval(timer);
+  }, [deadlineTimestamp]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(storageKey, JSON.stringify({ answers, currentQuestionIndex, flaggedQuestions, deadlineTimestamp }));
+    } catch (error) {
+      console.warn('Could not save this attempt in local storage:', error);
+    }
+  }, [answers, currentQuestionIndex, flaggedQuestions, deadlineTimestamp, storageKey]);
+
+  useEffect(() => {
+    if (timeLeft <= 0) handleAutoSubmit();
   }, [timeLeft]);
 
   const handleAnswerChange = (questionId, value) => {
@@ -932,24 +1575,45 @@ const ExamInterface = ({ test, onComplete }) => {
   const calculateScore = () => {
     let score = 0;
     let maxAutoScore = 0;
-    test.questions.forEach(q => {
-      if (q.type === 'mcq') {
-        maxAutoScore += 1;
-        if (answers[q.id] === q.correctAnswer) score += 1;
+    const questionReviews = test.questions.map(question => {
+      const accepted = acceptedAnswerValues(question);
+      const points = Number(question.points) || 1;
+      const graded = accepted.length > 0;
+      const correct = graded && isQuestionCorrect(question, answers[question.id]);
+      if (graded) {
+        maxAutoScore += points;
+        if (correct) score += points;
       }
+      return {
+        questionId: question.id,
+        questionText: question.text,
+        studentAnswer: answers[question.id] || '',
+        correctAnswer: question.correctAnswer || '',
+        acceptedAnswers: question.acceptedAnswers || [],
+        explanation: question.explanation || '',
+        section: question.section || '',
+        satDomain: question.satDomain || '',
+        satSkill: question.satSkill || '',
+        graded,
+        isCorrect: graded ? correct : null,
+        points: graded ? points : 0
+      };
     });
-    return { score, maxAutoScore };
+    return { score, maxAutoScore, questionReviews };
   };
 
   const submitTest = async (isAutoSubmit = false) => {
     if (isSubmitting) return;
     setIsSubmitting(true);
-    const { score, maxAutoScore } = calculateScore();
+    const { score, maxAutoScore, questionReviews } = calculateScore();
     await onComplete({
       testId: test.id,
       answers: answers,
       score: score,
       maxPossibleScore: maxAutoScore,
+      questionReviews,
+      displayTitle: test.title,
+      practiceMetadata: test.practiceMetadata || null,
       submittedAt: new Date().toISOString(),
       isAutoSubmitted: isAutoSubmit
     });
@@ -960,12 +1624,29 @@ const ExamInterface = ({ test, onComplete }) => {
   };
 
   const handleAutoSubmit = () => submitTest(true);
+  const toggleFlag = (questionIndex) => setFlaggedQuestions(previous => previous.includes(questionIndex)
+    ? previous.filter(index => index !== questionIndex)
+    : [...previous, questionIndex]);
+  const isAnswered = (question) => Boolean(String(answers[question.id] || '').trim());
 
   const isWarningTime = timeLeft <= 60;
   const currentQuestion = test.questions && test.questions[currentQuestionIndex];
   const currentSectionId = currentQuestion?.section;
-  const currentSection = currentSectionId && currentSectionId !== 'general' ? test.sections?.[currentSectionId] : null;
+  const rawSection = currentSectionId && currentSectionId !== 'general' ? test.sections?.[currentSectionId] : null;
+  const currentSection = currentSectionId === 'reading'
+    ? (() => {
+        const passage = rawSection?.passages?.find(item => item.passageNumber === (currentQuestion?.passageNumber || 1));
+        return { ...rawSection, passage: passage?.content || rawSection?.passage || '', title: passage?.title || `Passage ${currentQuestion?.passageNumber || 1}` };
+      })()
+    : currentSectionId === 'listening'
+      ? (() => {
+          const partNumber = currentQuestion?.listeningSectionNumber || 1;
+          const part = rawSection?.parts?.find(item => item.sectionNumber === partNumber);
+          return { ...rawSection, ...part, audioUrl: part?.audioUrl || (partNumber === 1 ? rawSection?.audioUrl : '') };
+        })()
+      : rawSection;
   const currentSectionTitle = currentSectionId ? `${currentSectionId[0].toUpperCase()}${currentSectionId.slice(1)}` : '';
+  const readingLayout = currentSectionId === 'reading';
   const unansweredQuestions = ((test.questions || []) as Array<{ id: string }>).reduce<number[]>((unanswered, question, index) => {
       const answer = answers[question.id];
       if (answer == null || answer.trim() === '') unanswered.push(index + 1);
@@ -978,7 +1659,7 @@ const ExamInterface = ({ test, onComplete }) => {
         <div className="max-w-6xl mx-auto px-4 sm:px-8 py-3 flex items-center justify-between">
           <div className="text-left">
             <h2 className="font-bold text-lg text-slate-800 dark:text-white line-clamp-1">{test.title}</h2>
-            <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{test.type} {test.category}</div>
+            <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{test.type} {test.category}{currentSectionId ? ` • ${currentSectionTitle}${currentSectionId === 'listening' ? ` ${currentQuestion?.listeningSectionNumber || 1}` : currentSectionId === 'reading' ? ` ${currentQuestion?.passageNumber || 1}` : ''}` : ''}</div>
           </div>
           <div className={`flex items-center gap-2 px-4 py-2 rounded-lg font-mono text-xl font-bold transition-colors ${isWarningTime ? 'bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 animate-pulse' : 'bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-white'}`}>
             <Clock className="w-5 h-5" />
@@ -993,10 +1674,10 @@ const ExamInterface = ({ test, onComplete }) => {
       </div>
 
       <main className="flex-grow max-w-6xl w-full mx-auto p-4 sm:p-8 text-left">
-        <div className="space-y-6 text-left">
+        <div className={readingLayout ? 'grid grid-cols-1 lg:grid-cols-2 gap-6 items-start text-left' : 'space-y-6 text-left'}>
           
           {test.description && (
-            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-5 sm:p-8 text-left transition-colors">
+            <div className="lg:col-span-2 bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-5 sm:p-8 text-left transition-colors">
                <h3 className="font-bold text-slate-800 dark:text-white mb-2 border-b border-slate-100 dark:border-slate-700 pb-2">Instructions / Reading Material</h3>
                <p className="whitespace-pre-wrap text-slate-700 dark:text-slate-300 leading-relaxed text-sm text-left">{test.description}</p>
             </div>
@@ -1004,7 +1685,7 @@ const ExamInterface = ({ test, onComplete }) => {
 
           {currentSection && (
             <section className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-purple-200 dark:border-purple-800 p-5 sm:p-8 text-left">
-              <h3 className="font-bold text-slate-800 dark:text-white mb-3">IELTS {currentSectionTitle}</h3>
+              <h3 className="font-bold text-slate-800 dark:text-white mb-3">IELTS {currentSectionTitle}{currentSection.title ? ` — ${currentSection.title}` : ''}</h3>
               {currentSection.instructions && <p className="whitespace-pre-wrap text-slate-700 dark:text-slate-300 leading-relaxed mb-4">{currentSection.instructions}</p>}
               {currentSection.passage && <div className="whitespace-pre-wrap text-slate-700 dark:text-slate-300 leading-relaxed border-t border-slate-100 dark:border-slate-700 pt-4">{currentSection.passage}</div>}
               {currentSection.audioUrl && (
@@ -1023,7 +1704,11 @@ const ExamInterface = ({ test, onComplete }) => {
                   {currentQuestionIndex + 1}
                 </div>
                 <div className="flex-grow min-w-0 space-y-4 text-left w-full overflow-hidden">
-                  
+                  <div className="flex justify-end">
+                    <button onClick={() => toggleFlag(currentQuestionIndex)} aria-pressed={flaggedQuestions.includes(currentQuestionIndex)} className={`px-3 py-1.5 rounded-lg border text-sm font-medium ${flaggedQuestions.includes(currentQuestionIndex) ? 'bg-amber-100 border-amber-400 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200' : 'border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300'}`}>
+                      {flaggedQuestions.includes(currentQuestionIndex) ? 'Flagged for review' : 'Flag for review'}
+                    </button>
+                  </div>
                   <p className="text-lg text-slate-800 dark:text-white font-medium leading-relaxed whitespace-pre-wrap text-left w-full block">
                     {currentQuestion.text}
                   </p>
@@ -1054,9 +1739,25 @@ const ExamInterface = ({ test, onComplete }) => {
                     </div>
                   )}
 
+                  {currentQuestion.type === 'select' && getSelectOptions(currentQuestion).length > 0 && (
+                    <div className="mt-4 text-left w-full">
+                      <label htmlFor={`answer-${currentQuestion.id}`} className="block font-medium text-slate-700 dark:text-slate-200 mb-2">Choose an answer</label>
+                      <select id={`answer-${currentQuestion.id}`} value={answers[currentQuestion.id] || ''} onChange={event => handleAnswerChange(currentQuestion.id, event.target.value)} className="w-full p-3 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white rounded-lg">
+                        <option value="">Select…</option>
+                        {getSelectOptions(currentQuestion).map(option => <option key={String(option)} value={String(option)}>{String(option)}</option>)}
+                      </select>
+                    </div>
+                  )}
+
                   {currentQuestion.type === 'text' && (
                     <div className="mt-4 text-left w-full">
-                      <textarea rows="6" placeholder="Type your answer here..." value={answers[currentQuestion.id] || ''} onChange={(e) => handleAnswerChange(currentQuestion.id, e.target.value)} className="w-full p-4 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-y transition-all text-left"></textarea>
+                      <textarea rows={6} placeholder="Type your answer here..." value={answers[currentQuestion.id] || ''} onChange={(e) => handleAnswerChange(currentQuestion.id, e.target.value)} className="w-full p-4 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-y transition-all text-left"></textarea>
+                    </div>
+                  )}
+                  {currentQuestion.type === 'number' && (
+                    <div className="mt-4 text-left w-full">
+                      <label htmlFor={`answer-${currentQuestion.id}`} className="block font-medium text-slate-700 dark:text-slate-200 mb-2">Enter a number</label>
+                      <input id={`answer-${currentQuestion.id}`} type="number" value={answers[currentQuestion.id] || ''} onChange={event => handleAnswerChange(currentQuestion.id, event.target.value)} className="w-full p-4 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white rounded-lg" />
                     </div>
                   )}
                 </div>
@@ -1065,22 +1766,17 @@ const ExamInterface = ({ test, onComplete }) => {
           )}
 
           {test.questions && test.questions.length > 0 && (
-            <div className="flex justify-between items-center bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 transition-colors">
-              <button onClick={() => setCurrentQuestionIndex(prev => Math.max(0, prev - 1))} disabled={currentQuestionIndex === 0} className="px-5 py-2.5 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-white font-medium rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-                ← Previous
-              </button>
-              <span className="text-slate-500 dark:text-slate-400 font-medium text-sm">
-                Question {currentQuestionIndex + 1} of {test.questions.length}
-              </span>
-              {currentQuestionIndex === test.questions.length - 1 ? (
-                <button onClick={handleManualSubmit} disabled={isSubmitting} className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition-colors disabled:opacity-70">
-                  Submit Final Answers
-                </button>
-              ) : (
-                <button onClick={() => setCurrentQuestionIndex(prev => Math.min(test.questions.length - 1, prev + 1))} className="px-5 py-2.5 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-white font-medium rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">
-                  Next →
-                </button>
-              )}
+            <div className="lg:col-span-2 bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 transition-colors">
+              <div className="flex flex-wrap gap-2 mb-4" aria-label="Question navigation">
+                {test.questions.map((question, index) => <button key={question.id} onClick={() => setCurrentQuestionIndex(index)} aria-current={index === currentQuestionIndex ? 'step' : undefined} aria-label={`Question ${index + 1}${isAnswered(question) ? ', answered' : ', unanswered'}${flaggedQuestions.includes(index) ? ', flagged for review' : ''}`} className={`w-10 h-10 rounded-lg border text-sm font-semibold ${index === currentQuestionIndex ? 'ring-2 ring-blue-500 border-blue-500' : ''} ${flaggedQuestions.includes(index) ? 'bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-900/40 dark:text-amber-100' : isAnswered(question) ? 'bg-green-100 text-green-800 border-green-300 dark:bg-green-900/30 dark:text-green-200' : 'bg-slate-50 text-slate-600 border-slate-300 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-600'}`}>
+                  {index + 1}
+                </button>)}
+              </div>
+              <div className="flex justify-between items-center gap-3">
+                <button onClick={() => setCurrentQuestionIndex(prev => Math.max(0, prev - 1))} disabled={currentQuestionIndex === 0} className="px-5 py-2.5 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-white font-medium rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">← Previous</button>
+                <span className="text-slate-500 dark:text-slate-400 font-medium text-sm">Question {currentQuestionIndex + 1} of {test.questions.length} • {test.questions.filter(isAnswered).length} answered • {flaggedQuestions.length} flagged</span>
+                {currentQuestionIndex === test.questions.length - 1 ? <button onClick={handleManualSubmit} disabled={isSubmitting} className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition-colors disabled:opacity-70">Submit Final Answers</button> : <button onClick={() => setCurrentQuestionIndex(prev => Math.min(test.questions.length - 1, prev + 1))} className="px-5 py-2.5 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-white font-medium rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">Next →</button>}
+              </div>
             </div>
           )}
 
@@ -1118,12 +1814,12 @@ const ExamInterface = ({ test, onComplete }) => {
 };
 
 export default function App() {
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState<any>(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
-  const [tests, setTests] = useState([]);
-  const [results, setResults] = useState([]);
+  const [tests, setTests] = useState<any[]>([]);
+  const [results, setResults] = useState<any[]>([]);
   const [currentView, setCurrentView] = useState('loading');
-  const [activeTest, setActiveTest] = useState(null);
+  const [activeTest, setActiveTest] = useState<any>(null);
   const [modalInfo, setModalInfo] = useState({ isOpen: false, title: '', message: '' });
   
   const [isDark, setIsDark] = useState(false);
@@ -1154,7 +1850,15 @@ export default function App() {
             const role = await resolveAccountRole(profileRef, firebaseUser, profileData.role);
             const userData = { uid: firebaseUser.uid, ...profileData, role, email: firebaseUser.email };
             setUser(userData);
-            setCurrentView(role === 'teacher' ? 'teacher_dashboard' : 'student_dashboard');
+            let savedExam = null;
+            try { savedExam = JSON.parse(localStorage.getItem(`activeExam:${firebaseUser.uid}`) || 'null'); } catch { savedExam = null; }
+            if (role === 'student' && savedExam?.questions?.length) {
+              setActiveTest(savedExam);
+              setCurrentView('exam');
+            } else {
+              setActiveTest(null);
+              setCurrentView(role === 'teacher' ? 'teacher_dashboard' : 'student_dashboard');
+            }
           } else {
             setUser(null);
             setCurrentView('login');
@@ -1184,8 +1888,8 @@ export default function App() {
                 : ['all'])
             );
     const unsubTests = onSnapshot(testsQuery, (snapshot) => {
-      const testsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      testsData.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      const testsData: any[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      testsData.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       setTests(testsData);
     }, err => console.error(err));
 
@@ -1193,8 +1897,8 @@ export default function App() {
     if (user.role === 'student') {
       const resultsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'results');
       unsubResults = onSnapshot(resultsRef, (snapshot) => {
-        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        data.sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt));
+        const data: any[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        data.sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
         setResults(data);
       }, err => console.error(err));
     }
@@ -1250,6 +1954,14 @@ export default function App() {
   };
 
   const handleLogout = async () => {
+    if (user?.uid) {
+      try {
+        if (activeTest?.id) localStorage.removeItem(`examAttempt:${user.uid}:${activeTest.id}`);
+        localStorage.removeItem(`activeExam:${user.uid}`);
+      } catch (error) {
+        console.warn('Could not clear the saved exam attempt:', error);
+      }
+    }
     if (auth) {
       await signOut(auth);
     }
@@ -1264,6 +1976,7 @@ export default function App() {
       setModalInfo({ isOpen: true, title: 'Exam not available', message: 'This exam is assigned to a different student group.' });
       return;
     }
+    try { localStorage.setItem(`activeExam:${user.uid}`, JSON.stringify(test)); } catch (error) { console.warn('Could not save the active assessment snapshot:', error); }
     setActiveTest(test);
     setCurrentView('exam');
   };
@@ -1280,6 +1993,12 @@ export default function App() {
     try {
       const resultsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'results');
       await addDoc(resultsRef, resultData);
+      try {
+        localStorage.removeItem(`examAttempt:${user.uid}:${activeTest?.id}`);
+        localStorage.removeItem(`activeExam:${user.uid}`);
+      } catch (error) {
+        console.warn('Could not clear the completed exam attempt:', error);
+      }
       setActiveTest(null);
       setCurrentView('student_dashboard');
       setModalInfo({ 
@@ -1317,7 +2036,7 @@ export default function App() {
       {currentView === 'login' && <LoginScreen onAuthAction={handleAuthAction} />}
       {currentView === 'teacher_dashboard' && <TeacherDashboard user={user} tests={tests} onLogout={handleLogout} />}
       {currentView === 'student_dashboard' && <StudentDashboard user={user} tests={tests} results={results} onStartTest={startTest} onSaveGroupCode={saveStudentGroupCode} onLogout={handleLogout} />}
-      {currentView === 'exam' && activeTest && <ExamInterface test={activeTest} onComplete={completeTest} />}
+      {currentView === 'exam' && activeTest && user && <ExamInterface key={`${user.uid}:${activeTest.id}`} test={activeTest} user={user} onComplete={completeTest} />}
 
       <Modal isOpen={modalInfo.isOpen} title={modalInfo.title} onClose={() => setModalInfo(prev => ({ ...prev, isOpen: false }))}>
         <p className="whitespace-pre-wrap text-left">{modalInfo.message}</p>
