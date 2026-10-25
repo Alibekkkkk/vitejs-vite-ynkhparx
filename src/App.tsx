@@ -1032,8 +1032,17 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
         ? `Published “${testToSave.title}” for group ${testToSave.groupCode} (assessment ID ${testRef.id}). It is visible to that group.`
         : `Saved “${testToSave.title}” as a draft. Assessment ID: ${testRef.id}`);
     } catch (err) {
-      console.error(err);
-      alert("Failed to save test.");
+      const firebaseError = err as { code?: string; message?: string };
+      console.error('Failed to save assessment to Firestore:', err);
+      const code = firebaseError?.code || 'unknown';
+      const guidance = code === 'permission-denied'
+        ? 'Firestore denied the write. Publish the latest firestore.rules, and confirm you are signed in with one of the four approved Google teacher accounts.'
+        : code === 'unauthenticated'
+          ? 'Your sign-in session expired. Sign out, sign in again with an approved Google teacher account, and retry.'
+          : code === 'resource-exhausted'
+            ? 'Firestore rejected the document because it exceeded a storage or quota limit. Try reducing large images or imported content.'
+            : firebaseError?.message || 'Check your connection and the browser console for the Firestore error.';
+      alert(`Could not save the assessment (${code}). ${guidance}`);
     }
     setIsSubmitting(false);
   };
