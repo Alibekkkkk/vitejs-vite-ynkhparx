@@ -7,7 +7,7 @@ import {
 
 import { initializeApp } from "firebase/app";
 import { getAI, getGenerativeModel, GoogleAIBackend } from 'firebase/ai';
-import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check';
+import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check';
 import { 
   getAuth, 
   onAuthStateChanged, 
@@ -18,10 +18,9 @@ import {
   signInWithPopup
 } from "firebase/auth";
 import { 
-  getFirestore, doc, getDoc, setDoc, addDoc, collection, onSnapshot, 
-  serverTimestamp, updateDoc, query, where, orderBy, limit, writeBatch
+  getFirestore, doc, getDoc, getDocs, setDoc, addDoc, collection, collectionGroup, onSnapshot,
+  serverTimestamp, updateDoc, query, where, orderBy, limit, writeBatch, startAfter
 } from "firebase/firestore";
-import { getFunctions, httpsCallable } from 'firebase/functions';
 import {
   gradeQuestion,
   normalizeQuestion,
@@ -45,28 +44,41 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-const appCheckSiteKey = import.meta.env.VITE_RECAPTCHA_ENTERPRISE_SITE_KEY || '';
+const appCheckSiteKey = import.meta.env.VITE_RECAPTCHA_V3_SITE_KEY || '';
 if (import.meta.env.DEV && import.meta.env.VITE_FIREBASE_APPCHECK_DEBUG_TOKEN === 'true') {
   (self as typeof self & { FIREBASE_APPCHECK_DEBUG_TOKEN: boolean }).FIREBASE_APPCHECK_DEBUG_TOKEN = true;
 }
 if (appCheckSiteKey) {
   initializeAppCheck(app, {
-    provider: new ReCaptchaEnterpriseProvider(appCheckSiteKey),
+    provider: new ReCaptchaV3Provider(appCheckSiteKey),
     isTokenAutoRefreshEnabled: true,
   });
 }
 const auth = getAuth(app);
 const db = getFirestore(app);
-const functions = getFunctions(app);
 const writingAI = getGenerativeModel(getAI(app, { backend: new GoogleAIBackend() }), {
   model: 'gemini-3.8-flash',
   generationConfig: { maxOutputTokens: 220, temperature: 0.3 },
 });
 const appId = "exam-portal-71a9b";
-const SAMPLE_BANKS = Object.entries(import.meta.glob('../sample-data/*.json', { eager: true, import: 'default' }))
-  .map(([path, value]: [string, any]) => ({ file: path.split('/').pop() || 'sample.json', bank: parseQuestionBank(value) }));
+const SAMPLE_BANKS = [
+  { file: 'ielts-academic-reading-full.json', title: 'IELTS Academic Reading — Full-Length Original Practice', type: 'IELTS', questionCount: 40, durationSeconds: 3600, passageCount: 3, description: 'Three original passages; exactly 40 questions; 60 minutes.' },
+  { file: 'ielts-general-reading-full.json', title: 'IELTS General Training Reading — Full-Length Original Practice', type: 'IELTS', questionCount: 40, durationSeconds: 3600, passageCount: 3, description: 'Three original texts; exactly 40 questions; 60 minutes.' },
+  { file: 'ielts-listening-full.json', title: 'IELTS Listening — Full-Length Original Practice (recordings required)', type: 'IELTS', questionCount: 40, durationSeconds: 1800, listeningSections: 4, description: 'Four original scripts and 40 questions; upload and verify four real recordings before publishing.' },
+  { file: 'ielts-reading-pilot.json', title: 'IELTS Reading Pilot', type: 'IELTS', questionCount: 5, durationSeconds: 2400, passageCount: 3, description: 'Short illustrative pilot; not a full-length test.' },
+  { file: 'ielts-listening-pilot.json', title: 'IELTS Listening Pilot', type: 'IELTS', questionCount: 5, durationSeconds: 1800, listeningSections: 4, description: 'Short pilot scripts; actual recordings must be added and verified before use.' },
+  { file: 'ielts-writing-pilot.json', title: 'IELTS Writing Pilot', type: 'IELTS', questionCount: 2, durationSeconds: 3600, description: 'Short illustrative writing pilot.' },
+  { file: 'ielts-academic-writing-full.json', title: 'IELTS Academic Writing — Full Practice Session', type: 'IELTS', questionCount: 2, durationSeconds: 3600, description: 'Original Task 1 and Task 2 prompts; 60 minutes total.' },
+  { file: 'ielts-general-writing-full.json', title: 'IELTS General Training Writing — Full Practice Session', type: 'IELTS', questionCount: 2, durationSeconds: 3600, description: 'Original letter and essay tasks; 60 minutes total.' },
+  { file: 'ielts-speaking-practice.json', title: 'IELTS Speaking Practice', type: 'IELTS', questionCount: 7, durationSeconds: 900, description: 'Original prompts for Parts 1, 2, and 3.' },
+  { file: 'sat-reading-writing-pilot.json', title: 'SAT Reading and Writing Pilot', type: 'SAT', questionCount: 2, durationSeconds: 900, description: 'Short illustrative pilot; not a full-length section.' },
+  { file: 'sat-reading-writing-full.json', title: 'Digital SAT Reading and Writing — Full-Length Original Practice', type: 'SAT', questionCount: 54, durationSeconds: 3840, description: '54 original questions in two 27-question modules; 64 minutes total.' },
+  { file: 'sat-math-pilot.json', title: 'SAT Math Pilot', type: 'SAT', questionCount: 2, durationSeconds: 900, description: 'Short illustrative pilot; not a full-length section.' },
+  { file: 'sat-math-full.json', title: 'Digital SAT Math — Full-Length Original Practice', type: 'SAT', questionCount: 44, durationSeconds: 4200, description: '44 questions in two 22-question modules; 70 minutes total.' },
+  { file: 'nuet-regression-pilot.json', title: 'NUET Regression Pilot', type: 'NUET', questionCount: 2, durationSeconds: 1800, description: 'Small regression fixture for the existing NUET engine.' },
+];
 
-const authorizedTeacherEmails = (import.meta.env.VITE_TEACHER_EMAILS || '')
+const authorizedTeacherEmails = (import.meta.env.VITE_TEACHER_EMAILS || 'alibek.alpysbayev@gmail.com,alibek.alpysbayev@nu.edu.kz,aalpysbayev2@gmail.com,nurbakyt.zholaman@nu.edu.kz')
   .split(',')
   .map((email) => email.trim().toLowerCase())
   .filter(Boolean);
@@ -285,17 +297,17 @@ type AssessmentRecord = {
   groupCode?: string;
   questions?: AssessmentQuestion[];
   sections?: {
-    listening?: { instructions?: string; audioUrl?: string; parts?: Array<{ sectionNumber: number; instructions?: string; audioUrl?: string }> };
+    listening?: { instructions?: string; audioUrl?: string; audioVerified?: boolean; parts?: Array<{ sectionNumber: number; instructions?: string; audioUrl?: string; audioVerified?: boolean }> };
     reading?: { instructions?: string; passage?: string; passages?: Array<{ passageNumber: number; title?: string; content?: string }> };
     writing?: { instructions?: string };
   };
 };
 
 const SAT_SKILLS: Record<string, string[]> = {
-  'Information and Ideas': ['Central Ideas and Details', 'Inferences', 'Command of Evidence', 'Command of Evidence: Textual', 'Command of Evidence: Quantitative'],
-  'Craft and Structure': ['Words in Context', 'Text Structure and Purpose', 'Cross-Text Connections'],
-  'Expression of Ideas': ['Rhetorical Synthesis', 'Transitions'],
-  'Standard English Conventions': ['Boundaries', 'Form, Structure, and Sense'],
+  'Information and Ideas': ['Central ideas, details, and quantitative evidence', 'Central Ideas and Details', 'Inferences', 'Command of Evidence', 'Command of Evidence: Textual', 'Command of Evidence: Quantitative'],
+  'Craft and Structure': ['Words in context and text structure', 'Words in Context', 'Text Structure and Purpose', 'Cross-Text Connections'],
+  'Expression of Ideas': ['Transitions and rhetorical synthesis', 'Rhetorical Synthesis', 'Transitions'],
+  'Standard English Conventions': ['Boundaries, form, and sentence structure', 'Boundaries', 'Form, Structure, and Sense'],
   Algebra: ['Linear equations', 'Linear inequalities', 'Systems of linear equations', 'Linear functions', 'Linear equations in one variable', 'Linear equations in two variables', 'Systems of two linear equations in two variables', 'Linear inequalities in one or two variables'],
   'Advanced Math': ['Equivalent expressions', 'Nonlinear equations', 'Nonlinear functions', 'Nonlinear equations in one variable', 'Systems of equations in two variables'],
   'Problem-Solving and Data Analysis': ['Ratios, rates, and units', 'Percentages', 'Data and statistics', 'Probability', 'Ratios, rates, proportional relationships, and units', 'One-variable data: distributions and measures of center and spread', 'Two-variable data: models and scatterplots', 'Probability and conditional probability', 'Inference from sample statistics and margin of error', 'Evaluating statistical claims: observational studies and experiments'],
@@ -326,15 +338,72 @@ const getSelectOptions = (question: AssessmentQuestion): string[] => question.op
 const getListeningAudioUrl = (test: AssessmentRecord, sectionNumber: number) => {
   const section = test?.sections?.listening;
   const part = section?.parts?.find(item => item.sectionNumber === sectionNumber);
-  return part?.audioUrl || (sectionNumber === 1 ? section?.audioUrl || '' : '');
+  if (part?.audioUrl && part.audioVerified === true) return part.audioUrl;
+  return sectionNumber === 1 && section?.audioUrl && section.audioVerified === true ? section.audioUrl : '';
 };
 
-const splitQuestionKeys = (questions: any[]) => ({
+const PRIVATE_QUESTION_FIELDS = ['correctAnswer', 'acceptedAnswers', 'correctOrder', 'explanation', 'answerKey', 'solution', 'teacherNotes', 'teacherOnlyNotes'];
+const PRIVATE_SECTION_FIELDS = ['recordingScript', 'recordingNotes', 'transcript', 'teacherInstructions'];
+
+const cloneData = (value: any) => value == null ? {} : JSON.parse(JSON.stringify(value));
+
+const extractTeacherOnlySections = (sections: any) => {
+  const listening = sections?.listening;
+  if (!listening) return {};
+  const teacherListening: any = {};
+  for (const field of PRIVATE_SECTION_FIELDS) if (listening[field] != null) teacherListening[field] = listening[field];
+  const parts = (listening.parts || []).map((part: any) => {
+    const privatePart: any = { sectionNumber: part.sectionNumber };
+    for (const field of PRIVATE_SECTION_FIELDS) if (part[field] != null) privatePart[field] = part[field];
+    return privatePart;
+  }).filter((part: any) => Object.keys(part).length > 1);
+  if (parts.length) teacherListening.parts = parts;
+  return Object.keys(teacherListening).length ? { listening: teacherListening } : {};
+};
+
+const sanitizePublicSections = (sections: any) => {
+  const visible = cloneData(sections);
+  const listening = visible.listening;
+  if (!listening) return visible;
+  for (const field of PRIVATE_SECTION_FIELDS) delete listening[field];
+  if (Array.isArray(listening.parts)) listening.parts = listening.parts.map((part: any) => {
+    const publicPart = { ...part };
+    for (const field of PRIVATE_SECTION_FIELDS) delete publicPart[field];
+    return publicPart;
+  });
+  return visible;
+};
+
+const mergeTeacherSections = (publicSections: any, teacherSections: any) => {
+  const sections = cloneData(publicSections);
+  if (!teacherSections?.listening) return sections;
+  const privateListening = teacherSections.listening;
+  sections.listening = { ...sections.listening, ...Object.fromEntries(PRIVATE_SECTION_FIELDS.filter(field => privateListening[field] != null).map(field => [field, privateListening[field]])) };
+  const privateParts = new Map((privateListening.parts || []).map((part: any) => [part.sectionNumber, part]));
+  if (Array.isArray(sections.listening.parts)) sections.listening.parts = sections.listening.parts.map((part: any) => {
+    const privatePart: any = privateParts.get(part.sectionNumber);
+    return privatePart ? { ...part, ...privatePart } : part;
+  });
+  return sections;
+};
+
+const hasPublicAnswerKeys = (questions: any[]) => questions.some(question =>
+  PRIVATE_QUESTION_FIELDS.some(field => question?.[field] != null)
+  || (question?.answerSlots || []).some((slot: any) => slot.correctAnswers != null)
+);
+
+const hasPublicTeacherScripts = (sections: any) => {
+  const listening = sections?.listening;
+  return Boolean(listening && (PRIVATE_SECTION_FIELDS.some(field => listening[field] != null)
+    || (listening.parts || []).some((part: any) => PRIVATE_SECTION_FIELDS.some(field => part[field] != null))));
+};
+
+const splitQuestionKeys = (questions: any[], sections: any) => ({
+  publicSections: sanitizePublicSections(sections),
+  teacherSections: extractTeacherOnlySections(sections),
   publicQuestions: questions.map(question => {
     const visible = { ...question };
-    delete visible.correctAnswer;
-    delete visible.acceptedAnswers;
-    delete visible.correctOrder;
+    for (const field of PRIVATE_QUESTION_FIELDS) delete visible[field];
     if (Array.isArray(question.answerSlots)) visible.answerSlots = question.answerSlots.map((slot: any) => {
       const publicSlot = { ...slot };
       delete publicSlot.correctAnswers;
@@ -348,6 +417,8 @@ const splitQuestionKeys = (questions: any[]) => ({
     acceptedAnswers: question.acceptedAnswers || [],
     answerSlots: (question.answerSlots || []).map((slot: any) => ({ id: slot.id, correctAnswers: slot.correctAnswers || [] })),
     correctOrder: question.correctOrder || [],
+    explanation: question.explanation || '',
+    ...Object.fromEntries(PRIVATE_QUESTION_FIELDS.filter(field => !['correctAnswer', 'acceptedAnswers', 'correctOrder', 'explanation'].includes(field) && question[field] != null).map(field => [field, question[field]])),
   })),
 });
 
@@ -358,6 +429,30 @@ const mergeQuestionKeys = (questions: any[], keys: any[]) => {
     return { ...question, ...key, answerSlots: (question.answerSlots || []).map((slot: any) => ({ ...slot, ...(key.answerSlots || []).find((keySlot: any) => keySlot.id === slot.id) })) };
   });
 };
+
+const createTeacherReviewRows = (questions: any[], answers: Record<string, unknown>) => questions.map((question: any) => {
+  const studentAnswer = answers?.[question.id] ?? null;
+  const grade = gradeQuestion(question, studentAnswer);
+  return {
+    questionId: question.id,
+    questionText: question.text || '',
+    section: question.section || '',
+    passageNumber: question.passageNumber || null,
+    listeningSectionNumber: question.listeningSectionNumber || null,
+    writingTaskType: question.writingTaskType || null,
+    satDomain: question.satDomain || '',
+    satSkill: question.satSkill || '',
+    responseType: resolveResponseType(question),
+    studentAnswer,
+    points: Math.max(0, Number(question.points ?? 1) || 0),
+    status: grade.status,
+    isCorrect: grade.isCorrect,
+    earnedPoints: grade.status === 'graded' ? grade.earnedPoints : null,
+    answerKey: { responseType: resolveResponseType(question), correctAnswer: question.correctAnswer ?? null, acceptedAnswers: question.acceptedAnswers || [], answerSlots: question.answerSlots || [], correctOrder: question.correctOrder || [] },
+    acceptedAnswers: question.acceptedAnswers || [],
+    explanation: question.explanation || '',
+  };
+});
 
 const getReadingPassage = (test: AssessmentRecord, passageNumber: number) => {
   const reading = test?.sections?.reading;
@@ -505,7 +600,8 @@ const TeacherReviewFields = ({ attempt, review, onSaveReview }) => {
   const [saving, setSaving] = useState(false);
   const save = async () => {
     setSaving(true);
-    try { await onSaveReview(attempt.id, review.questionId, { feedback, points: points === '' ? null : Number(points) }); }
+    if (points === '') { setSaving(false); alert('Enter the awarded points before saving this review.'); return; }
+    try { await onSaveReview(attempt.id, review.questionId, { feedback, points: Number(points) }); }
     catch (error) { alert(error instanceof Error ? error.message : 'Could not save this review.'); }
     finally { setSaving(false); }
   };
@@ -537,18 +633,38 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
   const [previewQuestionId, setPreviewQuestionId] = useState<string | null>(null);
   const [questionBankError, setQuestionBankError] = useState('');
 
-  const importSampleAsDraft = (bank: any) => {
+  const importSampleAsDraft = (bank: any, file: string) => {
+    const existingCopies = tests.filter((item: any) => item.sourceBank === file);
+    if (existingCopies.length && !window.confirm(`This sample bank was already imported as ${existingCopies.map((item: any) => item.title).join(', ')}. Create another separate draft with fresh question IDs?`)) return;
     bank = parseQuestionBank(bank);
     const sourceQuestions = Array.isArray(bank.questions) ? bank.questions : [];
     const idMap = new Map(sourceQuestions.map((question: any, index: number) => [question.id, `q_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 6)}`]));
-    const questions = sourceQuestions.map((question: any) => ({ ...question, sourceId: question.id, id: idMap.get(question.id),
+    const questions = sourceQuestions.map((question: any) => ({ ...question, id: idMap.get(question.id),
       answerSlots: question.answerSlots?.map((slot: any, index: number) => ({ ...slot, id: `${idMap.get(question.id)}_slot_${index + 1}` })) }));
     const minutes = Math.max(1, Math.round(Number(bank.durationSeconds || 1800) / 60));
-    setNewTest({ ...createEmptyTest(), ...bank, id: undefined, title: `${bank.title || 'Sample bank'} (draft)`, category: 'Practice', durationMinutes: minutes, groupCode: '', published: false, status: 'draft', questions });
+    setNewTest({ ...createEmptyTest(), ...bank, id: undefined, sourceBank: file, title: `${bank.title || 'Sample bank'} (draft)`, category: 'Practice', durationMinutes: minutes, groupCode: '', published: false, status: 'draft', questions });
     setEditingId(null);
     setActiveQuestionSection(bank.type === 'IELTS' ? 'listening' : 'general');
     setTeacherArea('assessments');
     setIsBuildingTest(true);
+  };
+
+  const loadSampleBankFile = async (event: React.ChangeEvent<HTMLInputElement>, expectedFile: string) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (file.name.toLowerCase() !== expectedFile.toLowerCase()) {
+      alert(`Please choose ${expectedFile} from the repository's sample-data folder.`);
+      return;
+    }
+    try {
+      const bank = parseQuestionBank(JSON.parse(await file.text()));
+      const descriptor = SAMPLE_BANKS.find(item => item.file === expectedFile);
+      if (descriptor && bank.type !== descriptor.type) throw new Error(`This file is not a ${descriptor.type} bank.`);
+      setSelectedSample({ file: expectedFile, bank });
+    } catch (error) {
+      alert(error instanceof Error ? `Could not load this bank: ${error.message}` : 'Could not read this question bank.');
+    }
   };
 
   const visibleSubmissions = submissions.filter((submission: any) => {
@@ -562,6 +678,23 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
       && (!resultType || submission.examType === resultType)
       && (!resultStatus || submission.reviewStatus === resultStatus)
       && (!resultFrom || day >= resultFrom) && (!resultTo || day <= resultTo);
+  }).map((submission: any) => {
+    const sourceAssessmentIds = submission.assessmentIds?.length ? submission.assessmentIds : [submission.assessmentId];
+    const sourceAssessments = sourceAssessmentIds.map((id: string) => tests.find((item: any) => item.id === id)).filter(Boolean);
+    const sourceQuestions = sourceAssessments.flatMap((assessment: any) => assessment.questions || []);
+    const questionsById = new Map(sourceQuestions.map((question: any) => [question.id, question]));
+    return {
+      ...submission,
+      questionReviews: (submission.questionReviews?.length ? submission.questionReviews : createTeacherReviewRows(sourceQuestions, submission.answers || {})).map((review: any) => {
+        const question: any = questionsById.get(review.questionId);
+        return question ? {
+          ...review,
+          points: Math.max(0, Number(question.points ?? 1) || 0),
+          answerKey: { responseType: resolveResponseType(question), correctAnswer: question.correctAnswer ?? null, acceptedAnswers: question.acceptedAnswers || [], answerSlots: question.answerSlots || [], correctOrder: question.correctOrder || [] },
+          explanation: question.explanation || '',
+        } : review;
+      }),
+    };
   });
 
   const exportSubmissionsCsv = () => {
@@ -866,13 +999,19 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
         const sectionsMissingAudio = [...new Set<number>(listeningQuestions.map((question: any) => Number(question.listeningSectionNumber || 1)))].filter(sectionNumber => !getListeningAudioUrl(testToSave, sectionNumber));
         if (sectionsMissingAudio.length) {
           setIsSubmitting(false);
-          alert(`This assessment cannot be published yet. Add valid audio for Listening section${sectionsMissingAudio.length > 1 ? 's' : ''} ${sectionsMissingAudio.join(', ')}.`);
+          alert(`This assessment cannot be published yet. Add a browser-playable recording for Listening section${sectionsMissingAudio.length > 1 ? 's' : ''} ${sectionsMissingAudio.join(', ')}, test playback, and mark each recording verified.`);
           return;
         }
       }
 
-      const { publicQuestions, answerKeyQuestions } = splitQuestionKeys(testToSave.questions);
+      if (testToSave.groupCode && !window.confirm(`Publish “${testToSave.title}” to student group “${testToSave.groupCode}” now? Students in that group will be able to see it.`)) {
+        setIsSubmitting(false);
+        return;
+      }
+
+      const { publicQuestions, answerKeyQuestions, publicSections, teacherSections } = splitQuestionKeys(testToSave.questions, testToSave.sections);
       testToSave.questions = publicQuestions;
+      testToSave.sections = publicSections;
       testToSave.answerKeysSecured = true;
       testToSave.answerKeyVersion = 1;
       if (editingId) testToSave.updatedAt = new Date().toISOString();
@@ -881,7 +1020,7 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
       const testRef = editingId ? doc(db, 'artifacts', appId, 'public', 'data', 'tests', editingId) : doc(testCollection);
       const answerKeyRef = doc(db, 'artifacts', appId, 'teacher', 'data', 'answerKeys', testRef.id);
       const batch = writeBatch(db);
-      batch.set(answerKeyRef, { assessmentId: testRef.id, questions: answerKeyQuestions, updatedAt: serverTimestamp() });
+      batch.set(answerKeyRef, { assessmentId: testRef.id, questions: answerKeyQuestions, teacherSections, updatedAt: serverTimestamp() });
       batch.set(testRef, testToSave);
       await batch.commit();
       
@@ -889,6 +1028,9 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
       setEditingId(null);
       setNewTest(createEmptyTest());
       setActiveQuestionSection('listening');
+      alert(testToSave.groupCode
+        ? `Published “${testToSave.title}” for group ${testToSave.groupCode} (assessment ID ${testRef.id}). It is visible to that group.`
+        : `Saved “${testToSave.title}” as a draft. Assessment ID: ${testRef.id}`);
     } catch (err) {
       console.error(err);
       alert("Failed to save test.");
@@ -896,17 +1038,25 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
     setIsSubmitting(false);
   };
 
-  const deleteTest = async (testId) => {
-    if(!window.confirm("Delete this assessment permanently?")) return;
+  const archiveTest = async (testId) => {
+    if(!window.confirm("Archive this assessment? It will be hidden from students, while the answer key and historical results are preserved.")) return;
     try {
-      const batch = writeBatch(db);
-      batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'tests', testId));
-      batch.delete(doc(db, 'artifacts', appId, 'teacher', 'data', 'answerKeys', testId));
-      await batch.commit();
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tests', testId), { status: 'archived', published: false, groupCode: '', archivedAt: new Date().toISOString() });
     } catch(err) {
       console.error(err);
+      alert('Could not archive this assessment. Please check your connection and try again.');
     }
   }
+
+  const unpublishTest = async (test: any) => {
+    if (!window.confirm(`Return “${test.title}” to draft? Students will no longer see it. Existing submissions and results will be kept.`)) return;
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tests', test.id), { groupCode: '', published: false, status: 'draft', updatedAt: new Date().toISOString() });
+      alert(`“${test.title}” is now a draft. Historical submissions remain available.`);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Could not return this assessment to draft.');
+    }
+  };
 
   const handleEditTest = (test) => {
     const defaults = createEmptyTest();
@@ -988,12 +1138,40 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
             {submissionsLoading && <p role="status" className="p-4">Loading submissions…</p>}{submissionsError && <p role="alert" className="p-4 rounded bg-red-50 text-red-700">Could not load submissions: {submissionsError}</p>}
             {!submissionsLoading && !submissionsError && visibleSubmissions.length === 0 && <p className="p-8 text-center rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300">No submissions match these filters yet.</p>}
             <div className="space-y-3">{visibleSubmissions.map((attempt: any) => <details key={attempt.id} className="rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-4">
-              <summary className="cursor-pointer list-none"><div className="grid grid-cols-1 md:grid-cols-4 gap-2 items-center"><div><strong>{attempt.studentName || 'Student'}</strong><div className="text-xs text-slate-500">{attempt.studentEmail || 'Email unavailable'} · UID {attempt.studentUid}</div></div><div><strong>{attempt.assessmentTitle}</strong><div className="text-xs text-slate-500">{attempt.examType} · {attempt.assessmentId}{attempt.sectionOrSkill ? ` · ${attempt.sectionOrSkill}` : ''}</div></div><div className="text-sm">{new Date(attempt.submittedAtMs || attempt.submittedAt || 0).toLocaleString()} · Group: {attempt.groupCode || '—'}</div><div className="text-sm">{attempt.score ?? 0} / {attempt.maxAutoScore ?? 0}{attempt.percentage != null ? ` (${attempt.percentage}%)` : ''} · {attempt.reviewStatus}</div></div><div className="mt-2 text-xs text-slate-500">Answered {attempt.answeredCount ?? 0} · unanswered {attempt.unansweredCount ?? 0} · correct {attempt.correctCount ?? 0} · incorrect {attempt.incorrectCount ?? 0} · pending review {attempt.pendingReviewCount ?? 0} · {attempt.isAutoSubmitted ? 'auto-submitted' : 'submitted'}{attempt.durationSeconds ? ` · ${Math.round(attempt.durationSeconds / 60)} min` : ''}</div></summary>
-              <div className="mt-4 border-t dark:border-slate-700 pt-3 space-y-4">{(attempt.questionReviews || []).map((review: any, index: number) => <div key={review.questionId || index} className="rounded-lg bg-slate-50 dark:bg-slate-900/60 p-3"><p className="font-semibold">Q{index + 1}. {review.questionText}</p><p className="text-sm mt-1">Student response: <span className="whitespace-pre-wrap">{typeof review.studentAnswer === 'object' ? JSON.stringify(review.studentAnswer) : String(review.studentAnswer || '—')}</span></p><p className="text-sm">Status: {review.status}{review.earnedPoints != null ? ` · ${review.earnedPoints}/${review.points} pts` : ''}{review.teacherReview?.points != null ? ` · teacher awarded ${review.teacherReview.points} pts` : ''}</p><p className="text-sm">Key: {JSON.stringify(review.answerKey ?? review.correctAnswer ?? '')}{review.acceptedAnswers?.length ? ` · Accepted: ${review.acceptedAnswers.join(', ')}` : ''}</p>{review.explanation && <p className="text-sm">Explanation: {review.explanation}</p>}{review.teacherReview?.feedback && <p className="text-sm text-blue-700 dark:text-blue-300">Teacher feedback: {review.teacherReview.feedback}</p>}{review.status === 'manual-review' && <TeacherReviewFields attempt={attempt} review={review} onSaveReview={onSaveReview} />}</div>)}</div>
+              <summary className="cursor-pointer list-none"><div className="grid grid-cols-1 md:grid-cols-4 gap-2 items-center"><div><strong>{attempt.studentName || 'Student'}</strong><div className="text-xs text-slate-500">{attempt.studentEmail || 'Email unavailable'} · UID {attempt.studentUid}</div></div><div><strong>{attempt.assessmentTitle}</strong><div className="text-xs text-slate-500">{attempt.examType} · {attempt.assessmentId}{attempt.sectionOrSkill ? ` · ${attempt.sectionOrSkill}` : ''}</div></div><div className="text-sm">{new Date(attempt.submittedAtMs || attempt.submittedAt || 0).toLocaleString()} · Group: {attempt.groupCode || '—'}</div><div className="text-sm">{attempt.score == null ? 'Pending' : `${attempt.score} / ${attempt.maxPossibleScore ?? attempt.maxAutoScore ?? '—'}`} · {attempt.reviewStatus}</div></div><div className="mt-2 text-xs text-slate-500">Answered {attempt.answeredCount ?? 0} · unanswered {attempt.unansweredCount ?? 0} · correct {attempt.correctCount ?? 0} · incorrect {attempt.incorrectCount ?? 0} · pending review {attempt.pendingReviewCount ?? 0} · {attempt.isAutoSubmitted ? 'auto-submitted' : 'submitted'}{attempt.durationSeconds ? ` · ${Math.round(attempt.durationSeconds / 60)} min` : ''}</div></summary>
+              <div className="mt-4 border-t dark:border-slate-700 pt-3 space-y-4">
+                <button onClick={async () => { try { await onSaveReview(attempt.id, '__finalize__', { feedback: '', points: null }); } catch (error) { alert(error instanceof Error ? error.message : 'Could not save grading. Try again.'); } }} className="px-3 py-2 rounded bg-blue-600 text-white text-sm font-semibold">Save objective grading and results</button>
+                <p className="text-xs text-slate-500">Uses the saved teacher-only answer key. Written responses remain pending until you review them.</p>
+                {(attempt.questionReviews || []).map((review: any, index: number) => <div key={review.questionId || index} className="rounded-lg bg-slate-50 dark:bg-slate-900/60 p-3"><p className="font-semibold">Q{index + 1}. {review.questionText}</p><p className="text-sm mt-1">Student response: <span className="whitespace-pre-wrap">{typeof review.studentAnswer === 'object' ? JSON.stringify(review.studentAnswer) : String(review.studentAnswer || '—')}</span></p><p className="text-sm">Status: {review.status}{review.earnedPoints != null ? ` · ${review.earnedPoints}/${review.points} pts` : ''}{review.teacherReview?.points != null ? ` · teacher awarded ${review.teacherReview.points}/${review.points} pts` : ''}</p><p className="text-sm">Key: {JSON.stringify(review.answerKey ?? review.correctAnswer ?? '')}{review.acceptedAnswers?.length ? ` · Accepted: ${review.acceptedAnswers.join(', ')}` : ''}</p>{review.explanation && <p className="text-sm">Explanation: {review.explanation}</p>}{review.teacherReview?.feedback && <p className="text-sm text-blue-700 dark:text-blue-300">Teacher feedback: {review.teacherReview.feedback}</p>}{review.status === 'manual-review' && <TeacherReviewFields attempt={attempt} review={review} onSaveReview={onSaveReview} />}</div>)}
+              </div>
             </details>)}</div>
           </section>
         ) : !isBuildingTest && teacherArea === 'samples' ? (
-          <section className="text-left space-y-5"><div><h1 className="text-2xl font-bold text-slate-800 dark:text-white">Sample banks</h1><p className="text-slate-500 dark:text-slate-400 mt-1">Illustrative, unofficial pilot content. Import creates an unpublished draft; assign a group only after review.</p></div><div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">{SAMPLE_BANKS.map(({ file, bank }: any) => <article key={file} className="rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5"><h2 className="font-bold text-lg">{bank.title}</h2><p className="text-sm text-slate-500 mt-1">{bank.type} · {bank.questions?.length || 0} questions · v{bank.schemaVersion || bank.version || 1}</p><p className="text-sm my-3">{bank.description || 'Illustrative, unofficial practice bank.'}</p><div className="flex gap-2"><button onClick={() => setSelectedSample(selectedSample?.file === file ? null : { file, bank })} className="px-3 py-2 rounded border dark:border-slate-600">{selectedSample?.file === file ? 'Hide preview' : 'Preview'}</button><button onClick={() => importSampleAsDraft(bank)} className="px-3 py-2 rounded bg-purple-600 text-white">Import as draft</button></div>{selectedSample?.file === file && <div className="mt-4 space-y-3">{(bank.questions || []).map((question: any, index: number) => <div key={question.id || index} className="p-3 rounded-lg border dark:border-slate-600"><p className="font-medium">{index + 1}. {question.text}</p><QuestionResponse question={question} value={undefined} onChange={() => {}} preview /><p className="text-xs text-slate-500 mt-2">{question.section || question.satDomain || 'Practice'} · {resolveResponseType(question)} · {question.explanation || 'No explanation.'}</p></div>)}</div>}</article>)}</div></section>
+          <section className="text-left space-y-5">
+            <div><h1 className="text-2xl font-bold text-slate-800 dark:text-white">Sample banks</h1><p className="text-slate-500 dark:text-slate-400 mt-1">Original, unofficial practice. Preview first, then import as a draft. A bank is never published until you choose a student group and save it.</p></div>
+            <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">{SAMPLE_BANKS.map(({ file, title, type, questionCount, durationSeconds, passageCount, listeningSections, description }: any) => {
+              const imported = tests.filter((item: any) => item.sourceBank === file);
+              const bank = selectedSample?.file === file ? selectedSample.bank : null;
+              const listeningParts = bank?.sections?.listening?.parts || [];
+              const usedAudioSections: number[] = [...new Set<number>((bank?.questions || []).filter((question: any) => question.section === 'listening').map((question: any) => Number(question.listeningSectionNumber || 1)))];
+              const missingAudio = usedAudioSections.filter((number: number) => {
+                const recording = listeningParts.find((part: any) => part.sectionNumber === number);
+                return !recording?.audioUrl || recording.audioVerified !== true;
+              });
+              const passages = passageCount || bank?.sections?.reading?.passages?.length || 0;
+              const duration = Math.round(Number(durationSeconds || bank?.durationSeconds || 0) / 60);
+              return <article key={file} className="rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5">
+                <h2 className="font-bold text-lg">{title}</h2>
+                <p className="text-sm text-slate-500 mt-1">{type} · {questionCount} questions · {duration ? `${duration} min` : 'untimed'} · JSON v1</p>
+                <p className="text-sm my-3">{description}</p>
+                <p className="text-sm text-slate-600 dark:text-slate-300">{passages ? `${passages} reading passages · ` : ''}{listeningSections ? `${listeningSections} listening sections · ` : ''}{listeningSections ? missingAudio.length || !bank ? 'Draft only · local audio files must be supplied and verified.' : 'Audio metadata loaded; verify each recording before publishing.' : bank ? 'File loaded and validated; ready for teacher review.' : 'Choose the matching local JSON file to inspect this bank.'}</p>
+                {imported.length > 0 && <p className="mt-2 text-xs text-blue-700 dark:text-blue-300">Already imported: {imported.map((item: any) => item.title).join(', ')}</p>}
+                <input id={`sample-bank-${file}`} type="file" accept="application/json,.json" className="hidden" onChange={event => loadSampleBankFile(event, file)} />
+                <div className="flex flex-wrap gap-2 mt-3"><button onClick={() => document.getElementById(`sample-bank-${file}`)?.click()} className="px-3 py-2 rounded border dark:border-slate-600">{bank ? 'Choose another file' : 'Choose JSON and preview'}</button><button disabled={!bank} onClick={() => bank && importSampleAsDraft(bank, file)} className="px-3 py-2 rounded bg-purple-600 text-white disabled:opacity-50">Import as draft</button></div>
+                {bank && selectedSample?.file === file && <div className="mt-4 space-y-3 max-h-[36rem] overflow-y-auto"><h3 className="font-semibold">Preview: {bank.title}</h3>{(bank.questions || []).map((question: any, index: number) => <div key={question.id || index} className="p-3 rounded-lg border dark:border-slate-600"><p className="font-medium">{index + 1}. {question.text}</p><QuestionResponse question={question} value={undefined} onChange={() => {}} preview /><p className="text-xs text-slate-500 mt-2">{question.section || question.satDomain || 'Practice'} · {resolveResponseType(question)}</p></div>)}</div>}
+              </article>;
+            })}</div>
+          </section>
         ) : !isBuildingTest ? (
           <div>
             <div className="flex justify-between items-center mb-8">
@@ -1015,13 +1193,14 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
                     </span>
                     <div className="flex items-center gap-2">
                       {test.pin && <Lock className="w-4 h-4 text-amber-500" aria-label="PIN protected" />}
+                      {test.groupCode && <button onClick={() => unpublishTest(test)} className="text-xs px-2 py-1 rounded border border-amber-300 text-amber-700 dark:text-amber-300" title="Hide from students and preserve all results">Unpublish</button>}
                       <button onClick={() => duplicateTest(test)} className="text-slate-400 dark:text-slate-500 hover:text-purple-500 ml-2" title="Duplicate Assessment">
                         <Copy className="w-4 h-4" />
                       </button>
                       <button onClick={() => handleEditTest(test)} className="text-slate-400 dark:text-slate-500 hover:text-blue-500 ml-2" title="Edit Assessment">
                         <Edit3 className="w-4 h-4" />
                       </button>
-                      <button onClick={() => deleteTest(test.id)} className="text-slate-400 dark:text-slate-500 hover:text-red-500 ml-2" title="Delete Assessment">
+                      <button onClick={() => archiveTest(test.id)} className="text-slate-400 dark:text-slate-500 hover:text-red-500 ml-2" title="Archive assessment; preserve results">
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
@@ -1132,9 +1311,10 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
                           <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Section instructions
                             <textarea value={newTest.sections?.listening?.parts?.find(part => part.sectionNumber === activeListeningSection)?.instructions || ''} onChange={event => updateListeningPart(activeListeningSection, 'instructions', event.target.value)} rows={2} placeholder={`Instructions for Listening Section ${activeListeningSection}`} className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-purple-500" />
                           </label>
-                          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Audio URL (optional)
+                          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Audio URL
                             <input type="url" value={newTest.sections?.listening?.parts?.find(part => part.sectionNumber === activeListeningSection)?.audioUrl || ''} onChange={event => updateListeningPart(activeListeningSection, 'audioUrl', event.target.value)} placeholder="Paste a direct link to a browser-playable audio file" className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-purple-500" />
                           </label>
+                          <label className="flex items-start gap-2 text-sm text-slate-700 dark:text-slate-300"><input type="checkbox" checked={newTest.sections?.listening?.parts?.find(part => part.sectionNumber === activeListeningSection)?.audioVerified === true} onChange={event => updateListeningPart(activeListeningSection, 'audioVerified', event.target.checked)} /><span>I played this recording through and verified it matches this section.</span></label>
                         </div>
                       )}
                       {activeQuestionSection === 'reading' && (
@@ -1479,7 +1659,7 @@ const WritingPractice = ({ tests, userId, onBack }) => {
       if (!window.confirm('Your browser cannot save the AI notice preference. The selected prompt and draft will be sent to Google Gemini for optional formative feedback. Continue this request?')) return;
     }
     if (!appCheckSiteKey) {
-      setAiError('AI setup is incomplete: add the Firebase App Check reCAPTCHA Enterprise site key to VITE_RECAPTCHA_ENTERPRISE_SITE_KEY. Local phrase suggestions still work.');
+    setAiError('AI setup is incomplete: add the Firebase App Check reCAPTCHA v3 site key to VITE_RECAPTCHA_V3_SITE_KEY. Local phrase suggestions still work.');
       return;
     }
     const now = Date.now();
@@ -1594,6 +1774,107 @@ const WritingPractice = ({ tests, userId, onBack }) => {
   );
 };
 
+const SpeakingPractice = ({ bank, userId, onBack }) => {
+  const prompts = bank?.questions || [];
+  const [selectedId, setSelectedId] = useState(prompts[0]?.id || '');
+  const selected = prompts.find((item: any) => item.id === selectedId) || prompts[0];
+  const [drafts, setDrafts] = useState<Record<string, string>>(() => {
+    try { return JSON.parse(localStorage.getItem(`speakingDrafts:${userId}`) || '{}'); } catch { return {}; }
+  });
+  const [seconds, setSeconds] = useState(0);
+  const [phase, setPhase] = useState<'ready' | 'preparation' | 'speaking' | 'finished'>('ready');
+  const [recording, setRecording] = useState(false);
+  const [recordingUrl, setRecordingUrl] = useState('');
+  const recorderRef = React.useRef<MediaRecorder | null>(null);
+  const streamRef = React.useRef<MediaStream | null>(null);
+  const chunksRef = React.useRef<BlobPart[]>([]);
+  const part = Number(selected?.speakingPart || 1);
+  const responseSeconds = Number(selected?.responseSeconds || (part === 2 ? 120 : 60));
+  const preparationSeconds = Number(selected?.preparationSeconds ?? (part === 2 ? 60 : 0));
+
+  useEffect(() => {
+    try { localStorage.setItem(`speakingDrafts:${userId}`, JSON.stringify(drafts)); } catch { /* Device storage may be unavailable. */ }
+  }, [drafts, userId]);
+
+  useEffect(() => {
+    if (phase !== 'preparation' && phase !== 'speaking') return;
+    const timer = window.setInterval(() => setSeconds(previous => {
+      if (previous <= 1) {
+        window.clearInterval(timer);
+        if (phase === 'preparation') { setPhase('speaking'); return responseSeconds; }
+        if (recorderRef.current?.state === 'recording') { recorderRef.current.stop(); setRecording(false); }
+        setPhase('finished');
+        return 0;
+      }
+      return previous - 1;
+    }), 1000);
+    return () => window.clearInterval(timer);
+  }, [phase, responseSeconds]);
+
+  useEffect(() => () => {
+    if (recordingUrl) URL.revokeObjectURL(recordingUrl);
+    streamRef.current?.getTracks().forEach(track => track.stop());
+  }, [recordingUrl]);
+
+  const choosePrompt = (id: string) => { setSelectedId(id); setPhase('ready'); setSeconds(0); setRecordingUrl(''); };
+  const begin = () => {
+    setRecordingUrl('');
+    if (preparationSeconds > 0) { setPhase('preparation'); setSeconds(preparationSeconds); }
+    else { setPhase('speaking'); setSeconds(responseSeconds); }
+  };
+  const startRecording = async () => {
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      chunksRef.current = [];
+      const recorder = new MediaRecorder(stream);
+      recorderRef.current = recorder;
+      recorder.ondataavailable = event => { if (event.data.size) chunksRef.current.push(event.data); };
+      recorder.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/webm' });
+        setRecordingUrl(URL.createObjectURL(blob));
+        stream.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
+      };
+      recorder.start();
+      setRecording(true);
+    } catch {
+      alert('Microphone access was not available. You can still practise by speaking aloud and writing a short reflection.');
+    }
+  };
+  const stopRecording = () => { recorderRef.current?.stop(); setRecording(false); };
+
+  if (!selected) return <section className="space-y-4"><p>No Speaking prompts are available.</p><button onClick={onBack} className="px-3 py-2 rounded border">Back</button></section>;
+  return <section className="space-y-5 text-left">
+    <div className="flex items-center justify-between"><div><h2 className="text-xl font-bold">IELTS Speaking practice</h2><p className="text-sm text-slate-500">Original, unofficial prompts. This tool does not calculate an official speaking score.</p></div><button onClick={onBack} className="px-3 py-2 rounded-lg border dark:border-slate-600">Back</button></div>
+    <label className="block max-w-3xl text-sm font-semibold">Prompt
+      <select value={selected.id} onChange={event => choosePrompt(event.target.value)} className="mt-1 w-full p-3 rounded-lg border dark:bg-slate-700 dark:border-slate-600">
+        {prompts.map((prompt: any) => <option key={prompt.id} value={prompt.id}>Part {prompt.speakingPart}: {prompt.text.slice(0, 90)}</option>)}
+      </select>
+    </label>
+    <div className="rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5 space-y-4">
+      <p className="font-semibold whitespace-pre-wrap">Part {part} · {selected.text}</p>
+      <div className="flex items-center gap-3"><button onClick={begin} disabled={phase === 'preparation' || phase === 'speaking'} className="px-4 py-2 rounded bg-blue-600 text-white disabled:opacity-50">{phase === 'ready' ? (preparationSeconds ? `Start ${preparationSeconds}s preparation` : 'Start response timer') : phase === 'finished' ? 'Start again' : phase === 'preparation' ? 'Preparing…' : 'Speaking…'}</button><span className="font-mono text-lg" role="timer">{['preparation', 'speaking'].includes(phase) ? `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}` : '—'}</span>{phase === 'preparation' && <span className="text-sm text-slate-500">Preparation time</span>}{phase === 'speaking' && <span className="text-sm text-slate-500">Response time</span>}</div>
+      <label className="block text-sm font-medium">Speaking notes / reflection
+        <textarea value={drafts[selected.id] || ''} onChange={event => setDrafts(previous => ({ ...previous, [selected.id]: event.target.value }))} rows={5} placeholder="After speaking, note what went well and what you want to improve." className="mt-1 w-full p-3 rounded-lg border dark:bg-slate-700 dark:border-slate-600" />
+      </label>
+      <div className="flex flex-wrap items-center gap-3"><button onClick={recording ? stopRecording : startRecording} disabled={phase === 'preparation'} className="px-4 py-2 rounded border disabled:opacity-50">{recording ? 'Stop recording' : 'Record locally'}</button><span className="text-xs text-slate-500">Recording stays in this page and is not uploaded. It is cleared when you leave or refresh.</span>{recordingUrl && <audio controls src={recordingUrl} />}</div>
+      {typeof MediaRecorder === 'undefined' && <p className="text-xs text-slate-500">Audio recording is not supported by this browser; use the notes box to review your response.</p>}
+    </div>
+  </section>;
+};
+
+const IELTS_SPEAKING_BANK = { questions: [
+  { id: 'sp_p1_routine', speakingPart: 1, text: 'What is the busiest part of your usual day? Why?', responseSeconds: 45 },
+  { id: 'sp_p1_learning', speakingPart: 1, text: 'What is something you recently learned to do? How did you learn it?', responseSeconds: 45 },
+  { id: 'sp_p1_place', speakingPart: 1, text: 'Is there a place in your town where you like to spend time? What makes it pleasant?', responseSeconds: 45 },
+  { id: 'sp_p2_skill', speakingPart: 2, text: 'Describe a useful skill you learned. Say what the skill is, when and how you learned it, who helped you, and explain how you use it now.', preparationSeconds: 60, responseSeconds: 120 },
+  { id: 'sp_p3_teaching', speakingPart: 3, text: 'Should practical skills be taught at school? Explain your view with an example.', responseSeconds: 90 },
+  { id: 'sp_p3_independent', speakingPart: 3, text: 'How has online learning changed the way adults develop new skills?', responseSeconds: 90 },
+  { id: 'sp_p3_lifelong', speakingPart: 3, text: 'Why might people continue learning after they finish formal education?', responseSeconds: 90 },
+] };
+
 const PracticeHub = ({ tests, user, onStartTest }) => {
   const [subject, setSubject] = useState('');
   const [sourceId, setSourceId] = useState('');
@@ -1605,9 +1886,19 @@ const PracticeHub = ({ tests, user, onStartTest }) => {
   const [satSkill, setSatSkill] = useState('');
   const [satDifficulty, setSatDifficulty] = useState('all');
   const [satQuestionCount, setSatQuestionCount] = useState('all');
+  const [satMode, setSatMode] = useState('skill');
+  const [satFullTestId, setSatFullTestId] = useState('');
 
   const ieltsTests = tests.filter(test => test.type === 'IELTS' && (test.questions || []).length > 0);
   const satTests = tests.filter(test => test.type === 'SAT' && (test.questions || []).length > 0);
+  const satFullTests = satTests.filter(test => {
+    const section = test.sections?.sat?.section;
+    const count = test.questions?.length || 0;
+    const expected = section === 'reading-writing' ? 54 : section === 'math' ? 44 : 0;
+    const moduleSize = section === 'reading-writing' ? 27 : 22;
+    return expected > 0 && count === expected && test.questions?.filter(question => question.satModule === 1).length === moduleSize && test.questions?.filter(question => question.satModule === 2).length === moduleSize;
+  });
+  const selectedSatFullTest = satFullTests.find(test => test.id === satFullTestId) || satFullTests[0];
   const sourceTests = subject === 'sat' ? satTests : ieltsTests;
   const selectedTest = sourceTests.find(test => test.id === sourceId) || sourceTests[0];
 
@@ -1635,9 +1926,13 @@ const PracticeHub = ({ tests, user, onStartTest }) => {
     if (readingMode === 'passage') return (question.passageNumber || 1) === passageNumber;
     return [1, 2, 3].includes(question.passageNumber || 1);
   });
-  const readingFullReady = [1, 2, 3].every(number => getReadingPassage(selectedTest, number).trim() && readingQuestions(selectedTest).some(question => (question.passageNumber || 1) === number));
+  const readingQuestionsAll = readingQuestions(selectedTest);
+  const readingFullReady = readingQuestionsAll.length === 40
+    && [1, 2, 3].every(number => getReadingPassage(selectedTest, number).trim() && readingQuestionsAll.filter(question => (question.passageNumber || 1) === number).length > 0);
   const listeningQuestionsForMode = listeningQuestions(selectedTest).filter(question => listeningSection === 'all' || (question.listeningSectionNumber || 1) === Number(listeningSection));
-  const listeningFullReady = [1, 2, 3, 4].every(number => getListeningAudioUrl(selectedTest, number) && listeningQuestions(selectedTest).some(question => (question.listeningSectionNumber || 1) === number));
+  const allListeningQuestions = listeningQuestions(selectedTest);
+  const listeningFullReady = allListeningQuestions.length === 40
+    && [1, 2, 3, 4].every(number => getListeningAudioUrl(selectedTest, number) && allListeningQuestions.filter(question => (question.listeningSectionNumber || 1) === number).length === 10);
 
   const launchPractice = (test, questions, durationSeconds, title, practiceMetadata) => {
     if (!test || questions.length === 0) return;
@@ -1648,6 +1943,8 @@ const PracticeHub = ({ tests, user, onStartTest }) => {
     });
     onStartTest({
       ...test,
+      practiceSourceTestId: test.id,
+      practiceSourceTestIds: practiceMetadata.sourceTestIds || [test.id],
       id: `practice-${test.id}-${Date.now()}`,
       title,
       durationSeconds,
@@ -1658,6 +1955,7 @@ const PracticeHub = ({ tests, user, onStartTest }) => {
   };
 
   if (subject === 'writing') return <WritingPractice tests={ieltsTests} userId={user?.uid} onBack={() => setSubject('')} />;
+  if (subject === 'speaking') return <SpeakingPractice bank={IELTS_SPEAKING_BANK} userId={user?.uid} onBack={() => setSubject('')} />;
 
   if (!subject) {
     return (
@@ -1666,6 +1964,7 @@ const PracticeHub = ({ tests, user, onStartTest }) => {
           ['reading', 'IELTS Reading', 'Practice by question type, passage, or all three passages.'],
           ['listening', 'IELTS Listening', 'Practice one listening section or all four continuously.'],
           ['writing', 'IELTS Writing', 'Work on Task 1 or Task 2 with a checklist and optional coaching.'],
+          ['speaking', 'IELTS Speaking', 'Practise Parts 1, 2, and 3 with preparation, response timing, notes, and optional local audio recording.'],
           ['sat', 'SAT Skills', 'Practice Reading and Writing or Math by domain and skill.']
         ].map(([id, title, description]) => <button key={id} onClick={() => setSubject(id)} className="p-6 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-left hover:border-blue-400"><h3 className="font-bold text-slate-800 dark:text-white">{title}</h3><p className="text-sm text-slate-500 dark:text-slate-400 mt-2">{description}</p></button>)}
       </div>
@@ -1707,6 +2006,39 @@ const PracticeHub = ({ tests, user, onStartTest }) => {
     launchPractice(selectedTest, matching, selectedTest?.durationSeconds || 15 * 60, `${selectedTest?.title || 'SAT'} — ${satSkill}`, { kind: 'sat', domain: satDomain, skill: satSkill });
   };
 
+  const startFullSat = () => {
+    if (!selectedSatFullTest) return;
+    const section = selectedSatFullTest.sections?.sat?.section;
+    const moduleSize = section === 'reading-writing' ? 27 : 22;
+    const moduleDurationSeconds = Math.round(Number(selectedSatFullTest.durationSeconds || 0) / 2);
+    launchPractice(
+      selectedSatFullTest,
+      selectedSatFullTest.questions || [],
+      selectedSatFullTest.durationSeconds || 0,
+      `Digital SAT ${section === 'math' ? 'Math' : 'Reading and Writing'} — full-length practice`,
+      { kind: 'sat-full-length', section, moduleSize, moduleDurationSeconds, scoreNotice: 'Unofficial practice; no SAT scaled score.' },
+    );
+  };
+
+  const startCombinedSat = () => {
+    const readingWriting = satFullTests.find(test => test.sections?.sat?.section === 'reading-writing');
+    const math = satFullTests.find(test => test.sections?.sat?.section === 'math');
+    if (!readingWriting || !math) return;
+    const questions = [...readingWriting.questions, ...math.questions];
+    if (questions.length !== 98 || new Set(questions.map(question => question.id)).size !== 98) return;
+    const modulePlan = [
+      { start: 0, end: 27, durationSeconds: 32 * 60, label: 'Reading and Writing Module 1' },
+      { start: 27, end: 54, durationSeconds: 32 * 60, label: 'Reading and Writing Module 2', breakAfter: true },
+      { start: 54, end: 76, durationSeconds: 35 * 60, label: 'Math Module 1' },
+      { start: 76, end: 98, durationSeconds: 35 * 60, label: 'Math Module 2' },
+    ];
+    launchPractice(readingWriting, questions, 134 * 60, 'Digital SAT — combined full-length practice', {
+      kind: 'sat-combined', section: 'combined', modulePlan, breakSeconds: 10 * 60,
+      sourceTestIds: [readingWriting.id, math.id],
+      scoreNotice: 'Unofficial practice only. Module progression is fixed; no adaptive routing or official SAT scaled score is calculated.',
+    });
+  };
+
   const emptyBank = subject === 'reading' ? readingQuestions(selectedTest).length === 0
       : subject === 'listening' ? listeningQuestions(selectedTest).length === 0
     : subject === 'sat' ? (selectedTest?.questions || []).filter(question => question.satDomain && question.satSkill).length === 0
@@ -1733,7 +2065,7 @@ const PracticeHub = ({ tests, user, onStartTest }) => {
             {readingMode === 'passage' && <label className="block max-w-2xl text-sm font-medium text-slate-700 dark:text-slate-300">Passage<select value={passageNumber} onChange={event => setPassageNumber(Number(event.target.value))} className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white">{[1, 2, 3].map(number => <option key={number} value={number}>Passage {number}</option>)}</select></label>}
             {emptyBank && <p className="text-amber-700 dark:text-amber-300">This assessment has no tagged Reading questions yet. A teacher can add them in IELTS Reading and assign a question type and passage number.</p>}
             {readingMode === 'question-type' && !readingTypes.length && !emptyBank && <p className="text-amber-700 dark:text-amber-300">Question-type practice needs published Reading questions with a question-format tag.</p>}
-            {readingMode === 'full' && !readingFullReady && <p className="text-amber-700 dark:text-amber-300">Full Reading needs a passage and tagged questions for each of Passages 1, 2, and 3. Complete those in the assessment editor first.</p>}
+            {readingMode === 'full' && !readingFullReady && <p className="text-amber-700 dark:text-amber-300">A full Reading session is available only when this bank contains exactly 40 questions linked to all three complete passages. Current sample banks are pilots and do not meet that count.</p>}
             {readingMode !== 'full' && selectedTest && readingMode !== 'question-type' && readingQuestionsForMode.length === 0 && <p className="text-amber-700 dark:text-amber-300">No questions are tagged for Passage {passageNumber} in this assessment yet.</p>}
             <button onClick={startReading} disabled={!selectedTest || emptyBank || readingQuestionsForMode.length === 0 || (readingMode === 'question-type' && !readingType) || (readingMode === 'full' && !readingFullReady)} className="px-5 py-3 rounded-lg bg-blue-600 text-white font-semibold disabled:opacity-50">Start Reading Practice</button>
           </div>}
@@ -1742,10 +2074,19 @@ const PracticeHub = ({ tests, user, onStartTest }) => {
             {emptyBank && <p className="text-amber-700 dark:text-amber-300">This assessment has no tagged Listening questions yet. Add audio and questions to one or more Listening sections in the teacher editor.</p>}
             {selectedTest && listeningSection !== 'all' && listeningQuestionsForMode.length === 0 && <p className="text-amber-700 dark:text-amber-300">No questions are tagged for Listening Section {listeningSection} yet.</p>}
             {selectedTest && listeningSection !== 'all' && listeningQuestionsForMode.length > 0 && !getListeningAudioUrl(selectedTest, Number(listeningSection)) && <p className="text-amber-700 dark:text-amber-300">Add audio for this Listening section before starting practice.</p>}
-            {selectedTest && listeningSection === 'all' && !listeningFullReady && <p className="text-amber-700 dark:text-amber-300">Full Listening needs audio and tagged questions in all four sections. You can start a complete individual section while the rest is being prepared.</p>}
+            {selectedTest && listeningSection === 'all' && !listeningFullReady && <p className="text-amber-700 dark:text-amber-300">A full Listening session requires exactly 40 questions (10 per section) and a tested, verified recording in each section. The pilot bank is not a complete test. You can practise an individual section once its recording is verified.</p>}
             <button onClick={startListening} disabled={!selectedTest || emptyBank || listeningQuestionsForMode.length === 0 || (listeningSection === 'all' ? !listeningFullReady : !getListeningAudioUrl(selectedTest, Number(listeningSection)))} className="px-5 py-3 rounded-lg bg-blue-600 text-white font-semibold disabled:opacity-50">Start Listening Practice</button>
           </div>}
           {subject === 'sat' && <div className="space-y-4">
+            <label className="block max-w-2xl text-sm font-medium text-slate-700 dark:text-slate-300">Practice mode<select value={satMode} onChange={event => setSatMode(event.target.value)} className="mt-1 w-full p-3 rounded-lg border dark:bg-slate-700 dark:border-slate-600"><option value="skill">Practice by domain and skill</option><option value="full">Full-length section</option></select></label>
+            {satMode === 'full' ? <div className="space-y-4">
+              {satFullTests.length > 0 ? <>
+                <label className="block max-w-2xl text-sm font-medium">Full-length SAT section<select value={selectedSatFullTest?.id || ''} onChange={event => setSatFullTestId(event.target.value)} className="mt-1 w-full p-3 rounded-lg border dark:bg-slate-700 dark:border-slate-600">{satFullTests.map(test => <option key={test.id} value={test.id}>{test.title} · {test.questions?.length} questions · {Math.floor((test.durationSeconds || 0) / 60)} minutes</option>)}</select></label>
+                <p className="text-sm text-amber-700 dark:text-amber-300">Unofficial practice only. The portal does not calculate an official SAT scaled score. Module navigation locks answers from the previous module.</p>
+                <button onClick={startFullSat} disabled={!selectedSatFullTest} className="px-5 py-3 rounded-lg bg-blue-600 text-white font-semibold disabled:opacity-50">Start full-length section</button>
+                {satFullTests.some(test => test.sections?.sat?.section === 'reading-writing') && satFullTests.some(test => test.sections?.sat?.section === 'math') && <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 p-4 space-y-2"><h3 className="font-semibold text-slate-800 dark:text-white">Combined Digital SAT practice</h3><p className="text-sm text-slate-600 dark:text-slate-300">98 questions · 134 minutes of testing · optional 10-minute break after Reading and Writing. This fixed practice sequence does not reproduce adaptive routing or official scaled scoring.</p><button onClick={startCombinedSat} className="px-5 py-3 rounded-lg bg-indigo-600 text-white font-semibold">Start combined SAT practice</button></div>}
+              </> : <p className="p-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-200">No complete full-length SAT section is published for your group. The teacher must publish a 54-question Reading and Writing bank or a 44-question Math bank with 27/27 or 22/22 module tags.</p>}
+            </div> : <div className="space-y-4">
             <label className="block max-w-2xl text-sm font-medium text-slate-700 dark:text-slate-300">Domain<select value={satDomain} onChange={event => { setSatDomain(event.target.value); setSatSkill(''); }} className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white"><option value="">Choose a domain</option>{Object.keys(SAT_SKILLS).map(domain => <option key={domain} value={domain}>{domain}</option>)}</select></label>
             <label className="block max-w-2xl text-sm font-medium text-slate-700 dark:text-slate-300">Skill<select value={satSkill} onChange={event => setSatSkill(event.target.value)} disabled={!satDomain} className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white disabled:opacity-50"><option value="">Choose a skill</option>{(SAT_SKILLS[satDomain] || []).map(skill => <option key={skill} value={skill}>{skill}</option>)}</select></label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
@@ -1755,6 +2096,7 @@ const PracticeHub = ({ tests, user, onStartTest }) => {
             {emptyBank && <p className="text-amber-700 dark:text-amber-300">No SAT questions with domain and skill tags are available yet. Ask a teacher to classify SAT questions in the assessment editor.</p>}
             {!emptyBank && satDomain && satSkill && satMatchingQuestions.length === 0 && <p className="text-amber-700 dark:text-amber-300">No questions match that domain, skill, and difficulty. Choose another filter or ask a teacher to add matching content.</p>}
             <button onClick={startSat} disabled={!selectedTest || !satDomain || !satSkill || satMatchingQuestions.length === 0} className="px-5 py-3 rounded-lg bg-blue-600 text-white font-semibold disabled:opacity-50">Start SAT Skill Practice</button>
+            </div>}
           </div>}
         </>
       )}
@@ -1913,7 +2255,7 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onSaveGroupCode, 
                      <div key={idx} className="p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
                        <div className="text-left">
                          <div className="flex items-center gap-3 mb-1">
-                           <h4 className="font-semibold text-slate-800 dark:text-white">{testInfo.title}</h4>
+                           <h4 className="font-semibold text-slate-800 dark:text-white">{result.displayTitle || testInfo.title}</h4>
                            <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-600">
                              {testInfo.type}
                            </span>
@@ -1939,7 +2281,7 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onSaveGroupCode, 
                          <div className="text-center">
                            <div className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1">Your Results</div>
                            <div className="font-bold text-xl text-blue-600 dark:text-blue-400">
-                             {result.score} <span className="text-sm text-slate-400 dark:text-slate-500 font-normal">/ {result.maxPossibleScore}</span>
+                           {result.score == null ? '—' : result.score} <span className="text-sm text-slate-400 dark:text-slate-500 font-normal">/ {result.maxPossibleScore == null ? '—' : result.maxPossibleScore}</span>
                            </div>
                            {(result.manualReviewCount > 0 || result.ungradedCount > 0) && <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{result.manualReviewCount ? `${result.manualReviewCount} awaiting review` : ''}{result.manualReviewCount && result.ungradedCount ? ' · ' : ''}{result.ungradedCount ? `${result.ungradedCount} ungraded` : ''}</p>}
                          </div>
@@ -1987,7 +2329,15 @@ const ExamInterface = ({ test, user, onComplete }) => {
   });
   const [attemptId] = useState(() => initialAttempt?.attemptId || crypto.randomUUID());
   const [startedAtMs] = useState(() => initialAttempt?.startedAtMs || Date.now());
-  const [deadlineTimestamp] = useState(initialAttempt?.deadlineTimestamp || Date.now() + (Number(test.durationSeconds) || 30 * 60) * 1000);
+  const moduleSize = Number(test.practiceMetadata?.moduleSize || 0);
+  const moduleDurationSeconds = Number(test.practiceMetadata?.moduleDurationSeconds || 0);
+  const modulePlan = Array.isArray(test.practiceMetadata?.modulePlan) ? test.practiceMetadata.modulePlan : moduleSize > 0 && moduleDurationSeconds > 0
+    ? [{ start: 0, end: moduleSize, durationSeconds: moduleDurationSeconds, label: 'Module 1' }, { start: moduleSize, end: questions.length, durationSeconds: moduleDurationSeconds, label: 'Module 2' }]
+    : [];
+  const initialModule = modulePlan.find(module => initialAttempt?.currentQuestionIndex >= module.start && initialAttempt?.currentQuestionIndex < module.end) || modulePlan[0];
+  const initialDuration = initialAttempt?.isOnOptionalBreak ? Number(test.practiceMetadata?.breakSeconds || 600) : Number(initialModule?.durationSeconds || test.durationSeconds || 30 * 60);
+  const [isOnOptionalBreak, setIsOnOptionalBreak] = useState(Boolean(initialAttempt?.isOnOptionalBreak));
+  const [deadlineTimestamp, setDeadlineTimestamp] = useState(initialAttempt?.deadlineTimestamp || Date.now() + initialDuration * 1000);
   const [timeLeft, setTimeLeft] = useState(Math.max(0, Math.ceil((deadlineTimestamp - Date.now()) / 1000)));
   const [answers, setAnswers] = useState<Record<string, unknown>>(initialAttempt?.answers || {});
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -2005,11 +2355,11 @@ const ExamInterface = ({ test, user, onComplete }) => {
 
   useEffect(() => {
     try {
-      localStorage.setItem(storageKey, JSON.stringify({ attemptId, startedAtMs, answers, currentQuestionIndex, flaggedQuestions, deadlineTimestamp }));
+      localStorage.setItem(storageKey, JSON.stringify({ attemptId, startedAtMs, answers, currentQuestionIndex, flaggedQuestions, deadlineTimestamp, isOnOptionalBreak }));
     } catch (error) {
       console.warn('Could not save this attempt in local storage:', error);
     }
-  }, [attemptId, startedAtMs, answers, currentQuestionIndex, flaggedQuestions, deadlineTimestamp, storageKey]);
+  }, [attemptId, startedAtMs, answers, currentQuestionIndex, flaggedQuestions, deadlineTimestamp, isOnOptionalBreak, storageKey]);
 
   useEffect(() => {
     if (timeLeft <= 0) handleAutoSubmit();
@@ -2065,7 +2415,8 @@ const ExamInterface = ({ test, user, onComplete }) => {
     try {
       const { score, maxAutoScore, manualReviewCount, ungradedCount, questionReviews } = calculateScore();
       await onComplete({
-        testId: test.id,
+        testId: test.practiceSourceTestId || test.id,
+        assessmentIds: test.practiceSourceTestIds || [test.practiceSourceTestId || test.id],
         attemptId,
         startedAtMs,
         answers,
@@ -2092,14 +2443,73 @@ const ExamInterface = ({ test, user, onComplete }) => {
     setIsConfirmSubmitOpen(true);
   };
 
-  const handleAutoSubmit = () => submitTest(true);
+  const handleAutoSubmit = () => {
+    if (isOnOptionalBreak) {
+      const nextModule = modulePlan[2];
+      if (!nextModule) return submitTest(true);
+      setIsOnOptionalBreak(false);
+      setCurrentQuestionIndex(nextModule.start);
+      const nextDeadline = Date.now() + nextModule.durationSeconds * 1000;
+      setDeadlineTimestamp(nextDeadline);
+      setTimeLeft(nextModule.durationSeconds);
+      return;
+    }
+    const currentModuleIndex = modulePlan.findIndex(module => currentQuestionIndex >= module.start && currentQuestionIndex < module.end);
+    const currentModule = modulePlan[currentModuleIndex];
+    if (currentModule?.breakAfter && Number(test.practiceMetadata?.breakSeconds) > 0) {
+      setIsOnOptionalBreak(true);
+      const nextDeadline = Date.now() + Number(test.practiceMetadata.breakSeconds) * 1000;
+      setDeadlineTimestamp(nextDeadline);
+      setTimeLeft(Number(test.practiceMetadata.breakSeconds));
+      return;
+    }
+    const nextModule = modulePlan[currentModuleIndex + 1];
+    if (nextModule) {
+      setCurrentQuestionIndex(nextModule.start);
+      const nextDeadline = Date.now() + nextModule.durationSeconds * 1000;
+      setDeadlineTimestamp(nextDeadline);
+      setTimeLeft(nextModule.durationSeconds);
+      return;
+    }
+    submitTest(true);
+  };
+  const continueSatModule = () => {
+    const currentModuleIndex = modulePlan.findIndex(module => currentQuestionIndex >= module.start && currentQuestionIndex < module.end);
+    const nextModule = modulePlan[currentModuleIndex + 1];
+    if (!nextModule) return;
+    if (!window.confirm(`Finish ${modulePlan[currentModuleIndex].label || `Module ${currentModuleIndex + 1}`} and lock its answers? You will not be able to return.`)) return;
+    const currentModule = modulePlan[currentModuleIndex];
+    if (currentModule?.breakAfter && Number(test.practiceMetadata?.breakSeconds) > 0) {
+      setIsOnOptionalBreak(true);
+      const breakSeconds = Number(test.practiceMetadata.breakSeconds);
+      const breakDeadline = Date.now() + breakSeconds * 1000;
+      setDeadlineTimestamp(breakDeadline);
+      setTimeLeft(breakSeconds);
+      return;
+    }
+    setCurrentQuestionIndex(nextModule.start);
+    const nextDeadline = Date.now() + nextModule.durationSeconds * 1000;
+    setDeadlineTimestamp(nextDeadline);
+    setTimeLeft(nextModule.durationSeconds);
+  };
+  const skipOptionalBreak = () => {
+    const nextModule = modulePlan.find(module => module.start > currentQuestionIndex);
+    if (!nextModule) return submitTest(true);
+    setIsOnOptionalBreak(false);
+    setCurrentQuestionIndex(nextModule.start);
+    const nextDeadline = Date.now() + nextModule.durationSeconds * 1000;
+    setDeadlineTimestamp(nextDeadline);
+    setTimeLeft(nextModule.durationSeconds);
+  };
   const toggleFlag = (questionIndex) => setFlaggedQuestions(previous => previous.includes(questionIndex)
     ? previous.filter(index => index !== questionIndex)
     : [...previous, questionIndex]);
   const isAnswered = (question) => isAnswerPresent(answers[question.id]);
 
   const isWarningTime = timeLeft <= 60;
-  const currentQuestion = questions[currentQuestionIndex];
+  const currentModuleIndex = modulePlan.findIndex(module => currentQuestionIndex >= module.start && currentQuestionIndex < module.end);
+  const currentModule = modulePlan[currentModuleIndex];
+  const currentQuestion = isOnOptionalBreak ? null : questions[currentQuestionIndex];
   const currentSectionId = currentQuestion?.section;
   const rawSection = currentSectionId && currentSectionId !== 'general' ? test.sections?.[currentSectionId] : null;
   const currentSection = currentSectionId === 'reading'
@@ -2139,10 +2549,11 @@ const ExamInterface = ({ test, user, onComplete }) => {
 
       <div className="w-full bg-amber-50 dark:bg-amber-900/40 border-b border-amber-200 dark:border-amber-800 px-4 py-2 text-center text-sm text-amber-800 dark:text-amber-400 flex items-center justify-center gap-2">
         <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-        Your answers, current question, flags, and deadline are saved on this device while the attempt is active. Keep this browser profile available; the exam submits automatically when the timer runs out.
+        {modulePlan.length ? 'Your answers, flags, and module deadline are saved on this device. At each module boundary, earlier answers lock. This is unofficial practice.' : 'Your answers, current question, flags, and deadline are saved on this device while the attempt is active. Keep this browser profile available; the exam submits automatically when the timer runs out.'}
       </div>
 
       <main className="flex-grow max-w-6xl w-full mx-auto p-4 sm:p-8 text-left">
+        {isOnOptionalBreak ? <section className="max-w-2xl mx-auto mt-12 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-8 text-center space-y-4"><h2 className="text-2xl font-bold">Optional 10-minute break</h2><p className="text-slate-600 dark:text-slate-300">Reading and Writing is complete. Your Module 1 and Module 2 answers are locked. Continue when ready or skip the rest of the break.</p><button onClick={skipOptionalBreak} className="px-5 py-3 rounded-lg bg-blue-600 text-white font-bold">Continue to Math</button></section> : <div className={readingLayout ? 'grid grid-cols-1 lg:grid-cols-2 gap-6 items-start text-left' : 'space-y-6 text-left'}>
         <div className={readingLayout ? 'grid grid-cols-1 lg:grid-cols-2 gap-6 items-start text-left' : 'space-y-6 text-left'}>
           
           {test.description && (
@@ -2199,19 +2610,20 @@ const ExamInterface = ({ test, user, onComplete }) => {
           {questions.length > 0 && (
             <div className="lg:col-span-2 bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 transition-colors">
               <div className="flex flex-wrap gap-2 mb-4" aria-label="Question navigation">
-                {questions.map((question, index) => <button key={question.id} onClick={() => setCurrentQuestionIndex(index)} aria-current={index === currentQuestionIndex ? 'step' : undefined} aria-label={`Question ${index + 1}${isAnswered(question) ? ', answered' : ', unanswered'}${flaggedQuestions.includes(index) ? ', flagged for review' : ''}`} className={`w-10 h-10 rounded-lg border text-sm font-semibold ${index === currentQuestionIndex ? 'ring-2 ring-blue-500 border-blue-500' : ''} ${flaggedQuestions.includes(index) ? 'bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-900/40 dark:text-amber-100' : isAnswered(question) ? 'bg-green-100 text-green-800 border-green-300 dark:bg-green-900/30 dark:text-green-200' : 'bg-slate-50 text-slate-600 border-slate-300 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-600'}`}>
+                {questions.map((question, index) => { const questionModuleIndex = modulePlan.findIndex(module => index >= module.start && index < module.end); const locked = modulePlan.length > 0 && questionModuleIndex !== currentModuleIndex; return <button key={question.id} onClick={() => !locked && setCurrentQuestionIndex(index)} disabled={locked} aria-current={index === currentQuestionIndex ? 'step' : undefined} aria-label={`Question ${index + 1}${locked ? ', locked' : isAnswered(question) ? ', answered' : ', unanswered'}${flaggedQuestions.includes(index) ? ', flagged for review' : ''}`} className={`w-10 h-10 rounded-lg border text-sm font-semibold disabled:opacity-30 disabled:cursor-not-allowed ${index === currentQuestionIndex ? 'ring-2 ring-blue-500 border-blue-500' : ''} ${flaggedQuestions.includes(index) ? 'bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-900/40 dark:text-amber-100' : isAnswered(question) ? 'bg-green-100 text-green-800 border-green-300 dark:bg-green-900/30 dark:text-green-200' : 'bg-slate-50 text-slate-600 border-slate-300 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-600'}`}>
                   {index + 1}
-                </button>)}
+                </button>; })}
               </div>
               <div className="flex justify-between items-center gap-3">
-                <button onClick={() => setCurrentQuestionIndex(prev => Math.max(0, prev - 1))} disabled={currentQuestionIndex === 0} className="px-5 py-2.5 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-white font-medium rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">← Previous</button>
-                <span className="text-slate-500 dark:text-slate-400 font-medium text-sm">Question {currentQuestionIndex + 1} of {questions.length} • {questions.filter(isAnswered).length} answered • {flaggedQuestions.length} flagged</span>
-                {currentQuestionIndex === questions.length - 1 ? <button onClick={handleManualSubmit} disabled={isSubmitting} className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition-colors disabled:opacity-70">Submit Final Answers</button> : <button onClick={() => setCurrentQuestionIndex(prev => Math.min(questions.length - 1, prev + 1))} className="px-5 py-2.5 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-white font-medium rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">Next →</button>}
+                <button onClick={() => setCurrentQuestionIndex(prev => Math.max(currentModule?.start || 0, prev - 1))} disabled={currentQuestionIndex === 0 || Boolean(currentModule && currentQuestionIndex === currentModule.start)} className="px-5 py-2.5 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-white font-medium rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">← Previous</button>
+                <span className="text-slate-500 dark:text-slate-400 font-medium text-sm">{modulePlan.length ? `${currentModule?.label || `Module ${currentModuleIndex + 1}`} · ` : ''}Question {currentQuestionIndex + 1} of {questions.length} • {questions.filter(isAnswered).length} answered • {flaggedQuestions.length} flagged</span>
+                {currentModule && currentQuestionIndex === currentModule.end - 1 && currentModuleIndex < modulePlan.length - 1 ? <button onClick={continueSatModule} className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg">{currentModule.breakAfter ? 'Take optional break →' : `Continue to ${modulePlan[currentModuleIndex + 1].label || `Module ${currentModuleIndex + 2}`} →`}</button> : currentQuestionIndex === questions.length - 1 ? <button onClick={handleManualSubmit} disabled={isSubmitting} className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition-colors disabled:opacity-70">Submit Final Answers</button> : <button onClick={() => setCurrentQuestionIndex(prev => Math.min(currentModule ? currentModule.end - 1 : questions.length - 1, prev + 1))} className="px-5 py-2.5 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-white font-medium rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">Next →</button>}
               </div>
             </div>
           )}
 
         </div>
+        </div>}
       </main>
 
       <Modal
@@ -2318,6 +2730,7 @@ export default function App() {
           : query(
               testsRef,
               where('answerKeysSecured', '==', true),
+              where('published', '==', true),
               where('groupCode', 'in', user.groupCode
                 ? [...new Set([user.groupCode.trim().toLowerCase(), 'all'])]
                 : ['all'])
@@ -2327,7 +2740,11 @@ export default function App() {
       if (user.role === 'teacher') {
         testsData = await Promise.all(testsData.map(async test => {
           const keySnapshot = await getDoc(doc(db, 'artifacts', appId, 'teacher', 'data', 'answerKeys', test.id));
-          return keySnapshot.exists() ? { ...test, questions: mergeQuestionKeys(test.questions || [], keySnapshot.data().questions || []) } : test;
+          return keySnapshot.exists() ? {
+            ...test,
+            sections: mergeTeacherSections(test.sections, keySnapshot.data().teacherSections),
+            questions: mergeQuestionKeys(test.questions || [], keySnapshot.data().questions || []),
+          } : test;
         }));
       }
       testsData.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -2439,9 +2856,54 @@ export default function App() {
     if (!user || !db) throw new Error('You are no longer signed in.');
     try {
       const attemptId = resultData.attemptId || crypto.randomUUID();
-      const submitAttempt = httpsCallable(functions, 'submitExamAttempt');
-      const submissionResponse: any = await submitAttempt({ testId: resultData.testId, attemptId, answers: resultData.answers, isAutoSubmitted: resultData.isAutoSubmitted, startedAtMs: resultData.startedAtMs });
-      const savedResult = submissionResponse.data || {};
+      const assessment = activeTest;
+      if (!assessment) throw new Error('The assessment is no longer open.');
+      const questions = Array.isArray(assessment.questions) ? assessment.questions : [];
+      const submittedAt = new Date().toISOString();
+      const submittedAtMs = Date.now();
+      const answeredCount = questions.filter((question: any) => isAnswerPresent(resultData.answers?.[question.id])).length;
+      const result = {
+        testId: assessment.practiceSourceTestId || assessment.id,
+        attemptId,
+        answers: resultData.answers || {},
+        displayTitle: assessment.title || 'Assessment',
+        submittedAt,
+        submittedAtMs,
+        isAutoSubmitted: Boolean(resultData.isAutoSubmitted),
+        durationSeconds: Math.max(0, Math.floor((submittedAtMs - Number(resultData.startedAtMs || submittedAtMs)) / 1000)),
+        score: null,
+        maxPossibleScore: null,
+        maxAutoScore: null,
+        answeredCount,
+        unansweredCount: questions.length - answeredCount,
+        pendingReviewCount: questions.filter((question: any) => gradeQuestion(question, resultData.answers?.[question.id]).status === 'manual-review').length,
+        reviewStatus: 'pending-review',
+        gradingMode: 'teacher-review-required',
+        assessmentIds: assessment.practiceSourceTestIds || [assessment.practiceSourceTestId || assessment.id],
+        secondaryAssessmentId: (assessment.practiceSourceTestIds || [])[1] || '',
+      };
+      const centralId = `${user.uid}_${attemptId}`;
+      const submissionRef = doc(db, 'artifacts', appId, 'public', 'data', 'submissions', centralId);
+      const resultRef = doc(db, 'artifacts', appId, 'users', user.uid, 'results', attemptId);
+      const existingSubmission = await getDoc(submissionRef);
+      if (!existingSubmission.exists()) {
+        const batch = writeBatch(db);
+        batch.set(submissionRef, {
+          ...result,
+          id: centralId,
+          studentUid: user.uid,
+          studentName: user.name || 'Student',
+          studentEmail: user.email || '',
+          groupCode: user.groupCode || '',
+          assessmentId: assessment.practiceSourceTestId || assessment.id,
+          assessmentIds: assessment.practiceSourceTestIds || [assessment.practiceSourceTestId || assessment.id],
+          secondaryAssessmentId: (assessment.practiceSourceTestIds || [])[1] || '',
+          assessmentTitle: assessment.title || 'Assessment',
+          examType: assessment.type || 'General',
+        });
+        batch.set(resultRef, result);
+        await batch.commit();
+      }
       try {
         localStorage.removeItem(`examAttempt:${user.uid}:${activeTest?.id}`);
         localStorage.removeItem(`activeExam:${user.uid}`);
@@ -2452,8 +2914,8 @@ export default function App() {
       setCurrentView('student_dashboard');
       setModalInfo({ 
         isOpen: true, 
-        title: 'Task Submitted Successfully', 
-        message: `Your ${resultData.isAutoSubmitted ? 'time ran out and your ' : ''}answers have been safely submitted.\n\nYour Results: ${savedResult.score ?? '—'} / ${savedResult.maxAutoScore ?? '—'}${savedResult.pendingReviewCount ? `\n\n${savedResult.pendingReviewCount} response(s) are awaiting teacher review.` : ''}`
+        title: 'Answers submitted',
+        message: `Your ${resultData.isAutoSubmitted ? 'time ran out and your ' : ''}answers have been saved privately. A teacher must review them before a score is available.`
       });
     } catch (err) {
       console.error(err);
@@ -2462,20 +2924,110 @@ export default function App() {
   };
 
   const saveTeacherReview = async (submissionId: string, questionId: string, reviewData: { feedback: string; points: number | null }) => {
-    const review = httpsCallable(functions, 'reviewSubmission');
-    await review({ submissionId, questionId, ...reviewData });
+    const submissionRef = doc(db, 'artifacts', appId, 'public', 'data', 'submissions', submissionId);
+    const snapshot = await getDoc(submissionRef);
+    if (!snapshot.exists()) throw new Error('Submission not found.');
+    const submission = snapshot.data();
+    const sourceAssessmentIds = submission.assessmentIds?.length ? submission.assessmentIds : [submission.assessmentId];
+    const sourceAssessments = sourceAssessmentIds.map((id: string) => tests.find((item: any) => item.id === id)).filter(Boolean);
+    const trustedQuestions = sourceAssessments.flatMap((assessment: any) => assessment.questions || []);
+    if (!trustedQuestions.length) throw new Error('The saved assessment is unavailable; grading was not saved.');
+    const previousReviews = new Map<string, any>((submission.questionReviews || []).map((item: any) => [item.questionId, item]));
+    const questionReviews = createTeacherReviewRows(trustedQuestions, submission.answers || {}).map((item: any) => ({
+      ...item,
+      teacherReview: previousReviews.get(item.questionId)?.teacherReview,
+    }));
+    if (questionId !== '__finalize__') {
+      const question = questionReviews.find((item: any) => item.questionId === questionId);
+      if (!question || question.status !== 'manual-review') throw new Error('This response is not awaiting review.');
+      const questionMaximum = question.points;
+      if (reviewData.points == null) throw new Error('Enter awarded points before saving the review.');
+      if (reviewData.points < 0 || reviewData.points > questionMaximum) throw new Error('Points must be within the assessment question maximum.');
+      question.teacherReview = { feedback: reviewData.feedback.trim(), points: reviewData.points, reviewedAt: new Date().toISOString() };
+    }
+    const pendingReviewCount = questionReviews.filter((item: any) => item.status === 'manual-review' && !item.teacherReview?.reviewedAt).length;
+    const maxPossibleScore = trustedQuestions.filter((item: any) => !item.ungraded).reduce((total: number, item: any) => total + Math.max(0, Number(item.points ?? 1) || 0), 0);
+    const score = questionReviews.reduce((total: number, item: any) => {
+      if (item.status === 'graded') return total + Math.max(0, Math.min(item.points, Number(item.earnedPoints || 0)));
+      if (item.status === 'manual-review' && item.teacherReview?.reviewedAt) return total + Math.max(0, Math.min(item.points, Number(item.teacherReview.points || 0)));
+      return total;
+    }, 0);
+    const scoredRows = questionReviews.filter((item: any) => item.status === 'graded' || (item.status === 'manual-review' && item.teacherReview?.reviewedAt));
+    const correctCount = scoredRows.filter((item: any) => item.status === 'graded' ? item.isCorrect === true : Number(item.teacherReview.points) >= item.points).length;
+    const incorrectCount = scoredRows.length - correctCount;
+    const answeredCount = questionReviews.filter((item: any) => item.status !== 'unanswered').length;
+    const unansweredCount = questionReviews.length - answeredCount;
+    const reviewedAt = new Date().toISOString();
+    const ungradedCount = questionReviews.filter((item: any) => item.status === 'ungraded').length;
+    const reviewSummary = { questionReviews: questionReviews, pendingReviewCount, manualReviewCount: pendingReviewCount, ungradedCount, reviewStatus: pendingReviewCount ? 'pending-review' : 'reviewed', score, maxPossibleScore, maxAutoScore: maxPossibleScore, correctCount, incorrectCount, answeredCount, unansweredCount, reviewedAt };
+    await updateDoc(submissionRef, reviewSummary);
+    const studentResultRef = doc(db, 'artifacts', appId, 'users', submission.studentUid, 'results', submission.attemptId);
+    const studentResult = await getDoc(studentResultRef);
+    if (studentResult.exists()) await updateDoc(studentResultRef, reviewSummary);
   };
 
   const backfillLegacySubmissions = async (cursorPath: string) => {
-    const migrate = httpsCallable(functions, 'backfillLegacySubmissions');
-    const response: any = await migrate(cursorPath ? { cursorPath } : {});
-    return response.data;
+    let legacyQuery = query(collectionGroup(db, 'results'), orderBy('submittedAt', 'desc'), limit(200));
+    if (cursorPath) {
+      const cursorSnapshot = await getDoc(doc(db, cursorPath));
+      if (cursorSnapshot.exists()) legacyQuery = query(legacyQuery, startAfter(cursorSnapshot));
+    }
+    const snapshot = await getDocs(legacyQuery);
+    const batch = writeBatch(db);
+    let migrated = 0;
+    for (const legacy of snapshot.docs) {
+      const parts = legacy.ref.path.split('/');
+      if (parts[0] !== 'artifacts' || parts[1] !== appId || parts[2] !== 'users' || parts[4] !== 'results') continue;
+      const uid = parts[3];
+      const legacyData = legacy.data();
+      const id = `legacy_${uid}_${legacy.id}`;
+      const target = doc(db, 'artifacts', appId, 'public', 'data', 'submissions', id);
+      const existing = await getDoc(target);
+      if (!existing.exists()) {
+        batch.set(target, { ...legacyData, id, attemptId: legacy.id, legacyResultId: legacy.id, legacySourcePath: legacy.ref.path, studentUid: uid, studentName: legacyData.studentName || 'Student', studentEmail: '', groupCode: legacyData.groupCode || '', assessmentId: legacyData.testId || '', assessmentTitle: legacyData.displayTitle || 'Legacy result', examType: legacyData.examType || 'General', gradingMode: 'legacy-unverified' });
+        migrated++;
+      }
+    }
+    if (migrated) await batch.commit();
+    return { migrated, nextCursorPath: snapshot.size === 200 ? snapshot.docs[snapshot.docs.length - 1].ref.path : null };
   };
 
   const secureExistingAnswerKeys = async () => {
-    const migrate = httpsCallable(functions, 'secureExistingAnswerKeys');
-    const response: any = await migrate({});
-    return response.data;
+    const testsSnapshot = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'tests'));
+    let secured = 0;
+    let alreadySecured = 0;
+    for (let offset = 0; offset < testsSnapshot.docs.length; offset += 200) {
+      const batch = writeBatch(db);
+      let batchSecured = 0;
+      // Each unsecured assessment produces two writes. Keep each write batch
+      // under Firestore's 500-write limit, including the final partial batch.
+      for (const testDoc of testsSnapshot.docs.slice(offset, offset + 200)) {
+        const test = testDoc.data();
+        const keyRef = doc(db, 'artifacts', appId, 'teacher', 'data', 'answerKeys', testDoc.id);
+        const keySnapshot = await getDoc(keyRef);
+        const questions = Array.isArray(test.questions) ? test.questions : [];
+        const existingKeys = keySnapshot.exists() ? keySnapshot.data() : {};
+        if (test.answerKeysSecured === true && keySnapshot.exists() && !hasPublicAnswerKeys(questions) && !hasPublicTeacherScripts(test.sections)) {
+          alreadySecured++;
+          continue;
+        }
+        const privateSections = mergeTeacherSections(existingKeys.teacherSections, extractTeacherOnlySections(test.sections));
+        const answerKeyQuestions = Array.isArray(existingKeys.questions) && keySnapshot.exists()
+          ? existingKeys.questions
+          : questions.map((question: any) => ({ id: question.id, correctAnswer: question.correctAnswer ?? null, acceptedAnswers: question.acceptedAnswers || [], answerSlots: (question.answerSlots || []).map((slot: any) => ({ id: slot.id, correctAnswers: slot.correctAnswers || [] })), correctOrder: question.correctOrder || [], explanation: question.explanation || '', ...Object.fromEntries(PRIVATE_QUESTION_FIELDS.filter(field => !['correctAnswer', 'acceptedAnswers', 'correctOrder', 'explanation'].includes(field) && question[field] != null).map(field => [field, question[field]])) }));
+        batch.set(keyRef, { assessmentId: testDoc.id, questions: answerKeyQuestions, teacherSections: privateSections, updatedAt: serverTimestamp() });
+        batch.update(testDoc.ref, { sections: sanitizePublicSections(test.sections), questions: questions.map((question: any) => {
+          const publicQuestion = { ...question };
+          for (const field of PRIVATE_QUESTION_FIELDS) delete publicQuestion[field];
+          if (Array.isArray(publicQuestion.answerSlots)) publicQuestion.answerSlots = publicQuestion.answerSlots.map((slot: any) => { const visible = { ...slot }; delete visible.correctAnswers; return visible; });
+          return publicQuestion;
+        }), answerKeysSecured: true, answerKeyVersion: 1 });
+        secured++;
+        batchSecured++;
+      }
+      if (batchSecured) await batch.commit();
+    }
+    return { secured, alreadySecured, total: testsSnapshot.size };
   };
 
   if (loadingAuth || currentView === 'loading') {
