@@ -19,7 +19,7 @@ Vercel's free Hobby plan currently permits only personal, non-commercial use. A 
 
 ## IELTS Writing Coach (optional)
 
-The optional coach uses Firebase AI Logic with the Gemini Developer API provider. It does not use Cloud Functions, OpenAI, or an automatic paid fallback. The Gemini Developer API free tier has changeable limits; requests stop if unavailable or quota-limited, and local phrase suggestions and saved drafts remain available. AI feedback is formative, not an official IELTS score, and never replaces a student's writing automatically.
+The optional coach uses Firebase AI Logic with the Gemini Developer API provider. During Task 1 or Task 2 practice, including an IELTS writing assessment, students can use task-specific sentence starters and request contextual AI phrase options to insert at the cursor. The separate writing-practice workspace also offers focused hints and formative feedback. AI requests are user-triggered; drafts are saved locally, and local phrase suggestions remain available if AI is unavailable or quota-limited. It does not use Cloud Functions, OpenAI, or an automatic paid fallback. The Gemini Developer API free tier has changeable limits. AI feedback is formative, not an official IELTS score, and never replaces a student's writing automatically.
 
 For the coach, enable **AI Logic → Gemini Developer API** in Firebase Console and register a reCAPTCHA v3 site and secret under **App Check**. Put the public site key in `VITE_RECAPTCHA_V3_SITE_KEY`; enter the secret only in Firebase Console, never in Git or the frontend. After checking App Check metrics, enable enforcement for Firebase AI Logic. For local development, create `.env.local` beside `package.json` with:
 
