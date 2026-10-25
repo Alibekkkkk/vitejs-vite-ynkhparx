@@ -1,0 +1,31 @@
+{
+  "manifestVersion": 1,
+  "title": "Digital SAT — Combined Full-Length Original Practice",
+  "description": "Unofficial practice manifest referencing the complete original Reading and Writing and Math sections. Does not calculate an official SAT score.",
+  "unofficialPractice": true,
+  "testingDurationSeconds": 8040,
+  "optionalBreakSeconds": 600,
+  "questionCount": 98,
+  "sections": [
+    {
+      "section": "reading-writing",
+      "bankFile": "sat-reading-writing-full.json",
+      "questionCount": 54,
+      "durationSeconds": 3840,
+      "modules": [
+        { "module": 1, "questionCount": 27, "durationSeconds": 1920 },
+        { "module": 2, "questionCount": 27, "durationSeconds": 1920 }
+      ]
+    },
+    {
+      "section": "math",
+      "bankFile": "sat-math-full.json",
+      "questionCount": 44,
+      "durationSeconds": 4200,
+      "modules": [
+        { "module": 1, "questionCount": 22, "durationSeconds": 2100 },
+        { "module": 2, "questionCount": 22, "durationSeconds": 2100 }
+      ]
+    }
+  ]
+}

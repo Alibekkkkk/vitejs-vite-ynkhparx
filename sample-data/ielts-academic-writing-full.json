@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "title": "IELTS Academic Writing — Full Practice Session",
+  "description": "Original, unofficial two-task Academic Writing session. Task 1 and Task 2 can also be practised separately in the Writing workspace.",
+  "type": "IELTS",
+  "category": "Practice",
+  "durationSeconds": 3600,
+  "sections": { "writing": { "instructions": "Spend about 20 minutes on Task 1 and 40 minutes on Task 2. Both tasks are reviewed by a teacher; no official band score is produced.", "taskTiming": { "task1Seconds": 1200, "task2Seconds": 2400 } } },
+  "questions": [
+    { "id": "academic_writing_task1_full", "section": "writing", "writingTaskType": 1, "questionType": "writing-task", "responseType": "long-text", "manualReview": true, "points": 4, "taskFormat": "chart report", "minimumWords": 150, "text": "Task 1 (about 20 minutes). The table shows the percentage of weekday commuters using four ways to travel to the fictional city of Lydon in 2015 and 2025. Write a report describing the main features and making relevant comparisons.\n\nMode | 2015 | 2025\nBus | 34% | 29%\nCar | 41% | 32%\nBicycle | 8% | 17%\nWalking | 17% | 22%\n\nSummarise the information in your own words. Do not give opinions or invent causes." , "evaluationCriteria": ["Accurate overview", "Relevant comparisons", "Clear organisation", "Appropriate vocabulary and grammar"] },
+    { "id": "academic_writing_task2_full", "section": "writing", "writingTaskType": 2, "questionType": "writing-task", "responseType": "long-text", "manualReview": true, "points": 4, "taskFormat": "essay", "minimumWords": 250, "text": "Task 2 (about 40 minutes). Some people believe public libraries should focus mainly on digital services, while others think physical books and quiet study spaces remain essential. Discuss both views and give your own opinion.", "evaluationCriteria": ["Addresses both views and the task", "Develops a clear position", "Organises ideas and paragraphs", "Uses appropriate vocabulary and grammar"] }
+  ]
+}

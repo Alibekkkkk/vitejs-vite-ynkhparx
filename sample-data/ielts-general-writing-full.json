@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "title": "IELTS General Training Writing — Full Practice Session",
+  "description": "Original, unofficial two-task General Training Writing session. Task 1 and Task 2 can also be practised separately in the Writing workspace.",
+  "type": "IELTS",
+  "category": "Practice",
+  "durationSeconds": 3600,
+  "sections": { "writing": { "instructions": "Spend about 20 minutes on Task 1 and 40 minutes on Task 2. Both tasks are reviewed by a teacher; no official band score is produced.", "taskTiming": { "task1Seconds": 1200, "task2Seconds": 2400 } } },
+  "questions": [
+    { "id": "general_writing_task1_full", "section": "writing", "writingTaskType": 1, "questionType": "writing-task", "responseType": "long-text", "manualReview": true, "points": 4, "taskFormat": "letter", "minimumWords": 150, "text": "Task 1 (about 20 minutes). You recently joined a community sports centre, but the evening classes have been cancelled for several weeks. Write a letter to the centre manager. In your letter: explain which classes you attend, describe how the cancellation has affected you, and suggest what the centre could do. Use an appropriate tone and include all three points.", "evaluationCriteria": ["Covers all three bullet points", "Uses an appropriate tone", "Organises the letter clearly", "Uses accurate vocabulary and grammar"] },
+    { "id": "general_writing_task2_full", "section": "writing", "writingTaskType": 2, "questionType": "writing-task", "responseType": "long-text", "manualReview": true, "points": 4, "taskFormat": "essay", "minimumWords": 250, "text": "Task 2 (about 40 minutes). Many towns are investing in cycle lanes and pedestrian areas. Do the advantages of making town centres less dependent on cars outweigh the disadvantages? Give reasons for your answer and include examples from your knowledge or experience.", "evaluationCriteria": ["Answers the question directly", "Develops reasons and examples", "Organises ideas and paragraphs", "Uses appropriate vocabulary and grammar"] }
+  ]
+}

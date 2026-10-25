@@ -1,0 +1,839 @@
+{
+  "schemaVersion": 1,
+  "title": "IELTS Academic Reading — Full-Length Original Practice",
+  "description": "Unofficial original practice: three passages, 40 questions, and 60 minutes. This is not an official IELTS test.",
+  "type": "IELTS",
+  "category": "Practice",
+  "durationSeconds": 3600,
+  "settings": {
+    "ieltsVariant": "academic",
+    "unofficialPractice": true,
+    "questionCount": 40
+  },
+  "sections": {
+    "reading": {
+      "instructions": "Answer all 40 questions. Use evidence in each passage; the practice uses the teacher review workflow.",
+      "passages": [
+        {
+          "passageNumber": 1,
+          "title": "Heat below the streets",
+          "content": "The fictional city of Norhaven tested district heating as a way to reuse heat that would otherwise be lost. Its engineers compared several neighbourhoods before recommending a cautious expansion.\n\nThe first pilot connected the riverside clinic to a heat network in 2018. Engineers used insulated pipes to carry hot water beneath the pavement. A data centre supplied waste heat during the winter trial. The library joined the network only after a separate heat exchanger was installed. Measurements showed lower gas use in connected buildings, but the report did not compare construction costs. The team found that older pipes lost more heat at shallow joints. A maintenance crew inspected the network every six weeks. Residents received notices before work began on each street. The council paused expansion until a second winter of data had been collected. The pilot used water at a lower temperature than the city’s older steam system. A university group checked the temperature sensors independently. The report recommended mapping underground utilities before selecting new routes. The researchers warned that savings would vary with building insulation."
+        },
+        {
+          "passageNumber": 2,
+          "title": "A night sky with fewer lamps",
+          "content": "In the fictional district of Bellmere, planners studied whether street lighting could be reduced without making paths feel unsafe. The team combined light measurements with interviews and a small controlled trial.\n\nThe survey covered twelve streets beside the town’s canal. Researchers measured brightness at pavement level rather than at lamp height. The trial replaced broad white lamps with shielded amber lights. The shield directed most light toward the walkway and away from bedroom windows. Participants walked each route at the same time on three evenings. The interviews found that even lighting mattered more to many walkers than maximum brightness. A separate group checked the routes during rainy weather. The trial reduced electricity use by about one fifth on the selected streets. The study recorded no change in reported falls during its short trial. The authors said the trial was too brief to establish long-term accident rates. Shop owners asked that signs near crossings remain clearly illuminated. The planners advised testing each lamp design with local residents before wider use. The report treated light pollution and personal safety as separate measures."
+        },
+        {
+          "passageNumber": 3,
+          "title": "Seeds kept for uncertain seasons",
+          "content": "A fictional agricultural institute built a seed collection to help farms prepare for changing rainfall. Its researchers stress that stored seeds are useful only when their origins and growing conditions are recorded.\n\nThe collection began with seeds from farms in three neighbouring valleys. Each packet received a code linked to its collection location and date. Staff dried the seeds slowly before placing them in sealed containers. A temperature log showed that the storage room stayed near four degrees Celsius. The institute tested a small sample from every new batch for germination. Some local varieties germinated later but survived longer without irrigation. Researchers compared growth in sandy soil and heavier clay soil. The trial did not identify one variety that performed best in every field. Farmers helped choose which traits to measure during the growing season. The institute returned duplicate seed samples to two village cooperatives. A yearly inventory was introduced after several labels became difficult to read. The report recommends keeping a living field collection alongside frozen storage. Researchers cautioned that a seed collection cannot replace healthy soils or reliable water. The next trial will compare planting dates after an unusually dry spring."
+        }
+      ]
+    }
+  },
+  "questions": [
+    {
+      "id": "academic_reading_01",
+      "section": "reading",
+      "passageNumber": 1,
+      "points": 1,
+      "difficulty": "easy",
+      "explanation": "The passage states: The first pilot connected the riverside clinic to a heat network in 2018.",
+      "text": "When did the first pilot begin?",
+      "type": "mcq",
+      "questionType": "multiple-choice",
+      "responseType": "single-choice",
+      "options": [
+        "2018",
+        "insulated pipes",
+        "a data centre",
+        "a heat exchanger"
+      ],
+      "correctAnswer": "2018"
+    },
+    {
+      "id": "academic_reading_02",
+      "section": "reading",
+      "passageNumber": 1,
+      "points": 1,
+      "difficulty": "medium",
+      "explanation": "The passage states: Engineers used insulated pipes to carry hot water beneath the pavement.",
+      "text": "Decide whether the statement agrees with the passage: “The passage reports that a documentary was made about Heat below the streets.”",
+      "type": "mcq",
+      "questionType": "true-false-not-given",
+      "responseType": "single-choice",
+      "options": [
+        "True",
+        "False",
+        "Not Given"
+      ],
+      "correctAnswer": "Not Given"
+    },
+    {
+      "id": "academic_reading_03",
+      "section": "reading",
+      "passageNumber": 1,
+      "points": 1,
+      "difficulty": "hard",
+      "explanation": "The passage states: A data centre supplied waste heat during the winter trial.",
+      "text": "Complete the note using words from the passage: Which facility supplied waste heat?",
+      "type": "text",
+      "questionType": "completion",
+      "responseType": "multi-blank",
+      "answerSlots": [
+        {
+          "id": "academic_reading_03_answer",
+          "label": "Answer",
+          "correctAnswers": [
+            "a data centre"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "academic_reading_04",
+      "section": "reading",
+      "passageNumber": 1,
+      "points": 1,
+      "difficulty": "easy",
+      "explanation": "The passage states: The library joined the network only after a separate heat exchanger was installed.",
+      "text": "What was installed before the library joined?",
+      "type": "text",
+      "questionType": "short-answer",
+      "responseType": "short-text",
+      "correctAnswer": "a heat exchanger",
+      "acceptedAnswers": [
+        "a heat exchanger"
+      ]
+    },
+    {
+      "id": "academic_reading_05",
+      "section": "reading",
+      "passageNumber": 1,
+      "points": 1,
+      "difficulty": "medium",
+      "explanation": "The passage states: Measurements showed lower gas use in connected buildings, but the report did not compare construction costs.",
+      "text": "Choose the best heading for Passage 1.",
+      "type": "select",
+      "questionType": "matching-headings",
+      "responseType": "matching",
+      "answerSlots": [
+        {
+          "id": "academic_reading_05_heading",
+          "label": "Heading",
+          "correctAnswers": [
+            "Passage 1: Heat below the streets"
+          ]
+        }
+      ],
+      "sharedChoices": [
+        "Passage 1: Heat below the streets",
+        "Passage 2: A night sky with fewer lamps",
+        "Passage 3: Seeds kept for uncertain seasons"
+      ]
+    },
+    {
+      "id": "academic_reading_06",
+      "section": "reading",
+      "passageNumber": 1,
+      "points": 1,
+      "difficulty": "hard",
+      "explanation": "The passage states: The team found that older pipes lost more heat at shallow joints.",
+      "text": "Which passage contains this information? The team found that older pipes lost more heat at shallow joints.",
+      "type": "select",
+      "questionType": "matching-information",
+      "responseType": "matching",
+      "answerSlots": [
+        {
+          "id": "academic_reading_06_passage",
+          "label": "Passage",
+          "correctAnswers": [
+            "Passage 1"
+          ]
+        }
+      ],
+      "sharedChoices": [
+        "Passage 1",
+        "Passage 2",
+        "Passage 3"
+      ]
+    },
+    {
+      "id": "academic_reading_07",
+      "section": "reading",
+      "passageNumber": 1,
+      "points": 1,
+      "difficulty": "easy",
+      "explanation": "The passage states: A maintenance crew inspected the network every six weeks.",
+      "text": "How often was the network inspected?",
+      "type": "mcq",
+      "questionType": "multiple-choice",
+      "responseType": "single-choice",
+      "options": [
+        "every six weeks",
+        "2018",
+        "insulated pipes",
+        "a data centre"
+      ],
+      "correctAnswer": "every six weeks"
+    },
+    {
+      "id": "academic_reading_08",
+      "section": "reading",
+      "passageNumber": 1,
+      "points": 1,
+      "difficulty": "medium",
+      "explanation": "The passage states: Residents received notices before work began on each street.",
+      "text": "Does the passage state that this claim is accurate? “The passage reports that a documentary was made about Heat below the streets.”",
+      "type": "mcq",
+      "questionType": "yes-no-not-given",
+      "responseType": "single-choice",
+      "options": [
+        "Yes",
+        "No",
+        "Not Given"
+      ],
+      "correctAnswer": "Not Given"
+    },
+    {
+      "id": "academic_reading_09",
+      "section": "reading",
+      "passageNumber": 1,
+      "points": 1,
+      "difficulty": "hard",
+      "explanation": "The passage states: The council paused expansion until a second winter of data had been collected.",
+      "text": "Why did the council pause expansion?",
+      "type": "mcq",
+      "questionType": "multiple-choice",
+      "responseType": "single-choice",
+      "options": [
+        "to collect a second winter of data",
+        "2018",
+        "insulated pipes",
+        "a data centre"
+      ],
+      "correctAnswer": "to collect a second winter of data"
+    },
+    {
+      "id": "academic_reading_10",
+      "section": "reading",
+      "passageNumber": 1,
+      "points": 1,
+      "difficulty": "easy",
+      "explanation": "The passage states: The pilot used water at a lower temperature than the city’s older steam system.",
+      "text": "How did the pilot water temperature compare with the old system?",
+      "type": "mcq",
+      "questionType": "multiple-choice",
+      "responseType": "single-choice",
+      "options": [
+        "it was lower",
+        "2018",
+        "insulated pipes",
+        "a data centre"
+      ],
+      "correctAnswer": "it was lower"
+    },
+    {
+      "id": "academic_reading_11",
+      "section": "reading",
+      "passageNumber": 1,
+      "points": 1,
+      "difficulty": "medium",
+      "explanation": "The passage states: A university group checked the temperature sensors independently.",
+      "text": "Decide whether the statement agrees with the passage: “The passage reports that a documentary was made about Heat below the streets.”",
+      "type": "mcq",
+      "questionType": "true-false-not-given",
+      "responseType": "single-choice",
+      "options": [
+        "True",
+        "False",
+        "Not Given"
+      ],
+      "correctAnswer": "Not Given"
+    },
+    {
+      "id": "academic_reading_12",
+      "section": "reading",
+      "passageNumber": 1,
+      "points": 1,
+      "difficulty": "hard",
+      "explanation": "The passage states: The report recommended mapping underground utilities before selecting new routes.",
+      "text": "Complete the note using words from the passage: What should be mapped before routes are selected?",
+      "type": "text",
+      "questionType": "completion",
+      "responseType": "multi-blank",
+      "answerSlots": [
+        {
+          "id": "academic_reading_12_answer",
+          "label": "Answer",
+          "correctAnswers": [
+            "underground utilities"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "academic_reading_13",
+      "section": "reading",
+      "passageNumber": 1,
+      "points": 1,
+      "difficulty": "easy",
+      "explanation": "The passage states: The researchers warned that savings would vary with building insulation.",
+      "text": "What could change the level of savings?",
+      "type": "text",
+      "questionType": "short-answer",
+      "responseType": "short-text",
+      "correctAnswer": "building insulation",
+      "acceptedAnswers": [
+        "building insulation"
+      ]
+    },
+    {
+      "id": "academic_reading_14",
+      "section": "reading",
+      "passageNumber": 2,
+      "points": 1,
+      "difficulty": "medium",
+      "explanation": "The passage states: The survey covered twelve streets beside the town’s canal.",
+      "text": "Choose the best heading for Passage 2.",
+      "type": "select",
+      "questionType": "matching-headings",
+      "responseType": "matching",
+      "answerSlots": [
+        {
+          "id": "academic_reading_14_heading",
+          "label": "Heading",
+          "correctAnswers": [
+            "Passage 2: A night sky with fewer lamps"
+          ]
+        }
+      ],
+      "sharedChoices": [
+        "Passage 1: Heat below the streets",
+        "Passage 2: A night sky with fewer lamps",
+        "Passage 3: Seeds kept for uncertain seasons"
+      ]
+    },
+    {
+      "id": "academic_reading_15",
+      "section": "reading",
+      "passageNumber": 2,
+      "points": 1,
+      "difficulty": "hard",
+      "explanation": "The passage states: Researchers measured brightness at pavement level rather than at lamp height.",
+      "text": "Which passage contains this information? Researchers measured brightness at pavement level rather than at lamp height.",
+      "type": "select",
+      "questionType": "matching-information",
+      "responseType": "matching",
+      "answerSlots": [
+        {
+          "id": "academic_reading_15_passage",
+          "label": "Passage",
+          "correctAnswers": [
+            "Passage 2"
+          ]
+        }
+      ],
+      "sharedChoices": [
+        "Passage 1",
+        "Passage 2",
+        "Passage 3"
+      ]
+    },
+    {
+      "id": "academic_reading_16",
+      "section": "reading",
+      "passageNumber": 2,
+      "points": 1,
+      "difficulty": "easy",
+      "explanation": "The passage states: The trial replaced broad white lamps with shielded amber lights.",
+      "text": "What kind of replacement lamps were tested?",
+      "type": "mcq",
+      "questionType": "multiple-choice",
+      "responseType": "single-choice",
+      "options": [
+        "shielded amber lights",
+        "2018",
+        "insulated pipes",
+        "a data centre"
+      ],
+      "correctAnswer": "shielded amber lights"
+    },
+    {
+      "id": "academic_reading_17",
+      "section": "reading",
+      "passageNumber": 2,
+      "points": 1,
+      "difficulty": "medium",
+      "explanation": "The passage states: The shield directed most light toward the walkway and away from bedroom windows.",
+      "text": "Does the passage state that this claim is accurate? “The passage reports that a documentary was made about A night sky with fewer lamps.”",
+      "type": "mcq",
+      "questionType": "yes-no-not-given",
+      "responseType": "single-choice",
+      "options": [
+        "Yes",
+        "No",
+        "Not Given"
+      ],
+      "correctAnswer": "Not Given"
+    },
+    {
+      "id": "academic_reading_18",
+      "section": "reading",
+      "passageNumber": 2,
+      "points": 1,
+      "difficulty": "hard",
+      "explanation": "The passage states: Participants walked each route at the same time on three evenings.",
+      "text": "How many evenings did participants walk each route?",
+      "type": "mcq",
+      "questionType": "multiple-choice",
+      "responseType": "single-choice",
+      "options": [
+        "three",
+        "2018",
+        "insulated pipes",
+        "a data centre"
+      ],
+      "correctAnswer": "three"
+    },
+    {
+      "id": "academic_reading_19",
+      "section": "reading",
+      "passageNumber": 2,
+      "points": 1,
+      "difficulty": "easy",
+      "explanation": "The passage states: The interviews found that even lighting mattered more to many walkers than maximum brightness.",
+      "text": "Which feature mattered more than maximum brightness to many walkers?",
+      "type": "mcq",
+      "questionType": "multiple-choice",
+      "responseType": "single-choice",
+      "options": [
+        "even lighting",
+        "2018",
+        "insulated pipes",
+        "a data centre"
+      ],
+      "correctAnswer": "even lighting"
+    },
+    {
+      "id": "academic_reading_20",
+      "section": "reading",
+      "passageNumber": 2,
+      "points": 1,
+      "difficulty": "medium",
+      "explanation": "The passage states: A separate group checked the routes during rainy weather.",
+      "text": "Decide whether the statement agrees with the passage: “The passage reports that a documentary was made about A night sky with fewer lamps.”",
+      "type": "mcq",
+      "questionType": "true-false-not-given",
+      "responseType": "single-choice",
+      "options": [
+        "True",
+        "False",
+        "Not Given"
+      ],
+      "correctAnswer": "Not Given"
+    },
+    {
+      "id": "academic_reading_21",
+      "section": "reading",
+      "passageNumber": 2,
+      "points": 1,
+      "difficulty": "hard",
+      "explanation": "The passage states: The trial reduced electricity use by about one fifth on the selected streets.",
+      "text": "Complete the note using words from the passage: By roughly how much did electricity use fall?",
+      "type": "text",
+      "questionType": "completion",
+      "responseType": "multi-blank",
+      "answerSlots": [
+        {
+          "id": "academic_reading_21_answer",
+          "label": "Answer",
+          "correctAnswers": [
+            "one fifth"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "academic_reading_22",
+      "section": "reading",
+      "passageNumber": 2,
+      "points": 1,
+      "difficulty": "easy",
+      "explanation": "The passage states: The study recorded no change in reported falls during its short trial.",
+      "text": "What happened to reported falls during the short trial?",
+      "type": "text",
+      "questionType": "short-answer",
+      "responseType": "short-text",
+      "correctAnswer": "there was no recorded change",
+      "acceptedAnswers": [
+        "there was no recorded change"
+      ]
+    },
+    {
+      "id": "academic_reading_23",
+      "section": "reading",
+      "passageNumber": 2,
+      "points": 1,
+      "difficulty": "medium",
+      "explanation": "The passage states: The authors said the trial was too brief to establish long-term accident rates.",
+      "text": "Choose the best heading for Passage 2.",
+      "type": "select",
+      "questionType": "matching-headings",
+      "responseType": "matching",
+      "answerSlots": [
+        {
+          "id": "academic_reading_23_heading",
+          "label": "Heading",
+          "correctAnswers": [
+            "Passage 2: A night sky with fewer lamps"
+          ]
+        }
+      ],
+      "sharedChoices": [
+        "Passage 1: Heat below the streets",
+        "Passage 2: A night sky with fewer lamps",
+        "Passage 3: Seeds kept for uncertain seasons"
+      ]
+    },
+    {
+      "id": "academic_reading_24",
+      "section": "reading",
+      "passageNumber": 2,
+      "points": 1,
+      "difficulty": "hard",
+      "explanation": "The passage states: Shop owners asked that signs near crossings remain clearly illuminated.",
+      "text": "Which passage contains this information? Shop owners asked that signs near crossings remain clearly illuminated.",
+      "type": "select",
+      "questionType": "matching-information",
+      "responseType": "matching",
+      "answerSlots": [
+        {
+          "id": "academic_reading_24_passage",
+          "label": "Passage",
+          "correctAnswers": [
+            "Passage 2"
+          ]
+        }
+      ],
+      "sharedChoices": [
+        "Passage 1",
+        "Passage 2",
+        "Passage 3"
+      ]
+    },
+    {
+      "id": "academic_reading_25",
+      "section": "reading",
+      "passageNumber": 2,
+      "points": 1,
+      "difficulty": "easy",
+      "explanation": "The passage states: The planners advised testing each lamp design with local residents before wider use.",
+      "text": "Who should help test lamp designs?",
+      "type": "mcq",
+      "questionType": "multiple-choice",
+      "responseType": "single-choice",
+      "options": [
+        "local residents",
+        "2018",
+        "insulated pipes",
+        "a data centre"
+      ],
+      "correctAnswer": "local residents"
+    },
+    {
+      "id": "academic_reading_26",
+      "section": "reading",
+      "passageNumber": 2,
+      "points": 1,
+      "difficulty": "medium",
+      "explanation": "The passage states: The report treated light pollution and personal safety as separate measures.",
+      "text": "Does the passage state that this claim is accurate? “The passage reports that a documentary was made about A night sky with fewer lamps.”",
+      "type": "mcq",
+      "questionType": "yes-no-not-given",
+      "responseType": "single-choice",
+      "options": [
+        "Yes",
+        "No",
+        "Not Given"
+      ],
+      "correctAnswer": "Not Given"
+    },
+    {
+      "id": "academic_reading_27",
+      "section": "reading",
+      "passageNumber": 3,
+      "points": 1,
+      "difficulty": "hard",
+      "explanation": "The passage states: The collection began with seeds from farms in three neighbouring valleys.",
+      "text": "Where did the first seeds come from?",
+      "type": "mcq",
+      "questionType": "multiple-choice",
+      "responseType": "single-choice",
+      "options": [
+        "three neighbouring valleys",
+        "2018",
+        "insulated pipes",
+        "a data centre"
+      ],
+      "correctAnswer": "three neighbouring valleys"
+    },
+    {
+      "id": "academic_reading_28",
+      "section": "reading",
+      "passageNumber": 3,
+      "points": 1,
+      "difficulty": "easy",
+      "explanation": "The passage states: Each packet received a code linked to its collection location and date.",
+      "text": "What information was linked to each packet code?",
+      "type": "mcq",
+      "questionType": "multiple-choice",
+      "responseType": "single-choice",
+      "options": [
+        "its location and date",
+        "2018",
+        "insulated pipes",
+        "a data centre"
+      ],
+      "correctAnswer": "its location and date"
+    },
+    {
+      "id": "academic_reading_29",
+      "section": "reading",
+      "passageNumber": 3,
+      "points": 1,
+      "difficulty": "medium",
+      "explanation": "The passage states: Staff dried the seeds slowly before placing them in sealed containers.",
+      "text": "Decide whether the statement agrees with the passage: “The passage reports that a documentary was made about Seeds kept for uncertain seasons.”",
+      "type": "mcq",
+      "questionType": "true-false-not-given",
+      "responseType": "single-choice",
+      "options": [
+        "True",
+        "False",
+        "Not Given"
+      ],
+      "correctAnswer": "Not Given"
+    },
+    {
+      "id": "academic_reading_30",
+      "section": "reading",
+      "passageNumber": 3,
+      "points": 1,
+      "difficulty": "hard",
+      "explanation": "The passage states: A temperature log showed that the storage room stayed near four degrees Celsius.",
+      "text": "Complete the note using words from the passage: What temperature did the room stay near?",
+      "type": "text",
+      "questionType": "completion",
+      "responseType": "multi-blank",
+      "answerSlots": [
+        {
+          "id": "academic_reading_30_answer",
+          "label": "Answer",
+          "correctAnswers": [
+            "four degrees Celsius"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "academic_reading_31",
+      "section": "reading",
+      "passageNumber": 3,
+      "points": 1,
+      "difficulty": "easy",
+      "explanation": "The passage states: The institute tested a small sample from every new batch for germination.",
+      "text": "What did the institute test in each new batch?",
+      "type": "text",
+      "questionType": "short-answer",
+      "responseType": "short-text",
+      "correctAnswer": "germination",
+      "acceptedAnswers": [
+        "germination"
+      ]
+    },
+    {
+      "id": "academic_reading_32",
+      "section": "reading",
+      "passageNumber": 3,
+      "points": 1,
+      "difficulty": "medium",
+      "explanation": "The passage states: Some local varieties germinated later but survived longer without irrigation.",
+      "text": "Choose the best heading for Passage 3.",
+      "type": "select",
+      "questionType": "matching-headings",
+      "responseType": "matching",
+      "answerSlots": [
+        {
+          "id": "academic_reading_32_heading",
+          "label": "Heading",
+          "correctAnswers": [
+            "Passage 3: Seeds kept for uncertain seasons"
+          ]
+        }
+      ],
+      "sharedChoices": [
+        "Passage 1: Heat below the streets",
+        "Passage 2: A night sky with fewer lamps",
+        "Passage 3: Seeds kept for uncertain seasons"
+      ]
+    },
+    {
+      "id": "academic_reading_33",
+      "section": "reading",
+      "passageNumber": 3,
+      "points": 1,
+      "difficulty": "hard",
+      "explanation": "The passage states: Researchers compared growth in sandy soil and heavier clay soil.",
+      "text": "Which passage contains this information? Researchers compared growth in sandy soil and heavier clay soil.",
+      "type": "select",
+      "questionType": "matching-information",
+      "responseType": "matching",
+      "answerSlots": [
+        {
+          "id": "academic_reading_33_passage",
+          "label": "Passage",
+          "correctAnswers": [
+            "Passage 3"
+          ]
+        }
+      ],
+      "sharedChoices": [
+        "Passage 1",
+        "Passage 2",
+        "Passage 3"
+      ]
+    },
+    {
+      "id": "academic_reading_34",
+      "section": "reading",
+      "passageNumber": 3,
+      "points": 1,
+      "difficulty": "easy",
+      "explanation": "The passage states: The trial did not identify one variety that performed best in every field.",
+      "text": "Did one variety perform best in every field?",
+      "type": "mcq",
+      "questionType": "multiple-choice",
+      "responseType": "single-choice",
+      "options": [
+        "no",
+        "2018",
+        "insulated pipes",
+        "a data centre"
+      ],
+      "correctAnswer": "no"
+    },
+    {
+      "id": "academic_reading_35",
+      "section": "reading",
+      "passageNumber": 3,
+      "points": 1,
+      "difficulty": "medium",
+      "explanation": "The passage states: Farmers helped choose which traits to measure during the growing season.",
+      "text": "Does the passage state that this claim is accurate? “The passage reports that a documentary was made about Seeds kept for uncertain seasons.”",
+      "type": "mcq",
+      "questionType": "yes-no-not-given",
+      "responseType": "single-choice",
+      "options": [
+        "Yes",
+        "No",
+        "Not Given"
+      ],
+      "correctAnswer": "Not Given"
+    },
+    {
+      "id": "academic_reading_36",
+      "section": "reading",
+      "passageNumber": 3,
+      "points": 1,
+      "difficulty": "hard",
+      "explanation": "The passage states: The institute returned duplicate seed samples to two village cooperatives.",
+      "text": "Where were duplicate samples returned?",
+      "type": "mcq",
+      "questionType": "multiple-choice",
+      "responseType": "single-choice",
+      "options": [
+        "two village cooperatives",
+        "2018",
+        "insulated pipes",
+        "a data centre"
+      ],
+      "correctAnswer": "two village cooperatives"
+    },
+    {
+      "id": "academic_reading_37",
+      "section": "reading",
+      "passageNumber": 3,
+      "points": 1,
+      "difficulty": "easy",
+      "explanation": "The passage states: A yearly inventory was introduced after several labels became difficult to read.",
+      "text": "Why was a yearly inventory introduced?",
+      "type": "mcq",
+      "questionType": "multiple-choice",
+      "responseType": "single-choice",
+      "options": [
+        "some labels became difficult to read",
+        "2018",
+        "insulated pipes",
+        "a data centre"
+      ],
+      "correctAnswer": "some labels became difficult to read"
+    },
+    {
+      "id": "academic_reading_38",
+      "section": "reading",
+      "passageNumber": 3,
+      "points": 1,
+      "difficulty": "medium",
+      "explanation": "The passage states: The report recommends keeping a living field collection alongside frozen storage.",
+      "text": "Decide whether the statement agrees with the passage: “The passage reports that a documentary was made about Seeds kept for uncertain seasons.”",
+      "type": "mcq",
+      "questionType": "true-false-not-given",
+      "responseType": "single-choice",
+      "options": [
+        "True",
+        "False",
+        "Not Given"
+      ],
+      "correctAnswer": "Not Given"
+    },
+    {
+      "id": "academic_reading_39",
+      "section": "reading",
+      "passageNumber": 3,
+      "points": 1,
+      "difficulty": "hard",
+      "explanation": "The passage states: Researchers cautioned that a seed collection cannot replace healthy soils or reliable water.",
+      "text": "Complete the note using words from the passage: What two resources can the collection not replace?",
+      "type": "text",
+      "questionType": "completion",
+      "responseType": "multi-blank",
+      "answerSlots": [
+        {
+          "id": "academic_reading_39_answer",
+          "label": "Answer",
+          "correctAnswers": [
+            "healthy soils and reliable water"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "academic_reading_40",
+      "section": "reading",
+      "passageNumber": 3,
+      "points": 1,
+      "difficulty": "easy",
+      "explanation": "The passage states: The next trial will compare planting dates after an unusually dry spring.",
+      "text": "What will the next trial compare?",
+      "type": "text",
+      "questionType": "short-answer",
+      "responseType": "short-text",
+      "correctAnswer": "planting dates",
+      "acceptedAnswers": [
+        "planting dates"
+      ]
+    }
+  ]
+}

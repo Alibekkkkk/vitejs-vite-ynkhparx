@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "title": "IELTS Speaking Practice — Original Unofficial Prompts",
+  "description": "Original practice prompts for Parts 1, 2, and 3. Browser recordings remain on the student's device and are not uploaded.",
+  "type": "IELTS",
+  "category": "Practice",
+  "durationSeconds": 900,
+  "sections": {
+    "speaking": {
+      "instructions": "Practise speaking aloud. Part 2 includes one minute of preparation followed by up to two minutes of speaking.",
+      "parts": [
+        { "part": 1, "topic": "Daily routines", "preparationSeconds": 0, "responseSeconds": 45 },
+        { "part": 1, "topic": "Learning", "preparationSeconds": 0, "responseSeconds": 45 },
+        { "part": 1, "topic": "Places", "preparationSeconds": 0, "responseSeconds": 45 },
+        { "part": 2, "topic": "A useful skill", "preparationSeconds": 60, "responseSeconds": 120 },
+        { "part": 3, "topic": "Learning skills", "preparationSeconds": 0, "responseSeconds": 90 }
+      ]
+    }
+  },
+  "questions": [
+    { "id": "sp_p1_routine", "section": "speaking", "speakingPart": 1, "questionType": "speaking-prompt", "responseType": "long-text", "manualReview": true, "points": 0, "text": "What is the busiest part of your usual day? Why?" },
+    { "id": "sp_p1_learning", "section": "speaking", "speakingPart": 1, "questionType": "speaking-prompt", "responseType": "long-text", "manualReview": true, "points": 0, "text": "What is something you recently learned to do? How did you learn it?" },
+    { "id": "sp_p1_place", "section": "speaking", "speakingPart": 1, "questionType": "speaking-prompt", "responseType": "long-text", "manualReview": true, "points": 0, "text": "Is there a place in your town where you like to spend time? What makes it pleasant?" },
+    { "id": "sp_p2_skill", "section": "speaking", "speakingPart": 2, "questionType": "speaking-prompt", "responseType": "long-text", "manualReview": true, "points": 0, "preparationSeconds": 60, "responseSeconds": 120, "text": "Describe a useful skill you learned. Say what the skill is, when and how you learned it, who helped you, and explain how you use it now." },
+    { "id": "sp_p3_teaching", "section": "speaking", "speakingPart": 3, "questionType": "speaking-prompt", "responseType": "long-text", "manualReview": true, "points": 0, "text": "Should practical skills be taught at school? Explain your view with an example." },
+    { "id": "sp_p3_independent", "section": "speaking", "speakingPart": 3, "questionType": "speaking-prompt", "responseType": "long-text", "manualReview": true, "points": 0, "text": "How has online learning changed the way adults develop new skills?" },
+    { "id": "sp_p3_lifelong", "section": "speaking", "speakingPart": 3, "questionType": "speaking-prompt", "responseType": "long-text", "manualReview": true, "points": 0, "text": "Why might people continue learning after they finish formal education?" }
+  ]
+}
