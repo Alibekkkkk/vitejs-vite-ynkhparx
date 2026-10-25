@@ -26,6 +26,7 @@ service cloud.firestore {
       let testGroup = resource.data.get('groupCode', '');
       let studentGroup = profile.get('groupCode', '');
       return signedIn()
+        && resource.data.get('answerKeysSecured', false) == true
         && testGroup != ''
         && (testGroup == 'all' || (studentGroup != '' && testGroup == studentGroup));
     }
@@ -74,8 +75,27 @@ service cloud.firestore {
       allow create, update, delete: if isAuthorizedTeacher();
     }
 
+    match /artifacts/{appId}/teacher/data/answerKeys/{testId} {
+      allow get, list, create, update, delete: if isAuthorizedTeacher();
+    }
+
     match /artifacts/{appId}/users/{userId}/results/{resultId} {
-      allow read, create: if signedIn() && request.auth.uid == userId;
+      allow get, list: if signedIn() && request.auth.uid == userId;
+      // The trusted submission callable writes each student's compatible history.
+      allow create: if false;
+      allow update, delete: if false;
+    }
+
+    match /artifacts/{appId}/public/data/submissions/{submissionId} {
+      allow get, list: if isAuthorizedTeacher()
+        || (signedIn() && resource.data.studentUid == request.auth.uid);
+      // Admin SDK writes bypass rules; browser clients cannot forge score summaries.
+      allow create: if false;
+      allow update: if isAuthorizedTeacher()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'questionReviews', 'pendingReviewCount', 'reviewStatus', 'reviewedBy', 'reviewedAt'
+        ]);
+      allow delete: if false;
     }
   }
 }

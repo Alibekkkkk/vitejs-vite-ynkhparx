@@ -43,16 +43,35 @@ After reviewing the rules, deploy only Firestore rules from the repository root 
 
 ```sh
 firebase login
-firebase deploy --project exam-portal-71a9b --only firestore:rules
+firebase deploy --project exam-portal-71a9b --only firestore:rules,firestore:indexes
 ```
 
-The app frontend is deployed on Vercel; do not run a bare `firebase deploy` for the frontend. The legacy `functions/` folder contains an optional callable writing coach that uses an OpenAI secret and may require paid Cloud Functions infrastructure. It is not used by the app and is not part of the default free-tier setup. Avoid deploying it unless you deliberately choose that separate paid setup.
+The frontend is deployed on Vercel; Firebase deploys do not publish the Vercel website. Exam submissions now use authenticated Cloud Functions: `submitExamAttempt` checks the student's group, grades against the teacher-only answer key, and writes both the central teacher record and the student's existing history; `reviewSubmission` saves teacher feedback to both views; `backfillLegacySubmissions` copies older history into the teacher list without deleting it; `secureExistingAnswerKeys` moves existing assessment keys to teacher-only documents. The legacy `writingCoach` function remains optional and uses an OpenAI secret; the app's default writing coach still uses Firebase AI Logic.
+
+Deploying Cloud Functions requires the Firebase project to use the **Blaze** plan. This change does not alter the project's billing plan and no function has been deployed from this task. To deploy rules, indexes, and only the required submission functions, use the repository root:
+
+```sh
+cd functions
+npm install
+cd ..
+firebase deploy --project exam-portal-71a9b --only firestore:rules,firestore:indexes,functions:submitExamAttempt,functions:backfillLegacySubmissions,functions:reviewSubmission,functions:secureExistingAnswerKeys
+```
+
+If you do not want to enable Blaze, do not publish this frontend version: the current rules deliberately deny browser-side result writes so students cannot forge scores. Cloud Functions usage is not the free browser AI coach; review Firebase's [Cloud Functions setup and pricing requirements](https://firebase.google.com/docs/functions/get-started) before deploying.
+
+After deploying Firebase, redeploy the frontend on Vercel. From **Teacher Portal → Results & submissions**, select **Secure existing assessment keys** once. Until this completes, older assessments remain hidden from students; their question content and keys are retained in Firestore, with keys moved to the teacher-only collection. Then use **Import legacy results** repeatedly until migration reaches the end. This reads result records in batches of 200, preserves original student history, and creates central records the teacher can filter and export. New submissions appear automatically. The teacher results subscription is limited to the newest 500 attempts.
 
 ## Question authoring and grading
 
 The editor separates the exam-specific `questionType` tag from the student's `responseType`. Supported response types are single choice, multiple select, short text, multiple blanks, numeric/tolerance, matching, ordering, and long written responses. Multiple blanks and matching use individually keyed answer slots; written responses are never auto-graded as exact text. Existing `mcq`, `select`, `text`, and `number` records are normalized at read time, without a destructive migration.
 
-**Answer-key security limitation:** the current app auto-grades in the browser, and student-readable assessment documents include answer keys. The interface does not display keys before submission, but a technically capable student can inspect the downloaded Firestore data. Firestore rules cannot hide selected fields within a document. True key confidentiality requires moving keys to a teacher-only store and grading submissions through a trusted server endpoint; this is not part of the browser-only free AI integration and has not been deployed.
+Answer keys are stored separately under `artifacts/{appId}/teacher/data/answerKeys/{assessmentId}`. Student-readable assessment documents omit answer keys, and student queries require `answerKeysSecured == true`. The migration button moves existing keys to the restricted collection without deleting assessments; existing exams stay hidden until migrated. Server-side grading rejects un-migrated exams.
+
+## Question bank JSON and sample banks
+
+Version 1 files use `schemaVersion`, assessment metadata (`title`, `type`, `durationSeconds`, optional `settings` and `sections`), and `questions` in the same shape used by the editor and grading engine. Questions must have unique IDs and supported response types; IELTS passage numbers must be 1–3 and Listening section numbers 1–4. File imports are validated, assigned fresh question/slot IDs, and opened as a new hidden draft. They never overwrite a saved test or publish automatically. Export a selected bank from the assessment editor with **Export question bank**.
+
+The teacher's **Sample banks** panel previews and imports the six original, unofficial pilots in [`sample-data/`](sample-data/). Listening has intentionally blank audio references and cannot be published until actual audio is added for every section containing questions. Original illustrative recording scripts are in [`sample-data/ielts-listening-transcripts.md`](sample-data/ielts-listening-transcripts.md). Assign a student group only after reviewing the imported draft and adding its needed audio/media.
 
 Question engine checks:
 

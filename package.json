@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "test:question-engine": "node --experimental-strip-types --test tests/questionEngine.test.ts",
+    "test:question-engine": "node --experimental-strip-types --test tests/questionEngine.test.ts tests/questionBank.test.ts tests/functionGrading.test.cjs",
     "preview": "vite preview"
   },
   "dependencies": {
