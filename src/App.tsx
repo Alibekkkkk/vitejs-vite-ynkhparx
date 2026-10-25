@@ -61,6 +61,21 @@ const writingAI = getGenerativeModel(getAI(app, { backend: new GoogleAIBackend()
   generationConfig: { maxOutputTokens: 220, temperature: 0.3 },
 });
 const appId = "exam-portal-71a9b";
+const removeUndefinedValues = <T,>(value: T): T => {
+  if (Array.isArray(value)) {
+    return value.filter(item => item !== undefined).map(item => removeUndefinedValues(item)) as T;
+  }
+  if (value && typeof value === 'object') {
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return value;
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, item]) => item !== undefined)
+        .map(([key, item]) => [key, removeUndefinedValues(item)]),
+    ) as T;
+  }
+  return value;
+};
 const SAMPLE_BANKS = [
   { file: 'ielts-academic-reading-full.json', title: 'IELTS Academic Reading — Full-Length Original Practice', type: 'IELTS', questionCount: 40, durationSeconds: 3600, passageCount: 3, description: 'Three original passages; exactly 40 questions; 60 minutes.' },
   { file: 'ielts-general-reading-full.json', title: 'IELTS General Training Reading — Full-Length Original Practice', type: 'IELTS', questionCount: 40, durationSeconds: 3600, passageCount: 3, description: 'Three original texts; exactly 40 questions; 60 minutes.' },
@@ -1019,9 +1034,13 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
       const testCollection = collection(db, 'artifacts', appId, 'public', 'data', 'tests');
       const testRef = editingId ? doc(db, 'artifacts', appId, 'public', 'data', 'tests', editingId) : doc(testCollection);
       const answerKeyRef = doc(db, 'artifacts', appId, 'teacher', 'data', 'answerKeys', testRef.id);
+      // Imported drafts intentionally have id: undefined. Store the real
+      // Firestore document ID, and remove optional undefined fields throughout
+      // nested question/section data before either write.
+      testToSave.id = testRef.id;
       const batch = writeBatch(db);
-      batch.set(answerKeyRef, { assessmentId: testRef.id, questions: answerKeyQuestions, teacherSections, updatedAt: serverTimestamp() });
-      batch.set(testRef, testToSave);
+      batch.set(answerKeyRef, removeUndefinedValues({ assessmentId: testRef.id, questions: answerKeyQuestions, teacherSections, updatedAt: serverTimestamp() }));
+      batch.set(testRef, removeUndefinedValues(testToSave));
       await batch.commit();
       
       setIsBuildingTest(false);
