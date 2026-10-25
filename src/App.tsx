@@ -19,8 +19,9 @@ import {
 } from "firebase/auth";
 import { 
   getFirestore, doc, getDoc, setDoc, addDoc, collection, onSnapshot, 
-  serverTimestamp, deleteDoc, updateDoc, query, where
+  serverTimestamp, updateDoc, query, where, orderBy, limit, writeBatch
 } from "firebase/firestore";
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import {
   gradeQuestion,
   normalizeQuestion,
@@ -31,6 +32,7 @@ import {
   type EngineQuestion,
   type ResponseType,
 } from './questionEngine';
+import { parseQuestionBank } from './questionBank';
 
 const firebaseConfig = {
   apiKey: "AIzaSyBj6nrhP7w-KbMeYHV7wtEMk-yHftG8H4c",
@@ -55,11 +57,14 @@ if (appCheckSiteKey) {
 }
 const auth = getAuth(app);
 const db = getFirestore(app);
+const functions = getFunctions(app);
 const writingAI = getGenerativeModel(getAI(app, { backend: new GoogleAIBackend() }), {
   model: 'gemini-3.8-flash',
   generationConfig: { maxOutputTokens: 220, temperature: 0.3 },
 });
 const appId = "exam-portal-71a9b";
+const SAMPLE_BANKS = Object.entries(import.meta.glob('../sample-data/*.json', { eager: true, import: 'default' }))
+  .map(([path, value]: [string, any]) => ({ file: path.split('/').pop() || 'sample.json', bank: parseQuestionBank(value) }));
 
 const authorizedTeacherEmails = (import.meta.env.VITE_TEACHER_EMAILS || '')
   .split(',')
@@ -324,6 +329,36 @@ const getListeningAudioUrl = (test: AssessmentRecord, sectionNumber: number) => 
   return part?.audioUrl || (sectionNumber === 1 ? section?.audioUrl || '' : '');
 };
 
+const splitQuestionKeys = (questions: any[]) => ({
+  publicQuestions: questions.map(question => {
+    const visible = { ...question };
+    delete visible.correctAnswer;
+    delete visible.acceptedAnswers;
+    delete visible.correctOrder;
+    if (Array.isArray(question.answerSlots)) visible.answerSlots = question.answerSlots.map((slot: any) => {
+      const publicSlot = { ...slot };
+      delete publicSlot.correctAnswers;
+      return publicSlot;
+    });
+    return visible;
+  }),
+  answerKeyQuestions: questions.map(question => ({
+    id: question.id,
+    correctAnswer: question.correctAnswer ?? null,
+    acceptedAnswers: question.acceptedAnswers || [],
+    answerSlots: (question.answerSlots || []).map((slot: any) => ({ id: slot.id, correctAnswers: slot.correctAnswers || [] })),
+    correctOrder: question.correctOrder || [],
+  })),
+});
+
+const mergeQuestionKeys = (questions: any[], keys: any[]) => {
+  const byId = new Map(keys.map(question => [question.id, question]));
+  return questions.map(question => {
+    const key = byId.get(question.id) || {};
+    return { ...question, ...key, answerSlots: (question.answerSlots || []).map((slot: any) => ({ ...slot, ...(key.answerSlots || []).find((keySlot: any) => keySlot.id === slot.id) })) };
+  });
+};
+
 const getReadingPassage = (test: AssessmentRecord, passageNumber: number) => {
   const reading = test?.sections?.reading;
   const passage = reading?.passages?.find(item => item.passageNumber === passageNumber);
@@ -464,7 +499,33 @@ const LoginScreen = ({ onAuthAction }) => {
   );
 };
 
-const TeacherDashboard = ({ user, tests, onLogout }) => {
+const TeacherReviewFields = ({ attempt, review, onSaveReview }) => {
+  const [feedback, setFeedback] = useState(review.teacherReview?.feedback || '');
+  const [points, setPoints] = useState(review.teacherReview?.points ?? '');
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    setSaving(true);
+    try { await onSaveReview(attempt.id, review.questionId, { feedback, points: points === '' ? null : Number(points) }); }
+    catch (error) { alert(error instanceof Error ? error.message : 'Could not save this review.'); }
+    finally { setSaving(false); }
+  };
+  return <div className="mt-3 grid md:grid-cols-[1fr_8rem_auto] gap-2"><textarea value={feedback} onChange={event => setFeedback(event.target.value)} aria-label="Teacher feedback" placeholder="Teacher feedback" rows={2} className="p-2 rounded border dark:bg-slate-700 dark:border-slate-600"/><input type="number" min="0" max={review.points ?? 0} step="0.5" value={points} onChange={event => setPoints(event.target.value)} aria-label="Reviewed points" placeholder="Points" className="p-2 rounded border dark:bg-slate-700 dark:border-slate-600"/><button disabled={saving} onClick={save} className="px-3 py-2 rounded bg-blue-600 text-white disabled:opacity-50">{saving ? 'Saving…' : 'Save review'}</button></div>;
+};
+
+const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submissionsError, onSaveReview, onBackfillLegacy, onSecureAnswerKeys, onLogout }) => {
+  const [teacherArea, setTeacherArea] = useState<'assessments' | 'results' | 'samples'>('assessments');
+  const [resultSearch, setResultSearch] = useState('');
+  const [resultGroup, setResultGroup] = useState('');
+  const [resultAssessment, setResultAssessment] = useState('');
+  const [resultType, setResultType] = useState('');
+  const [resultStatus, setResultStatus] = useState('');
+  const [resultFrom, setResultFrom] = useState('');
+  const [resultTo, setResultTo] = useState('');
+  const [selectedSample, setSelectedSample] = useState<any>(null);
+  const [legacyCursor, setLegacyCursor] = useState('');
+  const [legacyMigrationMessage, setLegacyMigrationMessage] = useState('');
+  const [migratingLegacy, setMigratingLegacy] = useState(false);
+  const [securingAnswerKeys, setSecuringAnswerKeys] = useState(false);
   const [isBuildingTest, setIsBuildingTest] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [newTest, setNewTest] = useState<any>(createEmptyTest);
@@ -475,6 +536,41 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
   const [validationErrors, setValidationErrors] = useState<Record<string, string[]>>({});
   const [previewQuestionId, setPreviewQuestionId] = useState<string | null>(null);
   const [questionBankError, setQuestionBankError] = useState('');
+
+  const importSampleAsDraft = (bank: any) => {
+    bank = parseQuestionBank(bank);
+    const sourceQuestions = Array.isArray(bank.questions) ? bank.questions : [];
+    const idMap = new Map(sourceQuestions.map((question: any, index: number) => [question.id, `q_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 6)}`]));
+    const questions = sourceQuestions.map((question: any) => ({ ...question, sourceId: question.id, id: idMap.get(question.id),
+      answerSlots: question.answerSlots?.map((slot: any, index: number) => ({ ...slot, id: `${idMap.get(question.id)}_slot_${index + 1}` })) }));
+    const minutes = Math.max(1, Math.round(Number(bank.durationSeconds || 1800) / 60));
+    setNewTest({ ...createEmptyTest(), ...bank, id: undefined, title: `${bank.title || 'Sample bank'} (draft)`, category: 'Practice', durationMinutes: minutes, groupCode: '', published: false, status: 'draft', questions });
+    setEditingId(null);
+    setActiveQuestionSection(bank.type === 'IELTS' ? 'listening' : 'general');
+    setTeacherArea('assessments');
+    setIsBuildingTest(true);
+  };
+
+  const visibleSubmissions = submissions.filter((submission: any) => {
+    const queryText = resultSearch.trim().toLowerCase();
+    const haystack = [submission.studentName, submission.studentEmail, submission.studentUid, submission.groupCode, submission.assessmentTitle, submission.assessmentId, submission.examType].join(' ').toLowerCase();
+    const at = new Date(submission.submittedAtMs || submission.submittedAt || 0).getTime();
+    const day = Number.isFinite(at) ? new Date(at).toISOString().slice(0, 10) : '';
+    return (!queryText || haystack.includes(queryText))
+      && (!resultGroup || submission.groupCode === resultGroup)
+      && (!resultAssessment || submission.assessmentId === resultAssessment)
+      && (!resultType || submission.examType === resultType)
+      && (!resultStatus || submission.reviewStatus === resultStatus)
+      && (!resultFrom || day >= resultFrom) && (!resultTo || day <= resultTo);
+  });
+
+  const exportSubmissionsCsv = () => {
+    const columns = ['studentName','studentEmail','studentUid','groupCode','assessmentTitle','examType','assessmentId','submittedAt','score','maxAutoScore','percentage','durationSeconds','isAutoSubmitted','answeredCount','unansweredCount','correctCount','incorrectCount','pendingReviewCount','reviewStatus'];
+    const quote = (value: unknown) => `"${String(value ?? '').replaceAll('"', '""')}"`;
+    const csv = [columns.join(','), ...visibleSubmissions.map((item: any) => columns.map(key => quote(item[key])).join(','))].join('\r\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a'); link.href = url; link.download = 'exam-submissions.csv'; link.click(); URL.revokeObjectURL(url);
+  };
 
   const handleAddQuestion = (type, section = activeQuestionSection) => {
     const writing = section === 'writing';
@@ -556,13 +652,21 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
       const copiedTest = {
         ...sourceTest,
         title: `${test.title} (Copy)`,
+        answerKeysSecured: false,
+        groupCode: '',
+        pin: '',
+        status: 'draft',
+        published: false,
         authorId: user.uid,
         authorName: user.name,
         createdAt: new Date().toISOString(),
         questions: (test.questions || []).map((question, index) => ({
           ...question,
           id: `q_${Date.now()}_${index}`,
-          ...(question.options ? { options: [...question.options] } : {})
+          ...(question.options ? { options: [...question.options] } : {}),
+          ...(question.sharedChoices ? { sharedChoices: [...question.sharedChoices] } : {}),
+          ...(question.correctOrder ? { correctOrder: [...question.correctOrder] } : {}),
+          ...(question.answerSlots ? { answerSlots: question.answerSlots.map((slot, slotIndex) => ({ ...slot, id: `slot_${index}_${slotIndex}_${Date.now()}` })) } : {})
         })),
         ...(test.sections ? {
           sections: Object.fromEntries(Object.entries(test.sections).map(([sectionId, section]) => [sectionId, { ...(section as Record<string, any>) }]))
@@ -697,18 +801,12 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
     setQuestionBankError('');
     try {
       if (file.size > 2_000_000) throw new Error('Choose a JSON file smaller than 2 MB.');
-      const parsed = JSON.parse(await file.text());
-      const rawQuestions = Array.isArray(parsed) ? parsed : parsed?.questions;
-      if (!Array.isArray(rawQuestions) || !rawQuestions.length || rawQuestions.length > 100) throw new Error('The file must contain 1–100 questions as an array or a { "questions": [...] } object.');
-      const questions = rawQuestions.map((raw, index) => {
-        if (!raw || typeof raw !== 'object' || typeof raw.text !== 'string') throw new Error(`Question ${index + 1} needs a text field.`);
-        if (raw.responseType && !RESPONSE_TYPE_LABELS.some(([type]) => type === raw.responseType)) throw new Error(`Question ${index + 1} uses an unsupported responseType.`);
-        const question = normalizeQuestion({ ...raw, id: typeof raw.id === 'string' && raw.id ? raw.id : `import_${Date.now()}_${index}` });
-        const errors = validateQuestion(question);
-        if (errors.length) throw new Error(`Question ${index + 1}: ${errors.join(' ')}`);
-        return question;
-      });
-      setNewTest(previous => ({ ...previous, questions: [...previous.questions, ...questions] }));
+      const bank = parseQuestionBank(JSON.parse(await file.text()));
+      if ((editingId || newTest.title || newTest.questions.length) && !window.confirm('Replace this editor content with the imported bank as a new unpublished draft? Saved assessments will not be changed.')) return;
+      const idMap = new Map(bank.questions.map((question: any, index) => [question.id, `q_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 6)}`]));
+      const questions = bank.questions.map((question: any) => ({ ...question, sourceId: question.id, id: idMap.get(question.id), answerSlots: question.answerSlots?.map((slot: any, index: number) => ({ ...slot, id: `${idMap.get(question.id)}_slot_${index + 1}` })) }));
+      setEditingId(null);
+      setNewTest({ ...createEmptyTest(), ...bank, id: undefined, durationMinutes: Math.max(1, Math.round(Number(bank.durationSeconds || 1800) / 60)), groupCode: '', status: 'draft', published: false, questions });
     } catch (error) {
       setQuestionBankError(error instanceof Error ? error.message : 'Could not import this question bank.');
     } finally {
@@ -717,7 +815,7 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
   };
 
   const exportQuestionBank = () => {
-    const blob = new Blob([JSON.stringify({ version: 1, questions: newTest.questions }, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify({ schemaVersion: 1, title: newTest.title, description: newTest.description, type: newTest.type, category: newTest.category, durationSeconds: Number(newTest.durationMinutes || 30) * 60, settings: { groupCode: newTest.groupCode || '', status: 'draft' }, sections: newTest.sections, questions: newTest.questions }, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -755,20 +853,37 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
             })
           : newTest.questions.map(question => ({ ...question, responseType: resolveResponseType(question) })),
         groupCode: newTest.groupCode.trim().toLowerCase(),
+        status: newTest.groupCode.trim() ? 'published' : 'draft',
+        published: Boolean(newTest.groupCode.trim()),
         durationSeconds: newTest.durationMinutes * 60,
         authorId: user.uid,
         authorName: user.name
       };
       delete testToSave.durationMinutes;
 
-      if (editingId) {
-        testToSave.updatedAt = new Date().toISOString();
-        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tests', editingId), testToSave);
-      } else {
-        testToSave.createdAt = new Date().toISOString();
-        const testsRef = collection(db, 'artifacts', appId, 'public', 'data', 'tests');
-        await addDoc(testsRef, testToSave);
+      if (testToSave.groupCode && testToSave.type === 'IELTS') {
+        const listeningQuestions = testToSave.questions.filter((question: any) => question.section === 'listening');
+        const sectionsMissingAudio = [...new Set<number>(listeningQuestions.map((question: any) => Number(question.listeningSectionNumber || 1)))].filter(sectionNumber => !getListeningAudioUrl(testToSave, sectionNumber));
+        if (sectionsMissingAudio.length) {
+          setIsSubmitting(false);
+          alert(`This assessment cannot be published yet. Add valid audio for Listening section${sectionsMissingAudio.length > 1 ? 's' : ''} ${sectionsMissingAudio.join(', ')}.`);
+          return;
+        }
       }
+
+      const { publicQuestions, answerKeyQuestions } = splitQuestionKeys(testToSave.questions);
+      testToSave.questions = publicQuestions;
+      testToSave.answerKeysSecured = true;
+      testToSave.answerKeyVersion = 1;
+      if (editingId) testToSave.updatedAt = new Date().toISOString();
+      else testToSave.createdAt = new Date().toISOString();
+      const testCollection = collection(db, 'artifacts', appId, 'public', 'data', 'tests');
+      const testRef = editingId ? doc(db, 'artifacts', appId, 'public', 'data', 'tests', editingId) : doc(testCollection);
+      const answerKeyRef = doc(db, 'artifacts', appId, 'teacher', 'data', 'answerKeys', testRef.id);
+      const batch = writeBatch(db);
+      batch.set(answerKeyRef, { assessmentId: testRef.id, questions: answerKeyQuestions, updatedAt: serverTimestamp() });
+      batch.set(testRef, testToSave);
+      await batch.commit();
       
       setIsBuildingTest(false);
       setEditingId(null);
@@ -784,7 +899,10 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
   const deleteTest = async (testId) => {
     if(!window.confirm("Delete this assessment permanently?")) return;
     try {
-      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tests', testId));
+      const batch = writeBatch(db);
+      batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'tests', testId));
+      batch.delete(doc(db, 'artifacts', appId, 'teacher', 'data', 'answerKeys', testId));
+      await batch.commit();
     } catch(err) {
       console.error(err);
     }
@@ -852,7 +970,31 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
       </header>
 
       <main className="w-full px-4 sm:px-8 lg:px-12 py-8 mx-auto">
-        {!isBuildingTest ? (
+        {!isBuildingTest && <nav className="flex flex-wrap gap-2 mb-6" aria-label="Teacher dashboard">
+          {([['assessments', 'Assessments'], ['results', 'Results & submissions'], ['samples', 'Sample banks']] as const).map(([id, label]) => <button key={id} onClick={() => setTeacherArea(id)} className={`px-4 py-2 rounded-lg border text-sm font-semibold ${teacherArea === id ? 'bg-purple-600 text-white border-purple-600' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-600'}`}>{label}</button>)}
+        </nav>}
+        {!isBuildingTest && teacherArea === 'results' ? (
+          <section className="text-left space-y-5">
+            <div className="flex flex-wrap items-center justify-between gap-3"><div><h1 className="text-2xl font-bold text-slate-800 dark:text-white">Results &amp; submissions</h1><p className="text-slate-500 dark:text-slate-400 mt-1">Latest 500 attempts, newest first. Import prior attempts and secure old assessment keys below.</p></div><div className="flex flex-wrap gap-2"><button onClick={async () => { setSecuringAnswerKeys(true); setLegacyMigrationMessage(''); try { const result: any = await onSecureAnswerKeys(); setLegacyMigrationMessage(`Secured answer keys for ${result.secured} assessment(s); ${result.alreadySecured} already secure. Students can access only secured assessments.`); } catch (error) { setLegacyMigrationMessage(error instanceof Error ? error.message : 'Could not secure existing answer keys.'); } finally { setSecuringAnswerKeys(false); } }} disabled={securingAnswerKeys} className="px-4 py-2 rounded-lg border border-amber-400 text-amber-800 dark:text-amber-200 disabled:opacity-50">{securingAnswerKeys ? 'Securing…' : 'Secure existing assessment keys'}</button><button onClick={async () => { setMigratingLegacy(true); setLegacyMigrationMessage(''); try { const result: any = await onBackfillLegacy(legacyCursor); setLegacyCursor(result.nextCursorPath || ''); setLegacyMigrationMessage(`${result.migrated} legacy result${result.migrated === 1 ? '' : 's'} copied into the teacher list.${result.nextCursorPath ? ' Select again to continue with older records.' : ' Migration reached the end of the legacy history.'}`); } catch (error) { setLegacyMigrationMessage(error instanceof Error ? error.message : 'Could not migrate older results.'); } finally { setMigratingLegacy(false); } }} disabled={migratingLegacy} className="px-4 py-2 rounded-lg border dark:border-slate-600 disabled:opacity-50">{migratingLegacy ? 'Importing…' : 'Import legacy results'}</button><button onClick={exportSubmissionsCsv} disabled={!visibleSubmissions.length} className="px-4 py-2 rounded-lg bg-purple-600 text-white disabled:opacity-50">Export filtered CSV</button></div></div>
+            {legacyMigrationMessage && <p role="status" className="p-3 rounded bg-blue-50 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200">{legacyMigrationMessage}</p>}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-4">
+              <input aria-label="Search submissions" value={resultSearch} onChange={e => setResultSearch(e.target.value)} placeholder="Search student / test" className="lg:col-span-2 p-2 rounded border dark:bg-slate-700 dark:border-slate-600" />
+              <select aria-label="Filter group" value={resultGroup} onChange={e => setResultGroup(e.target.value)} className="p-2 rounded border dark:bg-slate-700 dark:border-slate-600"><option value="">All groups</option>{[...new Set<string>(submissions.map((item: any) => String(item.groupCode || '')).filter(Boolean))].map(group => <option key={group} value={group}>{group}</option>)}</select>
+              <select aria-label="Filter assessment" value={resultAssessment} onChange={e => setResultAssessment(e.target.value)} className="p-2 rounded border dark:bg-slate-700 dark:border-slate-600"><option value="">All assessments</option>{[...new Map<string, string>(submissions.map((item: any) => [String(item.assessmentId || ''), String(item.assessmentTitle || item.assessmentId || '')] as [string, string])).entries()].filter(([id]) => id).map(([id, title]) => <option key={id} value={id}>{title}</option>)}</select>
+              <select aria-label="Filter exam type" value={resultType} onChange={e => setResultType(e.target.value)} className="p-2 rounded border dark:bg-slate-700 dark:border-slate-600"><option value="">All types</option>{['IELTS','SAT','NUET','General'].map(type => <option key={type}>{type}</option>)}</select>
+              <select aria-label="Filter review status" value={resultStatus} onChange={e => setResultStatus(e.target.value)} className="p-2 rounded border dark:bg-slate-700 dark:border-slate-600"><option value="">All statuses</option>{['pending-review','reviewed','auto-submitted','submitted'].map(status => <option key={status}>{status}</option>)}</select>
+              <div className="flex gap-1"><input aria-label="Submitted from" type="date" value={resultFrom} onChange={e => setResultFrom(e.target.value)} className="min-w-0 w-1/2 p-2 rounded border dark:bg-slate-700 dark:border-slate-600"/><input aria-label="Submitted to" type="date" value={resultTo} onChange={e => setResultTo(e.target.value)} className="min-w-0 w-1/2 p-2 rounded border dark:bg-slate-700 dark:border-slate-600"/></div>
+            </div>
+            {submissionsLoading && <p role="status" className="p-4">Loading submissions…</p>}{submissionsError && <p role="alert" className="p-4 rounded bg-red-50 text-red-700">Could not load submissions: {submissionsError}</p>}
+            {!submissionsLoading && !submissionsError && visibleSubmissions.length === 0 && <p className="p-8 text-center rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300">No submissions match these filters yet.</p>}
+            <div className="space-y-3">{visibleSubmissions.map((attempt: any) => <details key={attempt.id} className="rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-4">
+              <summary className="cursor-pointer list-none"><div className="grid grid-cols-1 md:grid-cols-4 gap-2 items-center"><div><strong>{attempt.studentName || 'Student'}</strong><div className="text-xs text-slate-500">{attempt.studentEmail || 'Email unavailable'} · UID {attempt.studentUid}</div></div><div><strong>{attempt.assessmentTitle}</strong><div className="text-xs text-slate-500">{attempt.examType} · {attempt.assessmentId}{attempt.sectionOrSkill ? ` · ${attempt.sectionOrSkill}` : ''}</div></div><div className="text-sm">{new Date(attempt.submittedAtMs || attempt.submittedAt || 0).toLocaleString()} · Group: {attempt.groupCode || '—'}</div><div className="text-sm">{attempt.score ?? 0} / {attempt.maxAutoScore ?? 0}{attempt.percentage != null ? ` (${attempt.percentage}%)` : ''} · {attempt.reviewStatus}</div></div><div className="mt-2 text-xs text-slate-500">Answered {attempt.answeredCount ?? 0} · unanswered {attempt.unansweredCount ?? 0} · correct {attempt.correctCount ?? 0} · incorrect {attempt.incorrectCount ?? 0} · pending review {attempt.pendingReviewCount ?? 0} · {attempt.isAutoSubmitted ? 'auto-submitted' : 'submitted'}{attempt.durationSeconds ? ` · ${Math.round(attempt.durationSeconds / 60)} min` : ''}</div></summary>
+              <div className="mt-4 border-t dark:border-slate-700 pt-3 space-y-4">{(attempt.questionReviews || []).map((review: any, index: number) => <div key={review.questionId || index} className="rounded-lg bg-slate-50 dark:bg-slate-900/60 p-3"><p className="font-semibold">Q{index + 1}. {review.questionText}</p><p className="text-sm mt-1">Student response: <span className="whitespace-pre-wrap">{typeof review.studentAnswer === 'object' ? JSON.stringify(review.studentAnswer) : String(review.studentAnswer || '—')}</span></p><p className="text-sm">Status: {review.status}{review.earnedPoints != null ? ` · ${review.earnedPoints}/${review.points} pts` : ''}{review.teacherReview?.points != null ? ` · teacher awarded ${review.teacherReview.points} pts` : ''}</p><p className="text-sm">Key: {JSON.stringify(review.answerKey ?? review.correctAnswer ?? '')}{review.acceptedAnswers?.length ? ` · Accepted: ${review.acceptedAnswers.join(', ')}` : ''}</p>{review.explanation && <p className="text-sm">Explanation: {review.explanation}</p>}{review.teacherReview?.feedback && <p className="text-sm text-blue-700 dark:text-blue-300">Teacher feedback: {review.teacherReview.feedback}</p>}{review.status === 'manual-review' && <TeacherReviewFields attempt={attempt} review={review} onSaveReview={onSaveReview} />}</div>)}</div>
+            </details>)}</div>
+          </section>
+        ) : !isBuildingTest && teacherArea === 'samples' ? (
+          <section className="text-left space-y-5"><div><h1 className="text-2xl font-bold text-slate-800 dark:text-white">Sample banks</h1><p className="text-slate-500 dark:text-slate-400 mt-1">Illustrative, unofficial pilot content. Import creates an unpublished draft; assign a group only after review.</p></div><div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">{SAMPLE_BANKS.map(({ file, bank }: any) => <article key={file} className="rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5"><h2 className="font-bold text-lg">{bank.title}</h2><p className="text-sm text-slate-500 mt-1">{bank.type} · {bank.questions?.length || 0} questions · v{bank.schemaVersion || bank.version || 1}</p><p className="text-sm my-3">{bank.description || 'Illustrative, unofficial practice bank.'}</p><div className="flex gap-2"><button onClick={() => setSelectedSample(selectedSample?.file === file ? null : { file, bank })} className="px-3 py-2 rounded border dark:border-slate-600">{selectedSample?.file === file ? 'Hide preview' : 'Preview'}</button><button onClick={() => importSampleAsDraft(bank)} className="px-3 py-2 rounded bg-purple-600 text-white">Import as draft</button></div>{selectedSample?.file === file && <div className="mt-4 space-y-3">{(bank.questions || []).map((question: any, index: number) => <div key={question.id || index} className="p-3 rounded-lg border dark:border-slate-600"><p className="font-medium">{index + 1}. {question.text}</p><QuestionResponse question={question} value={undefined} onChange={() => {}} preview /><p className="text-xs text-slate-500 mt-2">{question.section || question.satDomain || 'Practice'} · {resolveResponseType(question)} · {question.explanation || 'No explanation.'}</p></div>)}</div>}</article>)}</div></section>
+        ) : !isBuildingTest ? (
           <div>
             <div className="flex justify-between items-center mb-8">
               <div className="text-left">
@@ -869,7 +1011,7 @@ const TeacherDashboard = ({ user, tests, onLogout }) => {
                 <div key={test.id} className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 flex flex-col transition-colors">
                   <div className="flex justify-between items-start mb-4">
                     <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${getStatusColor(test.category)}`}>
-                      {test.category} • {test.type}
+                      {test.category} • {test.type} • {test.status || (test.groupCode ? 'Published' : 'Draft')}
                     </span>
                     <div className="flex items-center gap-2">
                       {test.pin && <Lock className="w-4 h-4 text-amber-500" aria-label="PIN protected" />}
@@ -1786,7 +1928,7 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onSaveGroupCode, 
                              <p className="font-medium">{reviewIndex + 1}. {review.questionText}</p>
                              <p className="mt-1">Your answer: {formatAnswerForReview(review.studentAnswer)}</p>
                              {review.status === 'graded' ? <p className={review.isCorrect ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'}>{review.isCorrect ? 'Correct' : `Incorrect. Answer key: ${formatAnswerForReview(review.answerKey)}`}{review.earnedPoints > 0 && !review.isCorrect ? ` — ${review.earnedPoints} / ${review.points} points` : ''}{review.acceptedAnswers?.length ? ` (also accepted: ${review.acceptedAnswers.join(', ')})` : ''}</p>
-                               : review.status === 'manual-review' ? <p className="text-amber-700 dark:text-amber-300">Awaiting teacher review; excluded from the automatic score.</p>
+                               : review.status === 'manual-review' ? <div className="text-amber-700 dark:text-amber-300">{review.teacherReview?.reviewedAt ? <p>Teacher reviewed this response{review.teacherReview.points != null ? ` · awarded ${review.teacherReview.points}/${review.points} points` : ''}.</p> : <p>Awaiting teacher review; excluded from the automatic score.</p>}{review.teacherReview?.feedback && <p className="mt-1 text-slate-700 dark:text-slate-200">Teacher feedback: {review.teacherReview.feedback}</p>}</div>
                                  : review.status === 'ungraded' ? <p>This response is ungraded practice.</p>
                                    : <p>Unanswered.</p>}
                              {review.explanation && <p className="mt-1">{review.explanation}</p>}
@@ -1843,6 +1985,8 @@ const ExamInterface = ({ test, user, onComplete }) => {
   const [initialAttempt] = useState(() => {
     try { return JSON.parse(localStorage.getItem(storageKey) || 'null'); } catch { return null; }
   });
+  const [attemptId] = useState(() => initialAttempt?.attemptId || crypto.randomUUID());
+  const [startedAtMs] = useState(() => initialAttempt?.startedAtMs || Date.now());
   const [deadlineTimestamp] = useState(initialAttempt?.deadlineTimestamp || Date.now() + (Number(test.durationSeconds) || 30 * 60) * 1000);
   const [timeLeft, setTimeLeft] = useState(Math.max(0, Math.ceil((deadlineTimestamp - Date.now()) / 1000)));
   const [answers, setAnswers] = useState<Record<string, unknown>>(initialAttempt?.answers || {});
@@ -1861,11 +2005,11 @@ const ExamInterface = ({ test, user, onComplete }) => {
 
   useEffect(() => {
     try {
-      localStorage.setItem(storageKey, JSON.stringify({ answers, currentQuestionIndex, flaggedQuestions, deadlineTimestamp }));
+      localStorage.setItem(storageKey, JSON.stringify({ attemptId, startedAtMs, answers, currentQuestionIndex, flaggedQuestions, deadlineTimestamp }));
     } catch (error) {
       console.warn('Could not save this attempt in local storage:', error);
     }
-  }, [answers, currentQuestionIndex, flaggedQuestions, deadlineTimestamp, storageKey]);
+  }, [attemptId, startedAtMs, answers, currentQuestionIndex, flaggedQuestions, deadlineTimestamp, storageKey]);
 
   useEffect(() => {
     if (timeLeft <= 0) handleAutoSubmit();
@@ -1922,6 +2066,8 @@ const ExamInterface = ({ test, user, onComplete }) => {
       const { score, maxAutoScore, manualReviewCount, ungradedCount, questionReviews } = calculateScore();
       await onComplete({
         testId: test.id,
+        attemptId,
+        startedAtMs,
         answers,
         score,
         maxPossibleScore: maxAutoScore,
@@ -1993,7 +2139,7 @@ const ExamInterface = ({ test, user, onComplete }) => {
 
       <div className="w-full bg-amber-50 dark:bg-amber-900/40 border-b border-amber-200 dark:border-amber-800 px-4 py-2 text-center text-sm text-amber-800 dark:text-amber-400 flex items-center justify-center gap-2">
         <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-        The test submits automatically when the timer runs out. Refreshing resets the timer and discards your answers.
+        Your answers, current question, flags, and deadline are saved on this device while the attempt is active. Keep this browser profile available; the exam submits automatically when the timer runs out.
       </div>
 
       <main className="flex-grow max-w-6xl w-full mx-auto p-4 sm:p-8 text-left">
@@ -2103,6 +2249,9 @@ export default function App() {
   const [loadingAuth, setLoadingAuth] = useState(true);
   const [tests, setTests] = useState<any[]>([]);
   const [results, setResults] = useState<any[]>([]);
+  const [submissions, setSubmissions] = useState<any[]>([]);
+  const [submissionsLoading, setSubmissionsLoading] = useState(false);
+  const [submissionsError, setSubmissionsError] = useState('');
   const [currentView, setCurrentView] = useState('loading');
   const [activeTest, setActiveTest] = useState<any>(null);
   const [modalInfo, setModalInfo] = useState({ isOpen: false, title: '', message: '' });
@@ -2168,17 +2317,25 @@ export default function App() {
       ? testsRef
           : query(
               testsRef,
+              where('answerKeysSecured', '==', true),
               where('groupCode', 'in', user.groupCode
                 ? [...new Set([user.groupCode.trim().toLowerCase(), 'all'])]
                 : ['all'])
             );
-    const unsubTests = onSnapshot(testsQuery, (snapshot) => {
-      const testsData: any[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const unsubTests = onSnapshot(testsQuery, async (snapshot) => {
+      let testsData: any[] = snapshot.docs.map(item => ({ id: item.id, ...item.data() }));
+      if (user.role === 'teacher') {
+        testsData = await Promise.all(testsData.map(async test => {
+          const keySnapshot = await getDoc(doc(db, 'artifacts', appId, 'teacher', 'data', 'answerKeys', test.id));
+          return keySnapshot.exists() ? { ...test, questions: mergeQuestionKeys(test.questions || [], keySnapshot.data().questions || []) } : test;
+        }));
+      }
       testsData.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       setTests(testsData);
     }, err => console.error(err));
 
     let unsubResults = () => {};
+    let unsubSubmissions = () => {};
     if (user.role === 'student') {
       const resultsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'results');
       unsubResults = onSnapshot(resultsRef, (snapshot) => {
@@ -2188,7 +2345,19 @@ export default function App() {
       }, err => console.error(err));
     }
 
-    return () => { unsubTests(); unsubResults(); };
+    if (user.role === 'teacher') {
+      setSubmissionsLoading(true);
+      setSubmissionsError('');
+      const submissionsRef = collection(db, 'artifacts', appId, 'public', 'data', 'submissions');
+      unsubSubmissions = onSnapshot(query(submissionsRef, orderBy('submittedAtMs', 'desc'), limit(500)), (snapshot) => {
+        setSubmissions(snapshot.docs.map(item => ({ id: item.id, ...item.data() })));
+        setSubmissionsLoading(false);
+      }, error => { setSubmissionsError(error.message || 'Permission or network error.'); setSubmissionsLoading(false); });
+    } else {
+      setSubmissions([]);
+    }
+
+    return () => { unsubTests(); unsubResults(); unsubSubmissions(); };
   }, [user]);
 
   const handleAuthAction = async (action, data) => {
@@ -2239,14 +2408,7 @@ export default function App() {
   };
 
   const handleLogout = async () => {
-    if (user?.uid) {
-      try {
-        if (activeTest?.id) localStorage.removeItem(`examAttempt:${user.uid}:${activeTest.id}`);
-        localStorage.removeItem(`activeExam:${user.uid}`);
-      } catch (error) {
-        console.warn('Could not clear the saved exam attempt:', error);
-      }
-    }
+    // Keep active attempt data in this browser so an accidental sign-out does not erase work.
     if (auth) {
       await signOut(auth);
     }
@@ -2276,8 +2438,10 @@ export default function App() {
   const completeTest = async (resultData) => {
     if (!user || !db) throw new Error('You are no longer signed in.');
     try {
-      const resultsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'results');
-      await addDoc(resultsRef, resultData);
+      const attemptId = resultData.attemptId || crypto.randomUUID();
+      const submitAttempt = httpsCallable(functions, 'submitExamAttempt');
+      const submissionResponse: any = await submitAttempt({ testId: resultData.testId, attemptId, answers: resultData.answers, isAutoSubmitted: resultData.isAutoSubmitted, startedAtMs: resultData.startedAtMs });
+      const savedResult = submissionResponse.data || {};
       try {
         localStorage.removeItem(`examAttempt:${user.uid}:${activeTest?.id}`);
         localStorage.removeItem(`activeExam:${user.uid}`);
@@ -2289,12 +2453,29 @@ export default function App() {
       setModalInfo({ 
         isOpen: true, 
         title: 'Task Submitted Successfully', 
-        message: `Your ${resultData.isAutoSubmitted ? 'time ran out and your ' : ''}answers have been safely submitted.\n\nYour Results: ${resultData.score} / ${resultData.maxPossibleScore}` 
+        message: `Your ${resultData.isAutoSubmitted ? 'time ran out and your ' : ''}answers have been safely submitted.\n\nYour Results: ${savedResult.score ?? '—'} / ${savedResult.maxAutoScore ?? '—'}${savedResult.pendingReviewCount ? `\n\n${savedResult.pendingReviewCount} response(s) are awaiting teacher review.` : ''}`
       });
     } catch (err) {
       console.error(err);
       throw new Error('Failed to save results. Your saved answers are still available to retry.', { cause: err });
     }
+  };
+
+  const saveTeacherReview = async (submissionId: string, questionId: string, reviewData: { feedback: string; points: number | null }) => {
+    const review = httpsCallable(functions, 'reviewSubmission');
+    await review({ submissionId, questionId, ...reviewData });
+  };
+
+  const backfillLegacySubmissions = async (cursorPath: string) => {
+    const migrate = httpsCallable(functions, 'backfillLegacySubmissions');
+    const response: any = await migrate(cursorPath ? { cursorPath } : {});
+    return response.data;
+  };
+
+  const secureExistingAnswerKeys = async () => {
+    const migrate = httpsCallable(functions, 'secureExistingAnswerKeys');
+    const response: any = await migrate({});
+    return response.data;
   };
 
   if (loadingAuth || currentView === 'loading') {
@@ -2319,7 +2500,7 @@ export default function App() {
       </button>
 
       {currentView === 'login' && <LoginScreen onAuthAction={handleAuthAction} />}
-      {currentView === 'teacher_dashboard' && <TeacherDashboard user={user} tests={tests} onLogout={handleLogout} />}
+      {currentView === 'teacher_dashboard' && <TeacherDashboard user={user} tests={tests} submissions={submissions} submissionsLoading={submissionsLoading} submissionsError={submissionsError} onSaveReview={saveTeacherReview} onBackfillLegacy={backfillLegacySubmissions} onSecureAnswerKeys={secureExistingAnswerKeys} onLogout={handleLogout} />}
       {currentView === 'student_dashboard' && <StudentDashboard user={user} tests={tests} results={results} onStartTest={startTest} onSaveGroupCode={saveStudentGroupCode} onLogout={handleLogout} />}
       {currentView === 'exam' && activeTest && user && <ExamInterface key={`${user.uid}:${activeTest.id}`} test={activeTest} user={user} onComplete={completeTest} />}
 
