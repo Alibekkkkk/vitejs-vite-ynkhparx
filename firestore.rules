@@ -32,19 +32,22 @@ service cloud.firestore {
         && (testGroup == 'all' || (studentGroup != '' && testGroup == studentGroup));
     }
 
-    function studentCanSubmit(appId, assessmentId, studentId) {
-      let profile = get(ownProfilePath(appId, studentId)).data;
+    function accountCanSubmit(appId, assessmentId, userId) {
+      let profile = get(ownProfilePath(appId, userId)).data;
       let assessment = get(/databases/$(database)/documents/artifacts/$(appId)/public/data/tests/$(assessmentId)).data;
       let group = profile.get('groupCode', '');
       let assigned = assessment.get('groupCode', '');
       return signedIn()
-        && request.auth.uid == studentId
-        && profile.get('role', '') == 'student'
-        && assigned != ''
-        && (assigned == 'all' || (group != '' && assigned == group))
+        && request.auth.uid == userId
         && assessment.get('published', false) == true
         && assessment.get('status', '') != 'draft'
-        && assessment.get('answerKeysSecured', false) == true;
+        && assessment.get('answerKeysSecured', false) == true
+        && (
+          (profile.get('role', '') == 'student'
+            && assigned != ''
+            && (assigned == 'all' || (group != '' && assigned == group)))
+          || (profile.get('role', '') == 'teacher' && isAuthorizedTeacher())
+        );
     }
 
     function validSubmissionAssessmentIds() {
@@ -129,9 +132,9 @@ service cloud.firestore {
 
     match /artifacts/{appId}/users/{userId}/results/{resultId} {
       allow get, list: if isAuthorizedTeacher() || (signedIn() && request.auth.uid == userId);
-      allow create: if studentCanSubmit(appId, request.resource.data.get('testId', ''), userId)
+      allow create: if accountCanSubmit(appId, request.resource.data.get('testId', ''), userId)
         && validSubmissionAssessmentIds()
-        && (request.resource.data.get('secondaryAssessmentId', '') == '' || studentCanSubmit(appId, request.resource.data.get('secondaryAssessmentId', ''), userId))
+        && (request.resource.data.get('secondaryAssessmentId', '') == '' || accountCanSubmit(appId, request.resource.data.get('secondaryAssessmentId', ''), userId))
         && resultId == request.resource.data.get('attemptId', '')
         && isUnscoredStudentSubmission();
       allow update: if isAuthorizedTeacher()
@@ -142,9 +145,9 @@ service cloud.firestore {
     match /artifacts/{appId}/public/data/submissions/{submissionId} {
       allow get, list: if isAuthorizedTeacher()
         || (signedIn() && resource.data.studentUid == request.auth.uid);
-      allow create: if studentCanSubmit(appId, request.resource.data.get('assessmentId', ''), request.auth.uid)
+      allow create: if accountCanSubmit(appId, request.resource.data.get('assessmentId', ''), request.auth.uid)
         && validSubmissionAssessmentIds()
-        && (request.resource.data.get('secondaryAssessmentId', '') == '' || studentCanSubmit(appId, request.resource.data.get('secondaryAssessmentId', ''), request.auth.uid))
+        && (request.resource.data.get('secondaryAssessmentId', '') == '' || accountCanSubmit(appId, request.resource.data.get('secondaryAssessmentId', ''), request.auth.uid))
         && submissionId == request.auth.uid + '_' + request.resource.data.get('attemptId', '')
         && request.resource.data.get('studentUid', '') == request.auth.uid
         && request.resource.data.get('groupCode', '') == get(ownProfilePath(appId, request.auth.uid)).data.get('groupCode', '')

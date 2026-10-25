@@ -2402,35 +2402,50 @@ const ExamWritingCoach = ({ question, userId, value, onChange, textareaRef }) =>
         : format.includes('graph') ? 'The graph compares…'
           : format.includes('chart') ? 'The chart compares…'
             : 'The visual illustrates…';
+  const hasIntroduction = wordCount >= (taskType === 1 ? 20 : 35)
+    || /\b(the (?:line )?graph|the chart|the table|the diagram|the maps|the visual|this essay)\b/i.test(draft);
+  const hasOverview = /\b(overall|in general|it is clear that|the main feature)\b/i.test(draft);
+  const hasComparison = /\b(by contrast|in comparison|whereas|while|meanwhile|compared with|respectively)\b/i.test(draft);
   const localPhrases = taskType === 1
-    ? wordCount < 25
+    ? !hasIntroduction
       ? [
-          { phrase: taskOneOpening, why: 'Introduce what the visual shows in your own words.' },
-          { phrase: 'Overall, …', why: 'State the main trend or contrast in a separate overview.' },
-          { phrase: 'In comparison, …', why: 'Introduce a useful comparison between categories.' },
+          { phrase: taskOneOpening, why: 'Introduction · paraphrase what the visual shows.' },
+          { phrase: 'The figures are given in…', why: 'Introduction · mention the unit if the visual provides one.' },
         ]
-      : !/\boverall\b/i.test(draft)
+      : !hasOverview
         ? [
-            { phrase: 'Overall, …', why: 'Add a clear overview of the most important features.' },
-            { phrase: 'The most notable feature is that…', why: 'Highlight a key pattern without listing every figure.' },
-            { phrase: 'By contrast, …', why: 'Compare a category with a different trend.' },
+            { phrase: 'Overall, …', why: 'Overview · summarize the most important trend or contrast.' },
+            { phrase: 'The most notable feature is that…', why: 'Overview · highlight a key pattern without listing every figure.' },
+            { phrase: 'It is clear that…', why: 'Overview · introduce the broad picture.' },
+          ]
+        : !hasComparison
+          ? [
+              { phrase: 'By contrast, …', why: 'Comparison · introduce a different category or period.' },
+              { phrase: 'Meanwhile, …', why: 'Comparison · move to another category’s trend.' },
+              { phrase: 'Whereas …, …', why: 'Comparison · connect two contrasting features.' },
+            ]
+          : [
+              { phrase: 'The figure rose from… to…', why: 'Detail · describe a change using the visual’s actual values.' },
+              { phrase: 'After reaching a peak of…, …', why: 'Detail · describe a peak only if shown in the visual.' },
+              { phrase: 'By the end of the period, …', why: 'Detail · summarize the final value or position.' },
+            ]
+    : !hasIntroduction
+      ? [
+          { phrase: 'This essay will argue that…', why: 'Introduction · state your position clearly.' },
+          { phrase: 'Although…, I believe…', why: 'Introduction · acknowledge another view and state your position.' },
+          { phrase: 'There are several reasons why…', why: 'Introduction · preview the main reasons.' },
+        ]
+      : !/\b(for example|for instance|such as)\b/i.test(draft)
+        ? [
+            { phrase: 'One reason for this is that…', why: 'Body paragraph · develop a supporting reason.' },
+            { phrase: 'For example, …', why: 'Body paragraph · connect a specific example to your point.' },
+            { phrase: 'As a result, …', why: 'Body paragraph · explain the consequence of your reasoning.' },
           ]
         : [
-            { phrase: 'By contrast, …', why: 'Compare two categories or periods.' },
-            { phrase: 'Meanwhile, …', why: 'Move smoothly to another trend or category.' },
-            { phrase: 'The figure rose from… to…', why: 'Describe a change using the visual’s actual values.' },
-          ]
-    : wordCount < 40
-      ? [
-          { phrase: 'This essay will argue that…', why: 'State your position clearly.' },
-          { phrase: 'Although…, I believe…', why: 'Acknowledge another view before stating your position.' },
-          { phrase: 'There are several reasons why…', why: 'Introduce the main reasons supporting your answer.' },
-        ]
-      : [
-          { phrase: 'One reason for this is that…', why: 'Develop a clear supporting reason.' },
-          { phrase: 'For example, …', why: 'Connect a specific example to your point.' },
-          { phrase: 'As a result, …', why: 'Explain the consequence of your reasoning.' },
-        ];
+            { phrase: 'However, it is also important to consider…', why: 'Development · acknowledge a relevant counterpoint.' },
+            { phrase: 'This suggests that…', why: 'Development · explain what your example demonstrates.' },
+            { phrase: 'In conclusion, …', why: 'Conclusion · summarize your position without adding a new point.' },
+          ];
 
   useEffect(() => {
     requestContext.current = { questionId: question.id, draft };
@@ -2530,7 +2545,7 @@ const ExamWritingCoach = ({ question, userId, value, onChange, textareaRef }) =>
     <section className="mt-4 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50/70 dark:bg-indigo-950/30 p-4 space-y-3" aria-label={`IELTS Task ${taskType} writing coach`}>
       <div>
         <h3 className="font-semibold text-indigo-950 dark:text-indigo-100">Task {taskType} writing coach</h3>
-        <p className="text-sm text-slate-700 dark:text-slate-300">Choose a phrase to insert at your cursor. Suggestions are optional; your writing is never replaced.</p>
+        <p className="text-sm text-slate-700 dark:text-slate-300">Suggestions update as your draft structure changes. Choose a phrase to insert at your cursor; your writing is never replaced.</p>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
         {localPhrases.map(item => <div key={item.phrase} className="rounded-lg bg-white dark:bg-slate-800 p-3">
@@ -2664,7 +2679,10 @@ const ExamInterface = ({ test, user, onComplete }) => {
       console.error('Could not submit this exam attempt:', error);
       submissionStarted.current = false;
       setIsSubmitting(false);
-      alert('Your answers are still saved on this device. Submission failed; please try again.');
+      const isPermissionError = error?.code === 'permission-denied' || /missing or insufficient permissions/i.test(String(error?.message || ''));
+      alert(isPermissionError
+        ? 'Firestore rejected this submission. Your answers are still saved on this device. Publish the latest firestore.rules; students must use an assigned group, and teacher practice submissions require an approved teacher account.'
+        : `Your answers are still saved on this device. Submission failed: ${error instanceof Error ? error.message : 'please try again.'}`);
     }
   };
 

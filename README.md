@@ -19,7 +19,7 @@ Vercel's free Hobby plan currently permits only personal, non-commercial use. A 
 
 ## IELTS Writing Coach (optional)
 
-The optional coach uses Firebase AI Logic with the Gemini Developer API provider. During Task 1 or Task 2 practice, including an IELTS writing assessment, students can use task-specific sentence starters and request contextual AI phrase options to insert at the cursor. The separate writing-practice workspace also offers focused hints and formative feedback. AI requests are user-triggered; drafts are saved locally, and local phrase suggestions remain available if AI is unavailable or quota-limited. It does not use Cloud Functions, OpenAI, or an automatic paid fallback. The Gemini Developer API free tier has changeable limits. AI feedback is formative, not an official IELTS score, and never replaces a student's writing automatically.
+The optional coach uses Firebase AI Logic with the Gemini Developer API provider. During Task 1 or Task 2 practice, including an IELTS writing assessment, task-specific phrase suggestions update locally as the draft's structure changes; students can also explicitly request contextual AI phrase options to insert at the cursor. AI is not called on every keystroke. The separate writing-practice workspace also offers focused hints and formative feedback. Drafts are saved locally, and local suggestions remain available if AI is unavailable or quota-limited. It does not use Cloud Functions, OpenAI, or an automatic paid fallback. The Gemini Developer API free tier has changeable limits. AI feedback is formative, not an official IELTS score, and never replaces a student's writing automatically.
 
 For the coach, enable **AI Logic → Gemini Developer API** in Firebase Console and register a reCAPTCHA v3 site and secret under **App Check**. Put the public site key in `VITE_RECAPTCHA_V3_SITE_KEY`; enter the secret only in Firebase Console, never in Git or the frontend. After checking App Check metrics, enable enforcement for Firebase AI Logic. For local development, create `.env.local` beside `package.json` with:
 
@@ -32,7 +32,7 @@ Register the local debug token in Firebase App Check. Never set the debug-token 
 
 ## Student groups and answer-key privacy
 
-The Firestore rules authorize the four verified Google teacher accounts listed in `firestore.rules`. Students can read only published tests assigned to their saved group or `all`. They cannot read teacher-only answer-key documents. Exam attempts are saved to a student's private result path and to the teacher's submissions collection; the rules reject client-provided score summaries.
+The Firestore rules authorize the four verified Google teacher accounts listed in `firestore.rules`. Students can read only published tests assigned to their saved group or `all`; approved teachers may also submit their own practice attempts for published, secured assessments. Students cannot read teacher-only answer-key documents. Exam attempts are saved to the account's private result path and to the teacher's submissions collection; the rules reject client-provided score summaries. After changing Firestore rules, publish them with `firebase deploy --project exam-portal-71a9b --only firestore:rules`.
 
 Teacher answer keys and explanations are stored under `artifacts/{appId}/teacher/data/answerKeys/{assessmentId}`. Student-readable assessment documents omit keys and explanations. The migration button copies old keys to the protected collection and removes them from the public assessment document without deleting the assessment.
 

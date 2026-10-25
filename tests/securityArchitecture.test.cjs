@@ -32,9 +32,15 @@ test('student-created result documents cannot include score fields or question r
   assert.match(rules, /request\.resource\.data\.get\('gradingMode', ''\) == 'teacher-review-required'/);
 });
 
+test('approved teachers may submit practice attempts while scores remain server-protected', () => {
+  assert.match(rules, /function accountCanSubmit\(appId, assessmentId, userId\)[\s\S]*?profile\.get\('role', ''\) == 'student'[\s\S]*?profile\.get\('role', ''\) == 'teacher' && isAuthorizedTeacher\(\)/);
+  assert.match(rules, /allow create: if accountCanSubmit/);
+  assert.match(rules, /request\.resource\.data\.get\('score', null\) == null/);
+});
+
 test('combined SAT records both source assessments and checks student access to the second section', () => {
   assert.match(appSource, /practiceSourceTestIds: practiceMetadata\.sourceTestIds \|\| \[test\.id\]/);
   assert.match(appSource, /sourceTestIds: \[readingWriting\.id, math\.id\]/);
-  assert.match(rules, /request\.resource\.data\.get\('secondaryAssessmentId', ''\) == '' \|\| studentCanSubmit/);
+  assert.match(rules, /request\.resource\.data\.get\('secondaryAssessmentId', ''\) == '' \|\| accountCanSubmit/);
   assert.match(rules, /function validSubmissionAssessmentIds\(\)[\s\S]*?ids\.size\(\) <= 2[\s\S]*?ids\[1\] == secondaryId/);
 });
