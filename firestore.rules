@@ -1,0 +1,81 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAuthorizedTeacher() {
+      return signedIn()
+        && request.auth.token.email_verified == true
+        && request.auth.token.firebase.sign_in_provider == 'google.com'
+        && (
+          request.auth.token.email == 'alibek.alpysbayev@gmail.com'
+          || request.auth.token.email == 'alibek.alpysbayev@nu.edu.kz'
+          || request.auth.token.email == 'aalpysbayev2@gmail.com'
+          || request.auth.token.email == 'nurbakyt.zholaman@nu.edu.kz'
+        );
+    }
+
+    function ownProfilePath(appId, userId) {
+      return /databases/$(database)/documents/artifacts/$(appId)/users/$(userId)/profile/info;
+    }
+
+    function canReadTestForStudent(appId) {
+      let profile = get(ownProfilePath(appId, request.auth.uid)).data;
+      let testGroup = resource.data.get('groupCode', '');
+      let studentGroup = profile.get('groupCode', '');
+      return signedIn()
+        && testGroup != ''
+        && (testGroup == 'all' || (studentGroup != '' && testGroup == studentGroup));
+    }
+
+    match /artifacts/{appId}/users/{userId}/profile/{profileId} {
+      allow get, list: if signedIn() && request.auth.uid == userId;
+
+      // Every account starts as a student. Teacher role promotion is only
+      // permitted for one of the verified Google accounts listed above.
+      allow create: if signedIn()
+        && request.auth.uid == userId
+        && profileId == 'info'
+        && request.resource.data.role == 'student';
+
+      allow update: if (
+          isAuthorizedTeacher()
+          && request.auth.uid == userId
+          && profileId == 'info'
+          && resource.data.role == 'student'
+          && request.resource.data.role == 'teacher'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role'])
+        )
+        || (
+          signedIn()
+          && request.auth.uid == userId
+          && profileId == 'info'
+          && resource.data.role == 'student'
+          && request.resource.data.role == 'student'
+          && resource.data.get('groupCode', '') == ''
+          && request.resource.data.get('groupCode', '') is string
+          && request.resource.data.get('groupCode', '') != ''
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['groupCode'])
+        )
+        || (
+          signedIn()
+          && request.auth.uid == userId
+          && profileId == 'info'
+          && resource.data.role == 'teacher'
+          && request.resource.data.role == 'student'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role'])
+        );
+    }
+
+    match /artifacts/{appId}/public/data/tests/{testId} {
+      allow get, list: if isAuthorizedTeacher() || canReadTestForStudent(appId);
+      allow create, update, delete: if isAuthorizedTeacher();
+    }
+
+    match /artifacts/{appId}/users/{userId}/results/{resultId} {
+      allow read, create: if signedIn() && request.auth.uid == userId;
+    }
+  }
+}
