@@ -2403,7 +2403,9 @@ const ExamWritingCoach = ({ question, userId, value, onChange, textareaRef }) =>
           : format.includes('chart') ? 'The chart compares…'
             : 'The visual illustrates…';
   const hasIntroduction = wordCount >= (taskType === 1 ? 20 : 35)
-    || /\b(the (?:line )?graph|the chart|the table|the diagram|the maps|the visual|this essay)\b/i.test(draft);
+    || (taskType === 1
+      ? /\b(?:the|this|following)\s+(?:given\s+)?(?:(?:line|bar|pie)\s+)?(?:graph|chart|table|diagram|maps?|visual)\b/i.test(draft)
+      : /\bthis essay\b/i.test(draft));
   const hasOverview = /\b(overall|in general|it is clear that|the main feature)\b/i.test(draft);
   const hasComparison = /\b(by contrast|in comparison|whereas|while|meanwhile|compared with|respectively)\b/i.test(draft);
   const localPhrases = taskType === 1
