@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "title": "SAT Reading and Writing Pilot — Illustrative Practice",
+  "description": "Original, unofficial examples covering all four SAT Reading and Writing domains; not a full-length test.",
+  "type": "SAT",
+  "category": "Practice",
+  "durationSeconds": 900,
+  "questions": [
+    { "id": "sat_rw_info", "questionType": "multiple-choice", "responseType": "single-choice", "type": "mcq", "satDomain": "Information and Ideas", "satSkill": "Central Ideas and Details", "difficulty": "easy", "text": "A field team recorded fewer bird calls on a windy morning than on a calm morning. The team notes that wind may have obscured calls. Which conclusion is best supported?", "options": ["Wind may affect how many calls the team detects", "Birds stop calling whenever wind rises", "The site has no birds in windy weather"], "correctAnswer": "Wind may affect how many calls the team detects", "points": 1, "explanation": "The passage says wind may have obscured calls, so detection could differ." },
+    { "id": "sat_rw_craft", "questionType": "multiple-choice", "responseType": "single-choice", "type": "mcq", "satDomain": "Craft and Structure", "satSkill": "Words in Context", "difficulty": "medium", "text": "In the sentence 'The editor tempered the claim after reviewing the small sample,' what does 'tempered' most nearly mean?", "options": ["Made less forceful", "Repeated exactly", "Removed entirely"], "correctAnswer": "Made less forceful", "points": 1, "explanation": "The small sample led the editor to moderate the claim." },
+    { "id": "sat_rw_expression", "questionType": "multiple-choice", "responseType": "single-choice", "type": "mcq", "satDomain": "Expression of Ideas", "satSkill": "Transitions", "difficulty": "easy", "text": "The first trial produced promising results. _____, the researchers plan to repeat it with more participants.", "options": ["Nevertheless", "For example", "Similarly"], "correctAnswer": "Nevertheless", "points": 1, "explanation": "The transition signals a qualification: promising early results still need replication." },
+    { "id": "sat_rw_conventions", "questionType": "multiple-choice", "responseType": "single-choice", "type": "mcq", "satDomain": "Standard English Conventions", "satSkill": "Boundaries", "difficulty": "easy", "text": "Choose the sentence with correct punctuation.", "options": ["The exhibit opened in May, it quickly attracted visitors.", "The exhibit opened in May; it quickly attracted visitors.", "The exhibit opened in May it, quickly attracted visitors."], "correctAnswer": "The exhibit opened in May; it quickly attracted visitors.", "points": 1, "explanation": "A semicolon correctly joins two independent clauses." }
+  ]
+}

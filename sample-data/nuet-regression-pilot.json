@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "title": "NUET Regression Pilot — Illustrative Practice",
+  "description": "Small unofficial NUET-style regression sample using legacy-compatible fields.",
+  "type": "NUET",
+  "category": "Practice",
+  "durationSeconds": 600,
+  "questions": [
+    { "id": "nuet_legacy_mcq", "type": "mcq", "questionType": "multiple-choice", "text": "Which fraction is equivalent to 3/4?", "options": ["6/8", "4/6", "5/8", "3/8"], "correctAnswer": "6/8", "points": 1, "difficulty": "easy", "explanation": "Multiply numerator and denominator by 2." },
+    { "id": "nuet_legacy_text", "type": "text", "questionType": "short-answer", "text": "What is 9 × 7?", "correctAnswer": "63", "acceptedAnswers": ["63"], "points": 1, "difficulty": "easy", "explanation": "Nine groups of seven total 63." }
+  ]
+}

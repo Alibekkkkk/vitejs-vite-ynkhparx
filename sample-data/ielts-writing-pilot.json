@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "title": "IELTS Writing Pilot — Illustrative Prompts",
+  "description": "Original unofficial prompts for practice. Both are intentionally manual-review writing tasks.",
+  "type": "IELTS",
+  "category": "Practice",
+  "durationSeconds": 3600,
+  "sections": { "writing": { "instructions": "Write your response in your own words. These practice prompts have no official band score." } },
+  "questions": [
+    { "id": "write_task1", "section": "writing", "questionType": "writing-task", "responseType": "long-text", "type": "text", "writingTaskType": 1, "writingFormat": "letter", "text": "Write a letter to your local library suggesting two improvements for students who study there. Explain why each improvement would help. Write at least 150 words.", "manualReview": true, "points": 1, "difficulty": "medium", "explanation": "Practice Task 1 letter prompt. Suggested structure: greeting, purpose, two developed suggestions, courteous closing." },
+    { "id": "write_task2", "section": "writing", "questionType": "writing-task", "responseType": "long-text", "type": "text", "writingTaskType": 2, "writingFormat": "essay", "text": "Some people believe cities should spend more on public parks than on new roads. To what extent do you agree or disagree? Give reasons and examples. Write at least 250 words.", "manualReview": true, "points": 1, "difficulty": "medium", "explanation": "Practice Task 2 essay prompt. Suggested structure: position, two supporting reasons with examples, conclusion." }
+  ]
+}
+

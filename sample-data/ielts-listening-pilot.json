@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "title": "IELTS Listening Pilot — Audio Needed",
+  "description": "Illustrative, unofficial practice. Audio references are intentionally blank; this bank is incomplete until a teacher adds real recordings.",
+  "type": "IELTS",
+  "category": "Practice",
+  "durationSeconds": 1800,
+  "sections": { "listening": { "parts": [
+    { "sectionNumber": 1, "title": "Booking a repair", "instructions": "Listen to a caller arranging a bicycle repair.", "audioUrl": "" },
+    { "sectionNumber": 2, "title": "Park visitor information", "instructions": "Listen to a guide describing a public park.", "audioUrl": "" },
+    { "sectionNumber": 3, "title": "Project meeting", "instructions": "Listen to two students discussing a class project.", "audioUrl": "" },
+    { "sectionNumber": 4, "title": "Urban gardens", "instructions": "Listen to a short lecture about community gardens.", "audioUrl": "" }
+  ] } },
+  "questions": [
+    { "id": "listen_s1_q1", "section": "listening", "listeningSectionNumber": 1, "questionType": "completion", "responseType": "short-text", "type": "text", "text": "The caller's bicycle is a _____.", "correctAnswer": "road bike", "points": 1, "difficulty": "easy", "explanation": "Illustrative key for a future recording." },
+    { "id": "listen_s2_q1", "section": "listening", "listeningSectionNumber": 2, "questionType": "multiple-choice", "responseType": "single-choice", "type": "mcq", "text": "Which place is mentioned as the meeting point?", "options": ["The north gate", "The café", "The lake bridge"], "correctAnswer": "The north gate", "points": 1, "difficulty": "easy", "explanation": "Illustrative key for a future recording." },
+    { "id": "listen_s3_q1", "section": "listening", "listeningSectionNumber": 3, "questionType": "multiple-choice", "responseType": "single-choice", "type": "mcq", "text": "What will the students do first?", "options": ["Check the survey responses", "Design a poster", "Interview a lecturer"], "correctAnswer": "Check the survey responses", "points": 1, "difficulty": "medium", "explanation": "Illustrative key for a future recording." },
+    { "id": "listen_s4_q1", "section": "listening", "listeningSectionNumber": 4, "questionType": "completion", "responseType": "short-text", "type": "text", "text": "Community gardens can reduce the distance food travels from _____.", "correctAnswer": "farm to table", "acceptedAnswers": ["farm to table", "farms to tables"], "points": 1, "difficulty": "medium", "explanation": "Illustrative key for a future recording." }
+  ]
+}

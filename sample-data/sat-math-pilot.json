@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "title": "SAT Math Pilot — Illustrative Practice",
+  "description": "Original, unofficial examples across all four SAT Math domains with MCQ and student-produced response.",
+  "type": "SAT",
+  "category": "Practice",
+  "durationSeconds": 900,
+  "questions": [
+    { "id": "sat_math_algebra_mcq", "questionType": "multiple-choice", "responseType": "single-choice", "type": "mcq", "satDomain": "Algebra", "satSkill": "Linear equations in one variable", "difficulty": "easy", "text": "If 3x + 5 = 20, what is x?", "options": ["3", "5", "8", "15"], "correctAnswer": "5", "points": 1, "explanation": "Subtract 5, then divide 15 by 3." },
+    { "id": "sat_math_advanced_spr", "questionType": "sat-student-produced-response", "responseType": "numeric", "type": "number", "satDomain": "Advanced Math", "satSkill": "Nonlinear equations", "difficulty": "medium", "text": "A positive number x satisfies x² = 49. Enter x.", "correctAnswer": 7, "numericTolerance": 0, "points": 1, "explanation": "The positive solution to x squared equals 49 is 7." },
+    { "id": "sat_math_data", "questionType": "multiple-choice", "responseType": "single-choice", "type": "mcq", "satDomain": "Problem-Solving and Data Analysis", "satSkill": "Percentages", "difficulty": "easy", "text": "A $40 item is discounted by 15%. What is its sale price?", "options": ["$6", "$34", "$35", "$46"], "correctAnswer": "$34", "points": 1, "explanation": "Fifteen percent of $40 is $6; subtract the discount." },
+    { "id": "sat_math_geometry", "questionType": "multiple-choice", "responseType": "single-choice", "type": "mcq", "satDomain": "Geometry and Trigonometry", "satSkill": "Area and volume", "difficulty": "medium", "text": "A rectangle is 7 units long and 4 units wide. What is its area?", "options": ["11", "22", "28", "56"], "correctAnswer": "28", "points": 1, "explanation": "Area is length multiplied by width: 7 × 4." }
+  ]
+}
