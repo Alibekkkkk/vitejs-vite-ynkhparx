@@ -5,6 +5,7 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "answerKeysSecured", "order": "ASCENDING" },
+        { "fieldPath": "published", "order": "ASCENDING" },
         { "fieldPath": "groupCode", "order": "ASCENDING" }
       ]
     }

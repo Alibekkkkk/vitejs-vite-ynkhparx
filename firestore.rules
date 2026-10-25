@@ -27,8 +27,56 @@ service cloud.firestore {
       let studentGroup = profile.get('groupCode', '');
       return signedIn()
         && resource.data.get('answerKeysSecured', false) == true
+        && resource.data.get('published', false) == true
         && testGroup != ''
         && (testGroup == 'all' || (studentGroup != '' && testGroup == studentGroup));
+    }
+
+    function studentCanSubmit(appId, assessmentId, studentId) {
+      let profile = get(ownProfilePath(appId, studentId)).data;
+      let assessment = get(/databases/$(database)/documents/artifacts/$(appId)/public/data/tests/$(assessmentId)).data;
+      let group = profile.get('groupCode', '');
+      let assigned = assessment.get('groupCode', '');
+      return signedIn()
+        && request.auth.uid == studentId
+        && profile.get('role', '') == 'student'
+        && assigned != ''
+        && (assigned == 'all' || (group != '' && assigned == group))
+        && assessment.get('published', false) == true
+        && assessment.get('status', '') != 'draft'
+        && assessment.get('answerKeysSecured', false) == true;
+    }
+
+    function validSubmissionAssessmentIds() {
+      let primaryId = request.resource.data.get('assessmentId', request.resource.data.get('testId', ''));
+      let ids = request.resource.data.get('assessmentIds', [primaryId]);
+      let secondaryId = request.resource.data.get('secondaryAssessmentId', '');
+      return ids is list
+        && ids.size() >= 1
+        && ids.size() <= 2
+        && ids[0] == primaryId
+        && (ids.size() == 1
+          ? secondaryId == ''
+          : secondaryId is string && secondaryId != '' && ids[1] == secondaryId);
+    }
+
+    function isUnscoredStudentSubmission() {
+      return request.resource.data.keys().hasOnly([
+          'testId', 'attemptId', 'answers', 'displayTitle', 'submittedAt', 'submittedAtMs',
+          'isAutoSubmitted', 'durationSeconds', 'score', 'maxPossibleScore', 'maxAutoScore',
+          'answeredCount', 'unansweredCount', 'pendingReviewCount', 'reviewStatus', 'gradingMode',
+          'id', 'studentUid', 'studentName', 'studentEmail', 'groupCode', 'assessmentId',
+          'assessmentTitle', 'examType', 'assessmentIds', 'secondaryAssessmentId'
+        ])
+        && request.resource.data.get('score', null) == null
+        && request.resource.data.get('maxAutoScore', null) == null
+        && request.resource.data.get('maxPossibleScore', null) == null
+        && request.resource.data.get('percentage', null) == null
+        && request.resource.data.get('correctCount', null) == null
+        && request.resource.data.get('incorrectCount', null) == null
+        && request.resource.data.get('questionReviews', null) == null
+        && request.resource.data.get('pendingReviewCount', 0) is int
+        && request.resource.data.get('gradingMode', '') == 'teacher-review-required';
     }
 
     match /artifacts/{appId}/users/{userId}/profile/{profileId} {
@@ -80,20 +128,36 @@ service cloud.firestore {
     }
 
     match /artifacts/{appId}/users/{userId}/results/{resultId} {
-      allow get, list: if signedIn() && request.auth.uid == userId;
-      // The trusted submission callable writes each student's compatible history.
-      allow create: if false;
-      allow update, delete: if false;
+      allow get, list: if isAuthorizedTeacher() || (signedIn() && request.auth.uid == userId);
+      allow create: if studentCanSubmit(appId, request.resource.data.get('testId', ''), userId)
+        && validSubmissionAssessmentIds()
+        && (request.resource.data.get('secondaryAssessmentId', '') == '' || studentCanSubmit(appId, request.resource.data.get('secondaryAssessmentId', ''), userId))
+        && resultId == request.resource.data.get('attemptId', '')
+        && isUnscoredStudentSubmission();
+      allow update: if isAuthorizedTeacher()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['questionReviews', 'pendingReviewCount', 'manualReviewCount', 'ungradedCount', 'reviewStatus', 'score', 'maxPossibleScore', 'maxAutoScore', 'correctCount', 'incorrectCount', 'answeredCount', 'unansweredCount', 'reviewedAt']);
+      allow delete: if false;
     }
 
     match /artifacts/{appId}/public/data/submissions/{submissionId} {
       allow get, list: if isAuthorizedTeacher()
         || (signedIn() && resource.data.studentUid == request.auth.uid);
-      // Admin SDK writes bypass rules; browser clients cannot forge score summaries.
-      allow create: if false;
+      allow create: if studentCanSubmit(appId, request.resource.data.get('assessmentId', ''), request.auth.uid)
+        && validSubmissionAssessmentIds()
+        && (request.resource.data.get('secondaryAssessmentId', '') == '' || studentCanSubmit(appId, request.resource.data.get('secondaryAssessmentId', ''), request.auth.uid))
+        && submissionId == request.auth.uid + '_' + request.resource.data.get('attemptId', '')
+        && request.resource.data.get('studentUid', '') == request.auth.uid
+        && request.resource.data.get('groupCode', '') == get(ownProfilePath(appId, request.auth.uid)).data.get('groupCode', '')
+        && isUnscoredStudentSubmission();
+      // Authorized teachers may import preserved historical records. These are
+      // explicitly marked unverified and cannot be created by student clients.
+      allow create: if isAuthorizedTeacher()
+        && request.resource.data.get('gradingMode', '') == 'legacy-unverified'
+        && request.resource.data.get('studentUid', '') is string
+        && request.resource.data.get('assessmentId', '') is string;
       allow update: if isAuthorizedTeacher()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'questionReviews', 'pendingReviewCount', 'reviewStatus', 'reviewedBy', 'reviewedAt'
+          'questionReviews', 'pendingReviewCount', 'manualReviewCount', 'ungradedCount', 'reviewStatus', 'reviewedBy', 'reviewedAt', 'score', 'maxPossibleScore', 'maxAutoScore', 'correctCount', 'incorrectCount', 'answeredCount', 'unansweredCount'
         ]);
       allow delete: if false;
     }

@@ -1,87 +1,60 @@
 # EduPortal
 
-EduPortal is a React, TypeScript, Vite, Firebase Authentication, and Firestore app for IELTS, SAT, and NUET practice. Students can practice IELTS Reading, Listening, and Writing, or choose SAT questions by domain and skill. Teachers can author, duplicate, preview, and validate reusable question banks.
+EduPortal is a React, TypeScript, Vite, Firebase Authentication, and Firestore app for IELTS, SAT, and NUET learning. It includes student groups, a teacher assessment builder, question-type practice, writing workspaces, sample-bank import, and teacher submissions/review.
 
-## IELTS Writing AI coach (Gemini Developer API free tier)
+## Free deployment and secure grading
 
-The default coach uses Firebase AI Logic from the browser with the Gemini Developer API (`gemini-3.8-flash`). It does not use Cloud Functions, an OpenAI key, a Gemini key in frontend code, or an automatic paid fallback. The Firebase AI Logic SDK itself is free; the Gemini Developer API free tier has limited, changeable quotas. It does not require linking a Cloud Billing account, but requests stop when a free quota is exhausted. Google may use free-tier requests to improve its products, so the app asks students to consent before their first AI request. The prompt and draft are only sent after they click a coaching button.
+This repository does not require Firebase Cloud Functions, a Firebase Blaze plan, a Vercel API, a service-account key, or a paid AI fallback. `firebase.json` deploys only Firestore rules and indexes. Do not put service-account credentials or API secrets in Git.
 
-### One-time Firebase Console setup
+The no-billing version deliberately does not save scores calculated in a student's browser: browser code and answer data can be edited. Answers are submitted privately with **Pending teacher review**. In **Results & submissions**, the teacher can save objective grading from the protected assessment key; essays and other subjective responses remain pending until the teacher assigns points and feedback. The app then updates the student's private result. Student submissions cannot set scores, percentages, answer keys, or correct-response counts in Firestore rules.
 
-1. Open the Firebase project `exam-portal-71a9b` in [Firebase Console](https://console.firebase.google.com/).
-2. Open **AI Services → AI Logic → Get started**. Choose **Gemini Developer API**. Do not choose the Agent Platform / Vertex AI provider; that is the billing-based option.
-3. Open **App Check** and register the web app with **reCAPTCHA Enterprise**. Add the production domain and `localhost` to the reCAPTCHA key's allowed domains. Copy the reCAPTCHA **site key** (it is a public web key, not a secret).
-4. In App Check, set up and enforce App Check for **Firebase AI Logic**. The app initializes App Check using the site key before Firebase Auth/Firestore. Firebase began enforcing App Check in the AI Logic setup workflow in July 2026 and will require enforcement from November 2, 2026.
+To make the app functional after a fresh Firebase setup:
 
-### Run locally
+1. In Firebase Console, open **Firestore Database → Rules**, paste the contents of [`firestore.rules`](firestore.rules), and publish. Or from the repository root run `firebase login` and `firebase deploy --project exam-portal-71a9b --only firestore:rules,firestore:indexes`. The student test query uses a composite index included in [`firestore.indexes.json`](firestore.indexes.json).
+2. Deploy the Vite app to your existing static host and keep its existing Firebase web config. No server environment variables are required for submissions or grading.
+3. Sign in with one of the four approved Google teacher accounts shown in `firestore.rules`. The frontend has the same public email allowlist by default; `VITE_TEACHER_EMAILS` can override it, but Firestore rules remain the authority. In **Results & submissions**, run **Secure existing assessment keys** once. Old assessments remain unavailable to students until the answer keys are moved to the teacher-only collection.
+4. Use **Import legacy results** if you need to copy older student result records into the teacher results list. Legacy scores are imported as historical data, not recalculated or verified.
 
-In the repository root, create a text file named `.env.local` (next to `package.json`) and paste these two lines, replacing the placeholder with your site key:
+Vercel's free Hobby plan currently permits only personal, non-commercial use. A portal used by students can fall outside that scope, so this project does not add Vercel Functions as a supposedly free server backend. Ask Vercel whether your exact educational use qualifies before relying on Hobby for a student-facing service. A trusted automatic grader would need a server provider whose terms fit your use; without one, teacher review is the safe option.
+
+## IELTS Writing Coach (optional)
+
+The optional coach uses Firebase AI Logic with the Gemini Developer API provider. It does not use Cloud Functions, OpenAI, or an automatic paid fallback. The Gemini Developer API free tier has changeable limits; requests stop if unavailable or quota-limited, and local phrase suggestions and saved drafts remain available. AI feedback is formative, not an official IELTS score, and never replaces a student's writing automatically.
+
+For the coach, enable **AI Logic → Gemini Developer API** in Firebase Console and register a reCAPTCHA v3 site and secret under **App Check**. Put the public site key in `VITE_RECAPTCHA_V3_SITE_KEY`; enter the secret only in Firebase Console, never in Git or the frontend. After checking App Check metrics, enable enforcement for Firebase AI Logic. For local development, create `.env.local` beside `package.json` with:
 
 ```dotenv
-VITE_RECAPTCHA_ENTERPRISE_SITE_KEY=PASTE_YOUR_RECAPTCHA_SITE_KEY_HERE
+VITE_RECAPTCHA_V3_SITE_KEY=PASTE_YOUR_RECAPTCHA_V3_SITE_KEY
 VITE_FIREBASE_APPCHECK_DEBUG_TOKEN=true
 ```
 
-Then run:
+Register the local debug token in Firebase App Check. Never set the debug-token variable in the production environment. AI requests are user-triggered, limited to 5,000 draft characters, 15 seconds apart, and 8 per browser/user per day; these client-side limits are not a server-enforced quota. Gemini Developer API and App Check usage have provider quotas; stop or retry later if the free-tier quota is exhausted. No paid fallback is enabled.
 
-```sh
-npm install
-npm run dev
-```
+## Student groups and answer-key privacy
 
-On the first AI request, the browser console prints a Firebase App Check debug token. In Firebase Console, open **App Check → Apps → this web app → Manage debug tokens**, add that token, then retry the request. Never publish a debug token or set `VITE_FIREBASE_APPCHECK_DEBUG_TOKEN` on the production deployment. Without a site key, AI coaching reports a setup message; local phrase suggestions and saved drafts continue to work.
+The Firestore rules authorize the four verified Google teacher accounts listed in `firestore.rules`. Students can read only published tests assigned to their saved group or `all`. They cannot read teacher-only answer-key documents. Exam attempts are saved to a student's private result path and to the teacher's submissions collection; the rules reject client-provided score summaries.
 
-### Deploy the frontend
+Teacher answer keys and explanations are stored under `artifacts/{appId}/teacher/data/answerKeys/{assessmentId}`. Student-readable assessment documents omit keys and explanations. The migration button copies old keys to the protected collection and removes them from the public assessment document without deleting the assessment.
 
-For Vercel, add `VITE_RECAPTCHA_ENTERPRISE_SITE_KEY` under the project's **Settings → Environment Variables** for Production (and Preview if needed), then redeploy the frontend. Do not set the debug-token variable in Vercel. The Firebase AI Logic SDK sends only the chosen Task 1/Task 2 prompt and the current draft when the student asks for a hint or feedback. Requests are limited to 5,000 draft characters, 15 seconds apart, and 8 per user/browser per day; Firebase App Check and Gemini service quotas also apply. These browser limits are convenience safeguards, not a server-enforced quota. AI output is formative feedback and never an official IELTS band score or an automatic rewrite.
+## Question engine and practice
 
-## Firestore rules and student groups
+The shared engine supports single choice, multiple select, short text, multiple blanks, numeric tolerance, matching, ordering, and long written responses. Writing and other subjective work is not treated as objectively incorrect. Existing NUET question records are normalized at read time without a destructive migration.
 
-The app expects `firestore.rules` to protect teacher actions, group-assigned exams, profiles, and individual results. The rule file authorizes the four approved, verified Google teacher accounts and restricts student test queries to their saved group code plus tests assigned to `all`. Review the approved addresses in `firestore.rules` before publishing if the teacher allowlist changes.
+Question-bank JSON uses `schemaVersion: 1`, assessment metadata, optional `sections`, and validated `questions`. To import one: open **Teacher Portal → Sample Banks → Choose JSON and preview**, select the matching file inside your local `sample-data` folder, inspect the rendered questions, then choose **Import as draft**. In the assessment editor, review it, assign the intended group, and save only when ready to publish. Imports get fresh assessment/question/slot IDs and never publish automatically. Existing imported copies are shown; a deliberate duplicate gets new IDs. Unpublishing removes student visibility but preserves result history.
 
-After reviewing the rules, deploy only Firestore rules from the repository root when needed:
+The local original banks include Academic and General Training Reading (40 questions, three passages, 60 minutes each), Academic and General Writing (two complete manually reviewed tasks each), Speaking Parts 1–3, SAT Reading and Writing (54 questions, 27 per locked 32-minute module), SAT Math (44 questions, 22 per locked 35-minute module), and an IELTS Listening script bank with 40 questions across four sections. The optional combined SAT practice joins the two published sections into 98 questions and 134 testing minutes, with four locked modules and an optional 10-minute break after Reading and Writing. It is fixed-sequence practice and does not implement adaptive routing or an official SAT scaled score.
 
-```sh
-firebase login
-firebase deploy --project exam-portal-71a9b --only firestore:rules,firestore:indexes
-```
+IELTS Listening has 40 original questions across four sections, plus teacher recording scripts and recording instructions. **It is not ready for student use without actual audio.** In the assessment editor, select each section, add a direct browser-playable recording URL, play the recording through, and tick **I played this recording through and verified it matches this section**. Save as a draft while any section lacks verified audio; the app blocks publication and student launch until all four recordings are present and verified. Recordings are not bundled with the JSON bank.
 
-The frontend is deployed on Vercel; Firebase deploys do not publish the Vercel website. Exam submissions now use authenticated Cloud Functions: `submitExamAttempt` checks the student's group, grades against the teacher-only answer key, and writes both the central teacher record and the student's existing history; `reviewSubmission` saves teacher feedback to both views; `backfillLegacySubmissions` copies older history into the teacher list without deleting it; `secureExistingAnswerKeys` moves existing assessment keys to teacher-only documents. The legacy `writingCoach` function remains optional and uses an OpenAI secret; the app's default writing coach still uses Firebase AI Logic.
+The `sample-data/` folder and local bank-generation scripts are deliberately ignored by Git because the banks contain answer keys and teacher recording scripts. Keep these files on the teacher's computer and choose them through the Sample Banks file picker. Do not force-add them to a public GitHub repository or put them in the public app bundle; doing so would expose their keys. Published assessments are copied into Firestore with keys in the teacher-only collection. On a different teacher's computer, transfer these bank files through a private channel or create local copies; they are intentionally not downloadable from the public app. The `validate:banks` check validates these local files when present and reports a skip on a fresh clone without private banks. `test:question-engine` includes static Firestore-policy checks, but the Firestore emulator was not run.
 
-Deploying Cloud Functions requires the Firebase project to use the **Blaze** plan. This change does not alter the project's billing plan and no function has been deployed from this task. To deploy rules, indexes, and only the required submission functions, use the repository root:
+Run the bank-content validator locally with `npm run validate:banks` before importing the files.
 
-```sh
-cd functions
-npm install
-cd ..
-firebase deploy --project exam-portal-71a9b --only firestore:rules,firestore:indexes,functions:submitExamAttempt,functions:backfillLegacySubmissions,functions:reviewSubmission,functions:secureExistingAnswerKeys
-```
-
-If you do not want to enable Blaze, do not publish this frontend version: the current rules deliberately deny browser-side result writes so students cannot forge scores. Cloud Functions usage is not the free browser AI coach; review Firebase's [Cloud Functions setup and pricing requirements](https://firebase.google.com/docs/functions/get-started) before deploying.
-
-After deploying Firebase, redeploy the frontend on Vercel. From **Teacher Portal → Results & submissions**, select **Secure existing assessment keys** once. Until this completes, older assessments remain hidden from students; their question content and keys are retained in Firestore, with keys moved to the teacher-only collection. Then use **Import legacy results** repeatedly until migration reaches the end. This reads result records in batches of 200, preserves original student history, and creates central records the teacher can filter and export. New submissions appear automatically. The teacher results subscription is limited to the newest 500 attempts.
-
-## Question authoring and grading
-
-The editor separates the exam-specific `questionType` tag from the student's `responseType`. Supported response types are single choice, multiple select, short text, multiple blanks, numeric/tolerance, matching, ordering, and long written responses. Multiple blanks and matching use individually keyed answer slots; written responses are never auto-graded as exact text. Existing `mcq`, `select`, `text`, and `number` records are normalized at read time, without a destructive migration.
-
-Answer keys are stored separately under `artifacts/{appId}/teacher/data/answerKeys/{assessmentId}`. Student-readable assessment documents omit answer keys, and student queries require `answerKeysSecured == true`. The migration button moves existing keys to the restricted collection without deleting assessments; existing exams stay hidden until migrated. Server-side grading rejects un-migrated exams.
-
-## Question bank JSON and sample banks
-
-Version 1 files use `schemaVersion`, assessment metadata (`title`, `type`, `durationSeconds`, optional `settings` and `sections`), and `questions` in the same shape used by the editor and grading engine. Questions must have unique IDs and supported response types; IELTS passage numbers must be 1–3 and Listening section numbers 1–4. File imports are validated, assigned fresh question/slot IDs, and opened as a new hidden draft. They never overwrite a saved test or publish automatically. Export a selected bank from the assessment editor with **Export question bank**.
-
-The teacher's **Sample banks** panel previews and imports the six original, unofficial pilots in [`sample-data/`](sample-data/). Listening has intentionally blank audio references and cannot be published until actual audio is added for every section containing questions. Original illustrative recording scripts are in [`sample-data/ielts-listening-transcripts.md`](sample-data/ielts-listening-transcripts.md). Assign a student group only after reviewing the imported draft and adding its needed audio/media.
-
-Question engine checks:
+## Checks
 
 ```sh
 npm run test:question-engine
 npm run build
 npm run lint
-npm --prefix functions run lint
+npm run validate:banks
 ```
-
-## SAT taxonomy
-
-SAT domain and skill names follow the [College Board Digital SAT content domains](https://satsuite.collegeboard.org/practice/content-domains). Existing skill labels remain available so old question banks continue to match; current official skill labels have been added where needed.
