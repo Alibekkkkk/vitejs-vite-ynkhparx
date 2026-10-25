@@ -1586,6 +1586,7 @@ const WritingPractice = ({ tests, userId, onBack }) => {
   const [timerRunning, setTimerRunning] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
   const [aiMessage, setAiMessage] = useState('');
+  const [aiPhraseOptions, setAiPhraseOptions] = useState<string[]>([]);
   const [aiError, setAiError] = useState('');
   const textareaRef = React.useRef(null);
   const responseCache = React.useRef(new Map());
@@ -1611,6 +1612,7 @@ const WritingPractice = ({ tests, userId, onBack }) => {
     setSecondsLeft(taskType === 1 ? 20 * 60 : 40 * 60);
     setTimerRunning(false);
     setAiMessage('');
+    setAiPhraseOptions([]);
     setAiError('');
   }, [taskType]);
 
@@ -1656,15 +1658,23 @@ const WritingPractice = ({ tests, userId, onBack }) => {
     const textarea = textareaRef.current;
     const start = textarea?.selectionStart ?? draft.length;
     const end = textarea?.selectionEnd ?? draft.length;
-    const updated = `${draft.slice(0, start)}${phrase}${draft.slice(end)}`;
+    const suffix = draft.slice(end);
+    const insertion = `${phrase}${/\s$/.test(phrase) || /^\s/.test(suffix) ? '' : ' '}`;
+    const updated = `${draft.slice(0, start)}${insertion}${suffix}`;
     setDraft(updated);
     requestAnimationFrame(() => {
       textarea?.focus();
-      textarea?.setSelectionRange(start + phrase.length, start + phrase.length);
+      textarea?.setSelectionRange(start + insertion.length, start + insertion.length);
     });
   };
 
-  const requestCoach = async (kind) => {
+  const parsePhraseOptions = (message: string) => message
+    .split(/\r?\n/)
+    .map(line => line.trim().replace(/^(?:[-*•]|\d+[.)])\s*/, '').replace(/^["'“”‘’]|["'“”‘’]$/g, '').trim())
+    .filter(Boolean)
+    .slice(0, 3);
+
+  const requestCoach = async (kind: 'hint' | 'feedback' | 'final' | 'phrases') => {
     if (!selectedPrompt || !draft.trim() || aiBusy) return;
     if (draft.length > 5000) {
       setAiError('For privacy and request limits, shorten your draft to 5,000 characters before requesting feedback.');
@@ -1673,7 +1683,14 @@ const WritingPractice = ({ tests, userId, onBack }) => {
     const promptText = String(selectedPrompt.question.text || '').slice(0, 1500);
     const cacheKey = `${kind}:${taskType}:${selectedPrompt.id}:${promptText}:${draft.trim()}`;
     if (responseCache.current.has(cacheKey)) {
-      setAiMessage(responseCache.current.get(cacheKey));
+      const cachedMessage = responseCache.current.get(cacheKey);
+      if (kind === 'phrases') {
+        setAiPhraseOptions(parsePhraseOptions(cachedMessage));
+        setAiMessage('');
+      } else {
+        setAiPhraseOptions([]);
+        setAiMessage(cachedMessage);
+      }
       return;
     }
     const consentKey = `writingCoachConsent:v1:${userId}`;
@@ -1718,14 +1735,31 @@ const WritingPractice = ({ tests, userId, onBack }) => {
     setAiBusy(true);
     setAiError('');
     setAiMessage('');
+    setAiPhraseOptions([]);
     try {
       const taskFormat = selectedPrompt.question.writingFormat || (taskType === 1 ? 'chart or visual report' : 'essay');
-      const mode = kind === 'hint' ? 'Give one concise next-step hint without rewriting the student text.' : kind === 'final' ? 'Review the complete current response and give a concise final review with strengths and up to three prioritized improvements. Do not assign an IELTS band score.' : 'Give concise, specific formative feedback: one strength and up to two actionable improvements. Do not assign an IELTS band score.';
+      const mode = kind === 'phrases'
+        ? `Suggest exactly three short, natural sentence starters suited to the next step in this draft. Return one starter per line with no numbering, bullets, explanation, or completed answer. Do not invent figures or details${taskType === 1 ? ' for the visual' : ''}.`
+        : kind === 'hint'
+          ? 'Give one concise next-step hint without rewriting the student text.'
+          : kind === 'final'
+            ? 'Review the complete current response and give a concise final review with strengths and up to three prioritized improvements. Do not assign an IELTS band score.'
+            : 'Give concise, specific formative feedback: one strength and up to two actionable improvements. Do not assign an IELTS band score.';
       const response = await writingAI.generateContent(`You are a supportive IELTS writing practice coach. This is IELTS Writing Task ${taskType} (${taskFormat}). Use the exact task prompt and the student's current draft. ${mode} Refer to concrete details in this prompt and draft. Do not write a replacement essay or claim to calculate an official score. Keep the response under 140 words.\n\nTASK PROMPT:\n${promptText}\n\nSTUDENT DRAFT:\n${draft.slice(0, 5000)}`);
       const message = response.response.text();
       if (typeof message !== 'string' || !message.trim()) throw new Error('Gemini returned no feedback.');
-      responseCache.current.set(cacheKey, message);
-      setAiMessage(message);
+      if (kind === 'phrases') {
+        const options = parsePhraseOptions(message);
+        if (!options.length) {
+          setAiError('The AI response did not contain usable phrase options. Try requesting suggestions again.');
+          return;
+        }
+        responseCache.current.set(cacheKey, message);
+        setAiPhraseOptions(options);
+      } else {
+        responseCache.current.set(cacheKey, message);
+        setAiMessage(message);
+      }
     } catch (error) {
       console.error('Writing coach request failed:', error);
       const code = String(error?.code || '').toLowerCase();
@@ -1760,7 +1794,7 @@ const WritingPractice = ({ tests, userId, onBack }) => {
           <div className="space-y-4">
             <div className="p-5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Prompt
-                <select value={selectedPromptId || selectedPrompt.id} onChange={event => { setSelectedPromptId(event.target.value); setDraft(loadDraft(event.target.value)); setAiMessage(''); }} className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white">
+                <select value={selectedPromptId || selectedPrompt.id} onChange={event => { setSelectedPromptId(event.target.value); setDraft(loadDraft(event.target.value)); setAiMessage(''); setAiPhraseOptions([]); setAiError(''); }} className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white">
                   {prompts.map(prompt => <option key={prompt.id} value={prompt.id}>{prompt.test.title}: {prompt.question.text.slice(0, 90)}</option>)}
                 </select>
               </label>
@@ -1777,7 +1811,7 @@ const WritingPractice = ({ tests, userId, onBack }) => {
                   <button onClick={() => setTimerRunning(previous => !previous)} className="px-2 py-1 rounded border border-slate-300 dark:border-slate-600">{timerRunning ? 'Pause' : 'Start'}</button>
                 </div>
               </div>
-              <textarea ref={textareaRef} value={draft} onChange={event => { const value = event.target.value; setDraft(value); try { if (selectedPrompt) localStorage.setItem(getDraftStorageKey(selectedPrompt.id), value); } catch { /* Storage may be unavailable in private browsing. */ } }} rows={16} maxLength={12000} placeholder="Write your response here. Your text stays on this device unless you explicitly request AI feedback." className="w-full p-4 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white leading-relaxed" />
+              <textarea ref={textareaRef} value={draft} onChange={event => { const value = event.target.value; setDraft(value); setAiMessage(''); setAiPhraseOptions([]); setAiError(''); try { if (selectedPrompt) localStorage.setItem(getDraftStorageKey(selectedPrompt.id), value); } catch { /* Storage may be unavailable in private browsing. */ } }} rows={16} maxLength={12000} placeholder="Write your response here. Your text stays on this device unless you explicitly request AI feedback." className="w-full p-4 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white leading-relaxed" />
             </div>
           </div>
           <aside className="space-y-4">
@@ -1789,6 +1823,8 @@ const WritingPractice = ({ tests, userId, onBack }) => {
               <h3 className="font-semibold text-slate-800 dark:text-white mb-3">Phrase suggestions</h3>
               <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">AI is optional. The selected prompt and draft are sent only after you click an AI button; the free-tier provider may use submissions to improve its products.</p>
               <div className="space-y-2">{localSuggestions.map(suggestion => <div key={suggestion.phrase} className="p-3 rounded-lg bg-slate-50 dark:bg-slate-700"><button onClick={() => insertPhrase(suggestion.phrase)} className="text-left font-semibold text-blue-700 dark:text-blue-300 underline">{suggestion.phrase}</button><p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{suggestion.why}</p></div>)}</div>
+              <button onClick={() => requestCoach('phrases')} disabled={aiBusy || !draft.trim()} className="w-full mt-4 px-3 py-2 rounded-lg bg-indigo-600 text-white font-semibold disabled:opacity-50">{aiBusy ? 'Preparing suggestions…' : 'Suggest 3 AI phrase options'}</button>
+              {aiPhraseOptions.length > 0 && <div className="mt-3 space-y-2" aria-label="AI phrase options">{aiPhraseOptions.map((phrase, index) => <div key={`${phrase}-${index}`} className="p-3 rounded-lg bg-indigo-50 dark:bg-indigo-900/30"><button onClick={() => insertPhrase(phrase)} className="text-left font-semibold text-indigo-800 dark:text-indigo-200 underline">{phrase}</button><p className="text-xs text-slate-600 dark:text-slate-300 mt-1">Select to insert at your cursor. Adapt it to your own ideas.</p></div>)}</div>}
               <button onClick={() => requestCoach('hint')} disabled={aiBusy || !draft.trim()} className="w-full mt-4 px-3 py-2 rounded-lg bg-blue-600 text-white font-semibold disabled:opacity-50">{aiBusy ? 'Getting hint…' : 'Ask for a focused AI hint'}</button>
               <button onClick={() => requestCoach('feedback')} disabled={aiBusy || !draft.trim()} className="w-full mt-2 px-3 py-2 rounded-lg border border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 font-semibold disabled:opacity-50">Request feedback</button>
               <button onClick={() => requestCoach('final')} disabled={aiBusy || !draft.trim()} className="w-full mt-2 px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 font-semibold disabled:opacity-50">Finish and request final review</button>
@@ -2349,6 +2385,170 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onSaveGroupCode, 
   );
 };
 
+const ExamWritingCoach = ({ question, userId, value, onChange, textareaRef }) => {
+  const taskType = Number(question.writingTaskType || 2);
+  const taskFormat = question.writingFormat || (taskType === 1 ? 'visual report' : 'essay');
+  const draft = typeof value === 'string' ? value : '';
+  const requestContext = React.useRef({ questionId: question.id, draft });
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiPhrases, setAiPhrases] = useState<string[]>([]);
+  const [aiError, setAiError] = useState('');
+  const requestTimes = React.useRef({ date: '', count: 0, lastRequest: 0 });
+  const wordCount = draft.trim() ? draft.trim().split(/\s+/).length : 0;
+  const format = String(taskFormat).toLowerCase();
+  const taskOneOpening = format.includes('map') ? 'The maps illustrate…'
+    : format.includes('process') ? 'The diagram illustrates…'
+      : format.includes('table') ? 'The table shows…'
+        : format.includes('graph') ? 'The graph compares…'
+          : format.includes('chart') ? 'The chart compares…'
+            : 'The visual illustrates…';
+  const localPhrases = taskType === 1
+    ? wordCount < 25
+      ? [
+          { phrase: taskOneOpening, why: 'Introduce what the visual shows in your own words.' },
+          { phrase: 'Overall, …', why: 'State the main trend or contrast in a separate overview.' },
+          { phrase: 'In comparison, …', why: 'Introduce a useful comparison between categories.' },
+        ]
+      : !/\boverall\b/i.test(draft)
+        ? [
+            { phrase: 'Overall, …', why: 'Add a clear overview of the most important features.' },
+            { phrase: 'The most notable feature is that…', why: 'Highlight a key pattern without listing every figure.' },
+            { phrase: 'By contrast, …', why: 'Compare a category with a different trend.' },
+          ]
+        : [
+            { phrase: 'By contrast, …', why: 'Compare two categories or periods.' },
+            { phrase: 'Meanwhile, …', why: 'Move smoothly to another trend or category.' },
+            { phrase: 'The figure rose from… to…', why: 'Describe a change using the visual’s actual values.' },
+          ]
+    : wordCount < 40
+      ? [
+          { phrase: 'This essay will argue that…', why: 'State your position clearly.' },
+          { phrase: 'Although…, I believe…', why: 'Acknowledge another view before stating your position.' },
+          { phrase: 'There are several reasons why…', why: 'Introduce the main reasons supporting your answer.' },
+        ]
+      : [
+          { phrase: 'One reason for this is that…', why: 'Develop a clear supporting reason.' },
+          { phrase: 'For example, …', why: 'Connect a specific example to your point.' },
+          { phrase: 'As a result, …', why: 'Explain the consequence of your reasoning.' },
+        ];
+
+  useEffect(() => {
+    requestContext.current = { questionId: question.id, draft };
+    setAiPhrases([]);
+    setAiError('');
+  }, [question.id, draft]);
+
+  const insertPhrase = (phrase: string) => {
+    const textarea = textareaRef.current;
+    const start = textarea?.selectionStart ?? draft.length;
+    const end = textarea?.selectionEnd ?? draft.length;
+    const suffix = draft.slice(end);
+    const insertion = `${phrase}${/\s$/.test(phrase) || /^\s/.test(suffix) ? '' : ' '}`;
+    onChange(`${draft.slice(0, start)}${insertion}${suffix}`);
+    requestAnimationFrame(() => {
+      textarea?.focus();
+      textarea?.setSelectionRange(start + insertion.length, start + insertion.length);
+    });
+  };
+
+  const requestPhrases = async () => {
+    if (aiBusy) return;
+    setAiError('');
+    if (!appCheckSiteKey) {
+      setAiError('AI suggestions need Firebase App Check. Configure VITE_RECAPTCHA_V3_SITE_KEY; phrase suggestions above are available now.');
+      return;
+    }
+    if (draft.length > 5000) {
+      setAiError('Shorten your draft to 5,000 characters before requesting AI suggestions. Your local phrase suggestions are still available.');
+      return;
+    }
+
+    const consentKey = `writingCoachConsent:v1:${userId}`;
+    try {
+      if (!localStorage.getItem(consentKey)) {
+        const accepted = window.confirm('The selected IELTS prompt and your current draft (up to 5,000 characters) will be sent to Google Gemini through Firebase AI Logic to generate optional phrase suggestions. The Gemini Developer API free tier may use submitted content to improve Google products. Continue?');
+        if (!accepted) return;
+        localStorage.setItem(consentKey, 'accepted');
+      }
+    } catch {
+      if (!window.confirm('The selected IELTS prompt and your current draft will be sent to Google Gemini for optional phrase suggestions. Continue?')) return;
+    }
+
+    const now = Date.now();
+    const today = new Date().toISOString().slice(0, 10);
+    if (requestTimes.current.date !== today) requestTimes.current = { date: today, count: 0, lastRequest: 0 };
+    const dayKey = `writingCoachUsage:${userId}:${today}`;
+    try {
+      const usage = JSON.parse(localStorage.getItem(dayKey) || '{"count":0,"lastRequest":0}');
+      const count = Math.max(requestTimes.current.count, Number(usage.count) || 0);
+      const lastRequest = Math.max(requestTimes.current.lastRequest, Number(usage.lastRequest) || 0);
+      if (now - lastRequest < 15000) {
+        setAiError('Please wait 15 seconds between AI requests. Phrase suggestions above are still available.');
+        return;
+      }
+      if (count >= 8) {
+        setAiError('You have reached this browser’s limit of 8 AI requests today. Phrase suggestions above are still available.');
+        return;
+      }
+      requestTimes.current = { date: today, count: count + 1, lastRequest: now };
+      localStorage.setItem(dayKey, JSON.stringify({ count: count + 1, lastRequest: now }));
+    } catch {
+      if (now - requestTimes.current.lastRequest < 15000 || requestTimes.current.count >= 8) {
+        setAiError('Please wait 15 seconds between AI requests. Phrase suggestions above are still available.');
+        return;
+      }
+      requestTimes.current = { date: today, count: requestTimes.current.count + 1, lastRequest: now };
+    }
+
+    setAiBusy(true);
+    setAiPhrases([]);
+    try {
+      const response = await writingAI.generateContent(`You are a supportive IELTS writing practice coach. This is IELTS Writing Task ${taskType} (${taskFormat}). Suggest exactly three short, natural sentence starters or linking phrases that fit the next step in the student's draft. Return one phrase per line, with no numbering, bullets, or explanations. Never write a complete answer or invent chart data; the student must take all factual details from the visual.\n\nTASK PROMPT:\n${String(question.text || '').slice(0, 1500)}\n\nSTUDENT DRAFT:\n${draft.slice(0, 5000)}`);
+      if (requestContext.current.questionId !== question.id || requestContext.current.draft !== draft) return;
+      const phrases = response.response.text()
+        .split(/\r?\n/)
+        .map((line: string) => line.trim().replace(/^(?:[-*•]|\d+[.)])\s*/, '').replace(/^["'“”‘’]|["'“”‘’]$/g, '').trim())
+        .filter(Boolean)
+        .slice(0, 3);
+      if (!phrases.length) throw new Error('Gemini returned no usable phrase suggestions.');
+      setAiPhrases(phrases);
+    } catch (error) {
+      console.error('IELTS exam writing coach request failed:', error);
+      const code = String(error?.code || '').toLowerCase();
+      const details = String(error?.message || '').toLowerCase();
+      setAiError(code.includes('quota') || code.includes('resource-exhausted') || details.includes('quota') || details.includes('rate')
+        ? 'The Gemini free-tier quota or request limit is currently exhausted. Try again later; phrase suggestions above are still available.'
+        : code.includes('permission') || details.includes('app check') || details.includes('app_check')
+          ? 'Firebase denied this AI request. Check Firebase AI Logic and this site’s App Check registration. Phrase suggestions above are still available.'
+          : 'AI suggestions are temporarily unavailable. Your draft is saved; phrase suggestions above are still available.');
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  return (
+    <section className="mt-4 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50/70 dark:bg-indigo-950/30 p-4 space-y-3" aria-label={`IELTS Task ${taskType} writing coach`}>
+      <div>
+        <h3 className="font-semibold text-indigo-950 dark:text-indigo-100">Task {taskType} writing coach</h3>
+        <p className="text-sm text-slate-700 dark:text-slate-300">Choose a phrase to insert at your cursor. Suggestions are optional; your writing is never replaced.</p>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        {localPhrases.map(item => <div key={item.phrase} className="rounded-lg bg-white dark:bg-slate-800 p-3">
+          <button type="button" onClick={() => insertPhrase(item.phrase)} className="text-left font-semibold text-blue-700 dark:text-blue-300 underline">{item.phrase}</button>
+          <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">{item.why}</p>
+        </div>)}
+      </div>
+      <button type="button" onClick={requestPhrases} disabled={aiBusy} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+        {aiBusy ? 'Getting AI phrase suggestions…' : 'Get AI phrase suggestions'}
+      </button>
+      {aiError && <p role="status" className="text-sm text-amber-800 dark:text-amber-200">{aiError}</p>}
+      {aiPhrases.length > 0 && <div className="grid grid-cols-1 sm:grid-cols-3 gap-2" aria-label="AI phrase suggestions">
+        {aiPhrases.map((phrase, index) => <button key={`${phrase}-${index}`} type="button" onClick={() => insertPhrase(phrase)} className="rounded-lg bg-white dark:bg-slate-800 p-3 text-left font-semibold text-indigo-800 dark:text-indigo-200 underline">{phrase}</button>)}
+      </div>}
+    </section>
+  );
+};
+
 const ExamInterface = ({ test, user, onComplete }) => {
   const storageKey = `examAttempt:${user.uid}:${test.id}`;
   const questions = Array.isArray(test.questions) ? test.questions : [];
@@ -2373,6 +2573,7 @@ const ExamInterface = ({ test, user, onComplete }) => {
   const [flaggedQuestions, setFlaggedQuestions] = useState<number[]>(initialAttempt?.flaggedQuestions || []);
   const [isConfirmSubmitOpen, setIsConfirmSubmitOpen] = useState(false);
   const submissionStarted = React.useRef(false);
+  const writingTextareaRef = React.useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     const updateRemaining = () => setTimeLeft(Math.max(0, Math.ceil((deadlineTimestamp - Date.now()) / 1000)));
@@ -2554,6 +2755,9 @@ const ExamInterface = ({ test, user, onComplete }) => {
       : rawSection;
   const currentSectionTitle = currentSectionId ? `${currentSectionId[0].toUpperCase()}${currentSectionId.slice(1)}` : '';
   const readingLayout = currentSectionId === 'reading';
+  const currentIsIeltsWriting = test.type === 'IELTS'
+    && currentQuestion?.section === 'writing'
+    && resolveResponseType(currentQuestion) === 'long-text';
   const unansweredQuestions = ((test.questions || []) as Array<{ id: string }>).reduce<number[]>((unanswered, question, index) => {
       const answer = answers[question.id];
       if (!isAnswerPresent(answer)) unanswered.push(index + 1);
@@ -2628,7 +2832,24 @@ const ExamInterface = ({ test, user, onComplete }) => {
                   )}
                   
                   <div className="mt-4 text-left w-full">
-                    <QuestionResponse question={currentQuestion} value={answers[currentQuestion.id]} onChange={value => handleAnswerChange(currentQuestion.id, value)} />
+                    {currentIsIeltsWriting ? <>
+                      <textarea
+                        ref={writingTextareaRef}
+                        rows={8}
+                        maxLength={12000}
+                        className="w-full p-4 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white leading-relaxed"
+                        placeholder="Write your response"
+                        value={typeof answers[currentQuestion.id] === 'string' ? String(answers[currentQuestion.id]) : ''}
+                        onChange={event => handleAnswerChange(currentQuestion.id, event.target.value)}
+                      />
+                      <ExamWritingCoach
+                        question={currentQuestion}
+                        userId={user.uid}
+                        value={answers[currentQuestion.id]}
+                        onChange={value => handleAnswerChange(currentQuestion.id, value)}
+                        textareaRef={writingTextareaRef}
+                      />
+                    </> : <QuestionResponse question={currentQuestion} value={answers[currentQuestion.id]} onChange={value => handleAnswerChange(currentQuestion.id, value)} />}
                   </div>
                 </div>
               </div>
