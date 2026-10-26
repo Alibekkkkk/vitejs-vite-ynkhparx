@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Clock, BookOpen, FileText, CheckCircle, LogOut, User, Play, AlertTriangle, 
+  Clock, BookOpen, FileText, CheckCircle, LogOut, User, Play,
   ArrowRight, LayoutDashboard, History, Check, Plus, Trash2, Edit3, Users, 
   Lock, Image as ImageIcon, Sun, Moon, X, Copy
 } from 'lucide-react';
@@ -32,6 +32,7 @@ import {
   type ResponseType,
 } from './questionEngine';
 import { parseQuestionBank } from './questionBank';
+import { getLocalWritingSuggestions } from './writingSuggestions';
 
 const firebaseConfig = {
   apiKey: "AIzaSyBj6nrhP7w-KbMeYHV7wtEMk-yHftG8H4c",
@@ -130,20 +131,34 @@ const resolveAccountRole = async (profileRef, firebaseUser, storedRole, requeste
   return 'student';
 };
 
-const Modal = ({ isOpen, title, children, onClose }) => {
+const Modal = ({ isOpen, title, children, onClose, actions = [] }) => {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-      <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl max-w-lg w-full p-6 animate-in fade-in zoom-in duration-200 max-h-[90vh] overflow-y-auto border border-slate-200 dark:border-slate-700">
-        <h3 className="text-xl font-bold text-gray-800 dark:text-white mb-4 text-left">{title}</h3>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" role="presentation">
+      <div role="dialog" aria-modal="true" aria-labelledby="modal-title" className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl max-w-lg w-full p-6 animate-in fade-in zoom-in duration-200 max-h-[90vh] overflow-y-auto border border-slate-200 dark:border-slate-700">
+        <h3 id="modal-title" className="text-xl font-bold text-gray-800 dark:text-white mb-4 text-left">{title}</h3>
         <div className="text-slate-600 dark:text-slate-300 text-left">{children}</div>
-        {onClose && (
-           <div className="mt-6 flex justify-end">
-             <button onClick={onClose} className="px-4 py-2 bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-white font-medium rounded-lg hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors">
-               Close
-             </button>
-           </div>
-        )}
+        {actions.length > 0 ? (
+          <div className="mt-6 flex justify-end gap-3">
+            {actions.map((action, index) => (
+              <button
+                key={`${action.label}-${index}`}
+                type="button"
+                onClick={action.onClick}
+                disabled={action.disabled}
+                className={`px-4 py-2 rounded-lg font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 ${action.destructive ? 'bg-red-600 text-white hover:bg-red-500' : 'bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-white hover:bg-slate-300 dark:hover:bg-slate-600'} disabled:opacity-60`}
+              >
+                {action.label}
+              </button>
+            ))}
+          </div>
+        ) : onClose ? (
+          <div className="mt-6 flex justify-end">
+            <button onClick={onClose} className="px-4 py-2 bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-white font-medium rounded-lg hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors">
+              Close
+            </button>
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -613,14 +628,31 @@ const TeacherReviewFields = ({ attempt, review, onSaveReview }) => {
   const [feedback, setFeedback] = useState(review.teacherReview?.feedback || '');
   const [points, setPoints] = useState(review.teacherReview?.points ?? '');
   const [saving, setSaving] = useState(false);
+  const [alertState, setAlertState] = useState<null | { title: string; message: string }>(null);
   const save = async () => {
     setSaving(true);
-    if (points === '') { setSaving(false); alert('Enter the awarded points before saving this review.'); return; }
+    if (points === '') {
+      setSaving(false);
+      setAlertState({ title: 'Review incomplete', message: 'Enter the awarded points before saving this review.' });
+      return;
+    }
     try { await onSaveReview(attempt.id, review.questionId, { feedback, points: Number(points) }); }
-    catch (error) { alert(error instanceof Error ? error.message : 'Could not save this review.'); }
+    catch (error) {
+      setAlertState({
+        title: 'Save failed',
+        message: error instanceof Error ? error.message : 'Could not save this review.'
+      });
+    }
     finally { setSaving(false); }
   };
-  return <div className="mt-3 grid md:grid-cols-[1fr_8rem_auto] gap-2"><textarea value={feedback} onChange={event => setFeedback(event.target.value)} aria-label="Teacher feedback" placeholder="Teacher feedback" rows={2} className="p-2 rounded border dark:bg-slate-700 dark:border-slate-600"/><input type="number" min="0" max={review.points ?? 0} step="0.5" value={points} onChange={event => setPoints(event.target.value)} aria-label="Reviewed points" placeholder="Points" className="p-2 rounded border dark:bg-slate-700 dark:border-slate-600"/><button disabled={saving} onClick={save} className="px-3 py-2 rounded bg-blue-600 text-white disabled:opacity-50">{saving ? 'Saving…' : 'Save review'}</button></div>;
+  return <>
+    <div className="mt-3 grid md:grid-cols-[1fr_8rem_auto] gap-2"><textarea value={feedback} onChange={event => setFeedback(event.target.value)} aria-label="Teacher feedback" placeholder="Teacher feedback" rows={2} className="p-2 rounded border dark:bg-slate-700 dark:border-slate-600"/><input type="number" min="0" max={review.points ?? 0} step="0.5" value={points} onChange={event => setPoints(event.target.value)} aria-label="Reviewed points" placeholder="Points" className="p-2 rounded border dark:bg-slate-700 dark:border-slate-600"/><button disabled={saving} onClick={save} className="px-3 py-2 rounded bg-blue-600 text-white disabled:opacity-50">{saving ? 'Saving…' : 'Save review'}</button></div>
+    {alertState && (
+      <Modal isOpen={true} title={alertState.title} onClose={() => setAlertState(null)}>
+        <p className="whitespace-pre-wrap text-left">{alertState.message}</p>
+      </Modal>
+    )}
+  </>;
 };
 
 const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submissionsError, onSaveReview, onBackfillLegacy, onSecureAnswerKeys, onLogout }) => {
@@ -647,10 +679,34 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
   const [validationErrors, setValidationErrors] = useState<Record<string, string[]>>({});
   const [previewQuestionId, setPreviewQuestionId] = useState<string | null>(null);
   const [questionBankError, setQuestionBankError] = useState('');
+  const [confirmPrompt, setConfirmPrompt] = useState<null | { title: string; message: string; confirmLabel: string; destructive?: boolean; onConfirm: () => void; onCancel: () => void; }>(null);
+  const [alertPrompt, setAlertPrompt] = useState<null | { title: string; message: string; onClose: () => void; }>(null);
 
-  const importSampleAsDraft = (bank: any, file: string) => {
+  const showConfirmDialog = async (title: string, message: string, confirmLabel = 'Confirm', destructive = false) => {
+    return await new Promise<boolean>(resolve => {
+      setConfirmPrompt({
+        title,
+        message,
+        confirmLabel,
+        destructive,
+        onConfirm: () => { setConfirmPrompt(null); resolve(true); },
+        onCancel: () => { setConfirmPrompt(null); resolve(false); },
+      });
+    });
+  };
+
+  const showAlertDialog = async (title: string, message: string) => {
+    await new Promise<void>(resolve => {
+      setAlertPrompt({ title, message, onClose: () => { setAlertPrompt(null); resolve(); } });
+    });
+  };
+
+  const importSampleAsDraft = async (bank: any, file: string) => {
     const existingCopies = tests.filter((item: any) => item.sourceBank === file);
-    if (existingCopies.length && !window.confirm(`This sample bank was already imported as ${existingCopies.map((item: any) => item.title).join(', ')}. Create another separate draft with fresh question IDs?`)) return;
+    if (existingCopies.length) {
+      const confirmed = await showConfirmDialog('Duplicate sample?', `This sample bank was already imported as ${existingCopies.map((item: any) => item.title).join(', ')}. Create another separate draft with fresh question IDs?`, 'Create draft', false);
+      if (!confirmed) return;
+    }
     bank = parseQuestionBank(bank);
     const sourceQuestions = Array.isArray(bank.questions) ? bank.questions : [];
     const idMap = new Map(sourceQuestions.map((question: any, index: number) => [question.id, `q_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 6)}`]));
@@ -669,7 +725,7 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
     event.target.value = '';
     if (!file) return;
     if (file.name.toLowerCase() !== expectedFile.toLowerCase()) {
-      alert(`Please choose ${expectedFile} from the repository's sample-data folder.`);
+    await showAlertDialog('Choose the expected sample file', `Please choose ${expectedFile} from the repository's sample-data folder.`);
       return;
     }
     try {
@@ -678,7 +734,7 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
       if (descriptor && bank.type !== descriptor.type) throw new Error(`This file is not a ${descriptor.type} bank.`);
       setSelectedSample({ file: expectedFile, bank });
     } catch (error) {
-      alert(error instanceof Error ? `Could not load this bank: ${error.message}` : 'Could not read this question bank.');
+      await showAlertDialog('Sample bank error', error instanceof Error ? `Could not load this bank: ${error.message}` : 'Could not read this question bank.');
     }
   };
 
@@ -823,7 +879,7 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'tests'), copiedTest);
     } catch (err) {
       console.error(err);
-      alert('Failed to duplicate this assessment.');
+      await showAlertDialog('Duplicate failed', 'Failed to duplicate this assessment.');
     }
   };
 
@@ -950,7 +1006,10 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
     try {
       if (file.size > 2_000_000) throw new Error('Choose a JSON file smaller than 2 MB.');
       const bank = parseQuestionBank(JSON.parse(await file.text()));
-      if ((editingId || newTest.title || newTest.questions.length) && !window.confirm('Replace this editor content with the imported bank as a new unpublished draft? Saved assessments will not be changed.')) return;
+      if (editingId || newTest.title || newTest.questions.length) {
+        const confirmed = await showConfirmDialog('Replace editor draft?', 'Replace this editor content with the imported bank as a new unpublished draft? Saved assessments will not be changed.', 'Replace draft');
+        if (!confirmed) return;
+      }
       const idMap = new Map(bank.questions.map((question: any, index) => [question.id, `q_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 6)}`]));
       const questions = bank.questions.map((question: any) => ({ ...question, sourceId: question.id, id: idMap.get(question.id), answerSlots: question.answerSlots?.map((slot: any, index: number) => ({ ...slot, id: `${idMap.get(question.id)}_slot_${index + 1}` })) }));
       setEditingId(null);
@@ -977,7 +1036,10 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
   };
 
   const saveTest = async () => {
-    if (!newTest.title || newTest.questions.length === 0) return alert("Title and at least 1 question required.");
+    if (!newTest.title || newTest.questions.length === 0) {
+      await showAlertDialog('Assessment incomplete', 'Title and at least 1 question required.');
+      return;
+    }
     const errors = Object.fromEntries(newTest.questions.map((question, index) => {
       const messages = validateQuestion(question);
       if (newTest.type === 'SAT' && (!question.satDomain || !question.satSkill)) messages.push('Choose a SAT domain and skill.');
@@ -987,7 +1049,7 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
     setValidationErrors(errors);
     if (Object.keys(errors).length) {
       const firstIndex = newTest.questions.findIndex(question => errors[question.id || String(newTest.questions.indexOf(question))]);
-      alert(`Please fix question ${firstIndex + 1}: ${Object.values(errors)[0][0]}`);
+      await showAlertDialog('Fix the assessment', `Please fix question ${firstIndex + 1}: ${Object.values(errors)[0][0]}`);
       return;
     }
     setIsSubmitting(true);
@@ -1014,14 +1076,17 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
         const sectionsMissingAudio = [...new Set<number>(listeningQuestions.map((question: any) => Number(question.listeningSectionNumber || 1)))].filter(sectionNumber => !getListeningAudioUrl(testToSave, sectionNumber));
         if (sectionsMissingAudio.length) {
           setIsSubmitting(false);
-          alert(`This assessment cannot be published yet. Add a browser-playable recording for Listening section${sectionsMissingAudio.length > 1 ? 's' : ''} ${sectionsMissingAudio.join(', ')}, test playback, and mark each recording verified.`);
+          await showAlertDialog('Publishing blocked', `This assessment cannot be published yet. Add a browser-playable recording for Listening section${sectionsMissingAudio.length > 1 ? 's' : ''} ${sectionsMissingAudio.join(', ')}, test playback, and mark each recording verified.`);
           return;
         }
       }
 
-      if (testToSave.groupCode && !window.confirm(`Publish “${testToSave.title}” to student group “${testToSave.groupCode}” now? Students in that group will be able to see it.`)) {
-        setIsSubmitting(false);
-        return;
+      if (testToSave.groupCode) {
+        const confirmed = await showConfirmDialog('Publish assessment?', `Publish “${testToSave.title}” to student group “${testToSave.groupCode}” now? Students in that group will be able to see it.`, 'Publish', false);
+        if (!confirmed) {
+          setIsSubmitting(false);
+          return;
+        }
       }
 
       const { publicQuestions, answerKeyQuestions, publicSections, teacherSections } = splitQuestionKeys(testToSave.questions, testToSave.sections);
@@ -1047,9 +1112,12 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
       setEditingId(null);
       setNewTest(createEmptyTest());
       setActiveQuestionSection('listening');
-      alert(testToSave.groupCode
-        ? `Published “${testToSave.title}” for group ${testToSave.groupCode} (assessment ID ${testRef.id}). It is visible to that group.`
-        : `Saved “${testToSave.title}” as a draft. Assessment ID: ${testRef.id}`);
+      await showAlertDialog(
+        'Assessment saved',
+        testToSave.groupCode
+          ? `Published “${testToSave.title}” for group ${testToSave.groupCode} (assessment ID ${testRef.id}). It is visible to that group.`
+          : `Saved “${testToSave.title}” as a draft. Assessment ID: ${testRef.id}`
+      );
     } catch (err) {
       const firebaseError = err as { code?: string; message?: string };
       console.error('Failed to save assessment to Firestore:', err);
@@ -1061,28 +1129,30 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
           : code === 'resource-exhausted'
             ? 'Firestore rejected the document because it exceeded a storage or quota limit. Try reducing large images or imported content.'
             : firebaseError?.message || 'Check your connection and the browser console for the Firestore error.';
-      alert(`Could not save the assessment (${code}). ${guidance}`);
+      await showAlertDialog('Save failed', `Could not save the assessment (${code}). ${guidance}`);
     }
     setIsSubmitting(false);
   };
 
   const archiveTest = async (testId) => {
-    if(!window.confirm("Archive this assessment? It will be hidden from students, while the answer key and historical results are preserved.")) return;
+    const confirmed = await showConfirmDialog('Archive assessment?', 'Archive this assessment? It will be hidden from students, while the answer key and historical results are preserved.', 'Archive', true);
+    if (!confirmed) return;
     try {
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tests', testId), { status: 'archived', published: false, groupCode: '', archivedAt: new Date().toISOString() });
     } catch(err) {
       console.error(err);
-      alert('Could not archive this assessment. Please check your connection and try again.');
+      await showAlertDialog('Archive failed', 'Could not archive this assessment. Please check your connection and try again.');
     }
   }
 
   const unpublishTest = async (test: any) => {
-    if (!window.confirm(`Return “${test.title}” to draft? Students will no longer see it. Existing submissions and results will be kept.`)) return;
+    const confirmed = await showConfirmDialog('Return to draft?', `Return “${test.title}” to draft? Students will no longer see it. Existing submissions and results will be kept.`, 'Return to draft', false);
+    if (!confirmed) return;
     try {
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tests', test.id), { groupCode: '', published: false, status: 'draft', updatedAt: new Date().toISOString() });
-      alert(`“${test.title}” is now a draft. Historical submissions remain available.`);
+      await showAlertDialog('Assessment returned to draft', `“${test.title}” is now a draft. Historical submissions remain available.`);
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Could not return this assessment to draft.');
+      await showAlertDialog('Could not unpublish', error instanceof Error ? error.message : 'Could not return this assessment to draft.');
     }
   };
 
@@ -1129,8 +1199,27 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
   };
 
   return (
-    <div className="min-h-screen w-full bg-slate-50 dark:bg-slate-900 transition-colors duration-300">
-      <header className="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 sticky top-0 z-10 transition-colors w-full">
+    <>
+      {confirmPrompt && (
+        <Modal
+          isOpen={true}
+          title={confirmPrompt.title}
+          onClose={confirmPrompt.onCancel}
+          actions={[
+            { label: 'Cancel', onClick: confirmPrompt.onCancel },
+            { label: confirmPrompt.confirmLabel, destructive: confirmPrompt.destructive, onClick: confirmPrompt.onConfirm },
+          ]}
+        >
+          <p className="whitespace-pre-wrap text-left">{confirmPrompt.message}</p>
+        </Modal>
+      )}
+      {alertPrompt && (
+        <Modal isOpen={true} title={alertPrompt.title} onClose={alertPrompt.onClose}>
+          <p className="whitespace-pre-wrap text-left">{alertPrompt.message}</p>
+        </Modal>
+      )}
+      <div className="min-h-screen w-full bg-slate-50 dark:bg-slate-900 transition-colors duration-300">
+        <header className="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 sticky top-0 z-10 transition-colors w-full">
         <div className="w-full px-4 sm:px-8 lg:px-12 mx-auto">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-2">
@@ -1168,7 +1257,7 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
             <div className="space-y-3">{visibleSubmissions.map((attempt: any) => <details key={attempt.id} className="rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-4">
               <summary className="cursor-pointer list-none"><div className="grid grid-cols-1 md:grid-cols-4 gap-2 items-center"><div><strong>{attempt.studentName || 'Student'}</strong><div className="text-xs text-slate-500">{attempt.studentEmail || 'Email unavailable'} · UID {attempt.studentUid}</div></div><div><strong>{attempt.assessmentTitle}</strong><div className="text-xs text-slate-500">{attempt.examType} · {attempt.assessmentId}{attempt.sectionOrSkill ? ` · ${attempt.sectionOrSkill}` : ''}</div></div><div className="text-sm">{new Date(attempt.submittedAtMs || attempt.submittedAt || 0).toLocaleString()} · Group: {attempt.groupCode || '—'}</div><div className="text-sm">{attempt.score == null ? 'Pending' : `${attempt.score} / ${attempt.maxPossibleScore ?? attempt.maxAutoScore ?? '—'}`} · {attempt.reviewStatus}</div></div><div className="mt-2 text-xs text-slate-500">Answered {attempt.answeredCount ?? 0} · unanswered {attempt.unansweredCount ?? 0} · correct {attempt.correctCount ?? 0} · incorrect {attempt.incorrectCount ?? 0} · pending review {attempt.pendingReviewCount ?? 0} · {attempt.isAutoSubmitted ? 'auto-submitted' : 'submitted'}{attempt.durationSeconds ? ` · ${Math.round(attempt.durationSeconds / 60)} min` : ''}</div></summary>
               <div className="mt-4 border-t dark:border-slate-700 pt-3 space-y-4">
-                <button onClick={async () => { try { await onSaveReview(attempt.id, '__finalize__', { feedback: '', points: null }); } catch (error) { alert(error instanceof Error ? error.message : 'Could not save grading. Try again.'); } }} className="px-3 py-2 rounded bg-blue-600 text-white text-sm font-semibold">Save objective grading and results</button>
+                <button onClick={async () => { try { await onSaveReview(attempt.id, '__finalize__', { feedback: '', points: null }); } catch (error) { await showAlertDialog('Could not save grading', error instanceof Error ? error.message : 'Could not save grading. Try again.'); } }} className="px-3 py-2 rounded bg-blue-600 text-white text-sm font-semibold">Save objective grading and results</button>
                 <p className="text-xs text-slate-500">Uses the saved teacher-only answer key. Written responses remain pending until you review them.</p>
                 {(attempt.questionReviews || []).map((review: any, index: number) => <div key={review.questionId || index} className="rounded-lg bg-slate-50 dark:bg-slate-900/60 p-3"><p className="font-semibold">Q{index + 1}. {review.questionText}</p><p className="text-sm mt-1">Student response: <span className="whitespace-pre-wrap">{typeof review.studentAnswer === 'object' ? JSON.stringify(review.studentAnswer) : String(review.studentAnswer || '—')}</span></p><p className="text-sm">Status: {review.status}{review.earnedPoints != null ? ` · ${review.earnedPoints}/${review.points} pts` : ''}{review.teacherReview?.points != null ? ` · teacher awarded ${review.teacherReview.points}/${review.points} pts` : ''}</p><p className="text-sm">Key: {JSON.stringify(review.answerKey ?? review.correctAnswer ?? '')}{review.acceptedAnswers?.length ? ` · Accepted: ${review.acceptedAnswers.join(', ')}` : ''}</p>{review.explanation && <p className="text-sm">Explanation: {review.explanation}</p>}{review.teacherReview?.feedback && <p className="text-sm text-blue-700 dark:text-blue-300">Teacher feedback: {review.teacherReview.feedback}</p>}{review.status === 'manual-review' && <TeacherReviewFields attempt={attempt} review={review} onSaveReview={onSaveReview} />}</div>)}
               </div>
@@ -1574,11 +1663,13 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
         )}
       </main>
     </div>
+    </>
   )
 }
 
 const WritingPractice = ({ tests, userId, onBack }) => {
-  const [taskType, setTaskType] = useState(1);
+  const taskOptions: Array<1 | 2> = [1, 2];
+  const [taskType, setTaskType] = useState<1 | 2>(1);
   const [selectedPromptId, setSelectedPromptId] = useState('');
   const [draft, setDraft] = useState('');
   const [checklist, setChecklist] = useState({});
@@ -1588,6 +1679,9 @@ const WritingPractice = ({ tests, userId, onBack }) => {
   const [aiMessage, setAiMessage] = useState('');
   const [aiPhraseOptions, setAiPhraseOptions] = useState<string[]>([]);
   const [aiError, setAiError] = useState('');
+  const [inlineCompletion, setInlineCompletion] = useState('');
+  const [confirmDialog, setConfirmDialog] = useState<null | { title: string; message: string; onConfirm: () => void; onCancel: () => void; }>(null);
+  const suggestedContinuation = draft && localSuggestions[0] ? localSuggestions[0].phrase : ' ';
   const textareaRef = React.useRef(null);
   const responseCache = React.useRef(new Map());
   const aiUsage = React.useRef({ date: '', count: 0, lastRequest: 0 });
@@ -1628,31 +1722,22 @@ const WritingPractice = ({ tests, userId, onBack }) => {
     return () => window.clearInterval(timer);
   }, [timerRunning]);
 
-  const localSuggestions = taskType === 1
-    ? (wordCount < 25
-        ? [
-            { phrase: 'The chart illustrates…', why: 'A concise opening to paraphrase the visual.' },
-            { phrase: 'Overall, …', why: 'Introduce the main trend before details.' }
-          ]
-        : draft.toLowerCase().includes('overall')
-          ? [
-              { phrase: 'By contrast, …', why: 'Use this to compare a different category or period.' },
-              { phrase: 'The most notable change was…', why: 'Bring attention to a key feature without listing every figure.' }
-            ]
-          : [
-              { phrase: 'increased steadily', why: 'A precise description for a gradual upward trend.' },
-              { phrase: 'remained relatively stable', why: 'Describe a category with little overall change.' }
-            ])
-    : (wordCount < 40
-        ? [
-            { phrase: 'This essay will argue that…', why: 'State your position directly after interpreting the prompt.' },
-            { phrase: 'Although…, I believe…', why: 'Use this structure to acknowledge a counterpoint and state your view.' }
-          ]
-        : [
-            { phrase: 'One reason for this is that…', why: 'Start a body paragraph with a clear supporting reason.' },
-            { phrase: 'For example, …', why: 'Connect a specific example to the paragraph’s claim.' },
-            { phrase: 'As a result, …', why: 'Make the consequence of your reasoning explicit.' }
-          ]);
+  const localSuggestions = getLocalWritingSuggestions({
+    taskType,
+    draft,
+    format: selectedPrompt?.question?.writingFormat || (taskType === 1 ? 'chart' : 'essay'),
+    promptText: selectedPrompt?.question?.text || '',
+    figure: {
+      url: selectedPrompt?.question?.imageUrl || '',
+      alt: selectedPrompt?.question?.imageAlt || 'Writing prompt figure',
+      caption: selectedPrompt?.question?.figureCaption || '',
+      description: selectedPrompt?.question?.figureDescription || '',
+      units: selectedPrompt?.question?.figureUnits || '',
+      categories: Array.isArray(selectedPrompt?.question?.categories) ? selectedPrompt.question.categories : [],
+      years: Array.isArray(selectedPrompt?.question?.years) ? selectedPrompt.question.years : [],
+      isValid: Boolean(selectedPrompt?.question?.imageUrl),
+    },
+  });
 
   const insertPhrase = (phrase) => {
     const textarea = textareaRef.current;
@@ -1673,6 +1758,17 @@ const WritingPractice = ({ tests, userId, onBack }) => {
     .map(line => line.trim().replace(/^(?:[-*•]|\d+[.)])\s*/, '').replace(/^["'“”‘’]|["'“”‘’]$/g, '').trim())
     .filter(Boolean)
     .slice(0, 3);
+
+  const acceptInlineCompletion = () => {
+    if (!inlineCompletion) return false;
+    setDraft(previous => `${previous}${inlineCompletion}`);
+    setInlineCompletion('');
+    return true;
+  };
+
+  const showConfirm = async (title: string, message: string) => new Promise<boolean>(resolve => {
+    setConfirmDialog({ title, message, onConfirm: () => { setConfirmDialog(null); resolve(true); }, onCancel: () => { setConfirmDialog(null); resolve(false); } });
+  });
 
   const requestCoach = async (kind: 'hint' | 'feedback' | 'final' | 'phrases') => {
     if (!selectedPrompt || !draft.trim() || aiBusy) return;
@@ -1696,12 +1792,13 @@ const WritingPractice = ({ tests, userId, onBack }) => {
     const consentKey = `writingCoachConsent:v1:${userId}`;
     try {
       if (!localStorage.getItem(consentKey)) {
-        const accepted = window.confirm('Before the first AI request: the selected IELTS Task prompt and your current draft (up to 5,000 characters) will be sent to Google Gemini through Firebase AI Logic for processing. This is optional formative feedback, not an official IELTS score. The Gemini Developer API free tier may use submitted content to improve Google products. Continue?');
+        const accepted = await showConfirm('AI opt-in required', 'Before the first AI request: the selected IELTS Task prompt and your current draft (up to 5,000 characters) will be sent to Google Gemini through Firebase AI Logic for processing. This is optional formative feedback, not an official IELTS score. The Gemini Developer API free tier may use submitted content to improve Google products. Continue?');
         if (!accepted) return;
         localStorage.setItem(consentKey, 'accepted');
       }
     } catch {
-      if (!window.confirm('Your browser cannot save the AI notice preference. The selected prompt and draft will be sent to Google Gemini for optional formative feedback. Continue this request?')) return;
+      const accepted = await showConfirm('AI optional consent', 'Your browser cannot save the AI notice preference. The selected prompt and draft will be sent to Google Gemini for optional formative feedback. Continue this request?');
+      if (!accepted) return;
     }
     if (!appCheckSiteKey) {
     setAiError('AI setup is incomplete: add the Firebase App Check reCAPTCHA v3 site key to VITE_RECAPTCHA_V3_SITE_KEY. Local phrase suggestions still work.');
@@ -1777,13 +1874,22 @@ const WritingPractice = ({ tests, userId, onBack }) => {
   };
 
   return (
-    <div className="space-y-5 text-left">
+    <>
+      {confirmDialog && (
+        <Modal isOpen={true} title={confirmDialog.title} onClose={confirmDialog.onCancel} actions={[
+          { label: 'Cancel', onClick: confirmDialog.onCancel },
+          { label: 'Continue', onClick: confirmDialog.onConfirm },
+        ]}>
+          <p className="whitespace-pre-wrap text-left">{confirmDialog.message}</p>
+        </Modal>
+      )}
+      <div className="space-y-5 text-left">
       <div className="flex items-center justify-between gap-3">
         <div><h2 className="text-xl font-bold text-slate-800 dark:text-white">IELTS Writing Practice</h2><p className="text-sm text-slate-500 dark:text-slate-400">Suggestions are optional. Your writing is never replaced automatically.</p></div>
         <button onClick={onBack} className="px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200">Back</button>
       </div>
       <div className="flex gap-2" role="tablist" aria-label="Writing task">
-        {[1, 2].map(task => <button key={task} role="tab" aria-selected={taskType === task} onClick={() => setTaskType(task)} className={`px-4 py-2 rounded-lg font-semibold ${taskType === task ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-600'}`}>Task {task}</button>)}
+        {taskOptions.map(task => <button key={task} role="tab" aria-selected={taskType === task} onClick={() => setTaskType(task)} className={`px-4 py-2 rounded-lg font-semibold ${taskType === task ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-600'}`}>Task {task}</button>)}
       </div>
       {!selectedPrompt ? (
         <div className="p-6 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300">
@@ -1811,7 +1917,38 @@ const WritingPractice = ({ tests, userId, onBack }) => {
                   <button onClick={() => setTimerRunning(previous => !previous)} className="px-2 py-1 rounded border border-slate-300 dark:border-slate-600">{timerRunning ? 'Pause' : 'Start'}</button>
                 </div>
               </div>
-              <textarea ref={textareaRef} value={draft} onChange={event => { const value = event.target.value; setDraft(value); setAiMessage(''); setAiPhraseOptions([]); setAiError(''); try { if (selectedPrompt) localStorage.setItem(getDraftStorageKey(selectedPrompt.id), value); } catch { /* Storage may be unavailable in private browsing. */ } }} rows={16} maxLength={12000} placeholder="Write your response here. Your text stays on this device unless you explicitly request AI feedback." className="w-full p-4 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white leading-relaxed" />
+              <div className="relative">
+                <textarea
+                  ref={textareaRef}
+                  value={draft}
+                  onChange={event => {
+                    const value = event.target.value;
+                    setDraft(value);
+                    setAiMessage('');
+                    setAiPhraseOptions([]);
+                    setAiError('');
+                    try { if (selectedPrompt) localStorage.setItem(getDraftStorageKey(selectedPrompt.id), value); } catch { /* Storage may be unavailable in private browsing. */ }
+                  }}
+                  onKeyDown={event => {
+                    if (event.key === 'Tab' && acceptInlineCompletion()) {
+                      event.preventDefault();
+                    }
+                  }}
+                  rows={16}
+                  maxLength={12000}
+                  placeholder="Write your response here. Your text stays on this device unless you explicitly request AI feedback."
+                  className="w-full p-4 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white leading-relaxed"
+                />
+                {inlineCompletion && (
+                  <div aria-hidden="true" className="pointer-events-none absolute inset-0 mt-4 ml-4 mr-4 rounded-lg border border-dashed border-indigo-300 bg-transparent px-4 py-4 text-left text-sm leading-relaxed text-indigo-600 dark:text-indigo-300"
+                    style={{ WebkitTextFillColor: 'transparent' }}>
+                    <span className="inlineCompletion">{inlineCompletion}</span>
+                  </div>
+                )}
+              </div>
+              {inlineCompletion && (
+                <p className="mt-2 text-xs font-semibold text-indigo-600 dark:text-indigo-300">Faint text is a suggested continuation. Press Tab to accept it.</p>
+              )}
             </div>
           </div>
           <aside className="space-y-4">
@@ -1835,6 +1972,152 @@ const WritingPractice = ({ tests, userId, onBack }) => {
         </div>
       )}
     </div>
+    </>
+  );
+};
+
+const ExamInterface = ({ test, user, onComplete }) => {
+  const questions = Array.isArray(test?.questions) ? test.questions : [];
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [answers, setAnswers] = useState<Record<string, unknown>>({});
+  const currentQuestion = questions[currentIndex] || null;
+  const currentResponseType = currentQuestion ? resolveResponseType(normalizeQuestion(currentQuestion as any)) : 'short-text';
+  const currentValue = currentQuestion ? answers[currentQuestion.id] ?? '' : '';
+
+  const updateAnswer = (value: unknown) => {
+    if (!currentQuestion) return;
+    setAnswers(previous => ({ ...previous, [currentQuestion.id]: value }));
+  };
+
+  const questionHeader = currentQuestion ? `${currentIndex + 1} / ${questions.length}` : '0 / 0';
+
+  const renderAnswerInput = () => {
+    if (!currentQuestion) return null;
+
+    const question = currentQuestion as any;
+    const baseClass = 'mt-2 w-full rounded-lg border border-slate-300 bg-white p-3 text-slate-800 dark:border-slate-600 dark:bg-slate-700 dark:text-white';
+
+    if (currentResponseType === 'single-choice') {
+      return (
+        <div className="mt-3 space-y-2">
+          {(question.options || []).map((option: string, optionIndex: number) => (
+            <label key={`${question.id}-option-${optionIndex}`} className="flex items-center gap-3 rounded-lg border border-slate-200 p-3 dark:border-slate-600">
+              <input
+                type="radio"
+                name={question.id}
+                checked={String(currentValue) === String(option)}
+                onChange={() => updateAnswer(option)}
+              />
+              <span>{option}</span>
+            </label>
+          ))}
+        </div>
+      );
+    }
+
+    if (currentResponseType === 'multiple-select') {
+      const selected = Array.isArray(currentValue) ? currentValue : [];
+      return (
+        <div className="mt-3 space-y-2">
+          {(question.options || []).map((option: string, optionIndex: number) => (
+            <label key={`${question.id}-option-${optionIndex}`} className="flex items-center gap-3 rounded-lg border border-slate-200 p-3 dark:border-slate-600">
+              <input
+                type="checkbox"
+                checked={selected.includes(option)}
+                onChange={() => {
+                  const next = selected.includes(option)
+                    ? selected.filter(item => item !== option)
+                    : [...selected, option];
+                  updateAnswer(next);
+                }}
+              />
+              <span>{option}</span>
+            </label>
+          ))}
+        </div>
+      );
+    }
+
+    if (currentResponseType === 'numeric') {
+      return <input type="number" value={currentValue as string | number} onChange={event => updateAnswer(event.target.value)} className={baseClass} />;
+    }
+
+    if (currentResponseType === 'long-text' || currentResponseType === 'short-text') {
+      return <textarea value={String(currentValue || '')} onChange={event => updateAnswer(event.target.value)} rows={6} className={baseClass} placeholder="Type your response here" />;
+    }
+
+    return <input type="text" value={String(currentValue || '')} onChange={event => updateAnswer(event.target.value)} className={baseClass} placeholder="Answer" />;
+  };
+
+  const handleSubmit = () => {
+    const result = {
+      assessmentId: test?.id || 'local-exam',
+      assessmentTitle: test?.title || 'Practice exam',
+      submittedAt: new Date().toISOString(),
+      userUid: user?.uid || 'anonymous',
+      answers,
+      score: 0,
+      totalQuestions: questions.length,
+      status: 'submitted',
+    };
+    onComplete?.(result);
+  };
+
+  if (!questions.length) {
+    return (
+      <section className="mx-auto max-w-3xl rounded-xl border border-slate-200 bg-white p-8 text-left shadow-sm dark:border-slate-700 dark:bg-slate-800">
+        <h2 className="text-xl font-bold text-slate-800 dark:text-white">No questions available</h2>
+        <p className="mt-2 text-slate-600 dark:text-slate-300">This assessment does not contain any public questions yet.</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="mx-auto max-w-4xl rounded-xl border border-slate-200 bg-white p-6 text-left shadow-sm dark:border-slate-700 dark:bg-slate-800">
+      <div className="mb-5 flex items-center justify-between gap-3 border-b border-slate-200 pb-4 dark:border-slate-700">
+        <div>
+          <p className="text-sm font-medium uppercase tracking-wide text-blue-600 dark:text-blue-400">Exam</p>
+          <h2 className="text-xl font-bold text-slate-800 dark:text-white">{test?.title || 'Practice exam'}</h2>
+        </div>
+        <span className="rounded-full bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">{questionHeader}</span>
+      </div>
+
+      <div className="space-y-5">
+        <div className="rounded-lg bg-slate-50 p-4 dark:bg-slate-700/50">
+          <p className="whitespace-pre-wrap text-base font-medium text-slate-800 dark:text-slate-100">{currentQuestion.text || 'Question prompt'}</p>
+        </div>
+
+        {renderAnswerInput()}
+      </div>
+
+      <div className="mt-6 flex items-center justify-between gap-3 border-t border-slate-200 pt-4 dark:border-slate-700">
+        <button
+          type="button"
+          onClick={() => setCurrentIndex(previous => Math.max(0, previous - 1))}
+          disabled={currentIndex === 0}
+          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:text-slate-200"
+        >
+          Previous
+        </button>
+        {currentIndex < questions.length - 1 ? (
+          <button
+            type="button"
+            onClick={() => setCurrentIndex(previous => Math.min(questions.length - 1, previous + 1))}
+            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white"
+          >
+            Next
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={handleSubmit}
+            className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white"
+          >
+            Finish exam
+          </button>
+        )}
+      </div>
+    </section>
   );
 };
 
@@ -1849,6 +2132,7 @@ const SpeakingPractice = ({ bank, userId, onBack }) => {
   const [phase, setPhase] = useState<'ready' | 'preparation' | 'speaking' | 'finished'>('ready');
   const [recording, setRecording] = useState(false);
   const [recordingUrl, setRecordingUrl] = useState('');
+  const [speakingAlert, setSpeakingAlert] = useState<null | { title: string; message: string; onClose: () => void }>(null);
   const recorderRef = React.useRef<MediaRecorder | null>(null);
   const streamRef = React.useRef<MediaStream | null>(null);
   const chunksRef = React.useRef<BlobPart[]>([]);
@@ -1880,6 +2164,12 @@ const SpeakingPractice = ({ bank, userId, onBack }) => {
     streamRef.current?.getTracks().forEach(track => track.stop());
   }, [recordingUrl]);
 
+  const showStudentAlert = async (title: string, message: string) => {
+    await new Promise<void>(resolve => {
+      setSpeakingAlert({ title, message, onClose: () => { setSpeakingAlert(null); resolve(); } });
+    });
+  };
+
   const choosePrompt = (id: string) => { setSelectedId(id); setPhase('ready'); setSeconds(0); setRecordingUrl(''); };
   const begin = () => {
     setRecordingUrl('');
@@ -1904,13 +2194,19 @@ const SpeakingPractice = ({ bank, userId, onBack }) => {
       recorder.start();
       setRecording(true);
     } catch {
-      alert('Microphone access was not available. You can still practise by speaking aloud and writing a short reflection.');
+      await showStudentAlert('Microphone unavailable', 'Microphone access was not available. You can still practise by speaking aloud and writing a short reflection.');
     }
   };
   const stopRecording = () => { recorderRef.current?.stop(); setRecording(false); };
 
   if (!selected) return <section className="space-y-4"><p>No Speaking prompts are available.</p><button onClick={onBack} className="px-3 py-2 rounded border">Back</button></section>;
-  return <section className="space-y-5 text-left">
+  return <>
+    {speakingAlert && (
+      <Modal isOpen={true} title={speakingAlert.title} onClose={speakingAlert.onClose}>
+        <p className="whitespace-pre-wrap text-left">{speakingAlert.message}</p>
+      </Modal>
+    )}
+    <section className="space-y-5 text-left">
     <div className="flex items-center justify-between"><div><h2 className="text-xl font-bold">IELTS Speaking practice</h2><p className="text-sm text-slate-500">Original, unofficial prompts. This tool does not calculate an official speaking score.</p></div><button onClick={onBack} className="px-3 py-2 rounded-lg border dark:border-slate-600">Back</button></div>
     <label className="block max-w-3xl text-sm font-semibold">Prompt
       <select value={selected.id} onChange={event => choosePrompt(event.target.value)} className="mt-1 w-full p-3 rounded-lg border dark:bg-slate-700 dark:border-slate-600">
@@ -1926,7 +2222,8 @@ const SpeakingPractice = ({ bank, userId, onBack }) => {
       <div className="flex flex-wrap items-center gap-3"><button onClick={recording ? stopRecording : startRecording} disabled={phase === 'preparation'} className="px-4 py-2 rounded border disabled:opacity-50">{recording ? 'Stop recording' : 'Record locally'}</button><span className="text-xs text-slate-500">Recording stays in this page and is not uploaded. It is cleared when you leave or refresh.</span>{recordingUrl && <audio controls src={recordingUrl} />}</div>
       {typeof MediaRecorder === 'undefined' && <p className="text-xs text-slate-500">Audio recording is not supported by this browser; use the notes box to review your response.</p>}
     </div>
-  </section>;
+  </section>
+  </>
 };
 
 const IELTS_SPEAKING_BANK = { questions: [
@@ -2173,6 +2470,13 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onSaveGroupCode, 
   const [pinModal, setPinModal] = useState({ isOpen: false, test: null, enteredPin: '', error: '' });
   const [groupCodeInput, setGroupCodeInput] = useState(user?.groupCode || '');
   const [isSavingGroupCode, setIsSavingGroupCode] = useState(false);
+  const [studentAlert, setStudentAlert] = useState<null | { title: string; message: string; onClose: () => void }>(null);
+
+  const showStudentAlert = async (title: string, message: string) => {
+    await new Promise<void>(resolve => {
+      setStudentAlert({ title, message, onClose: () => { setStudentAlert(null); resolve(); } });
+    });
+  };
 
   const normalizedGroupCode = (user?.groupCode || '').trim().toLowerCase();
   const visibleTests = tests.filter((test) => {
@@ -2187,7 +2491,7 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onSaveGroupCode, 
       await onSaveGroupCode(groupCodeInput.trim().toLowerCase());
     } catch (error) {
       console.error(error);
-      alert('Could not save the group code. Please try again.');
+      await showStudentAlert('Group code not saved', 'Could not save the group code. Please try again.');
     } finally {
       setIsSavingGroupCode(false);
     }
@@ -2248,7 +2552,12 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onSaveGroupCode, 
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Ask your teacher for the exact code. Group assignment can only be set once from your account.</p>
         </div>
 
-        <div className="flex flex-wrap gap-x-4 border-b border-slate-200 dark:border-slate-700 mb-6">
+      {studentAlert && (
+        <Modal isOpen={true} title={studentAlert.title} onClose={studentAlert.onClose}>
+          <p className="whitespace-pre-wrap text-left">{studentAlert.message}</p>
+        </Modal>
+      )}
+      <div className="flex flex-wrap gap-x-4 border-b border-slate-200 dark:border-slate-700 mb-6">
           <button onClick={() => setActiveTab('tests')} className={`pb-4 px-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'tests' ? 'border-blue-600 dark:border-blue-400 text-blue-600 dark:text-blue-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'}`}>
             <LayoutDashboard className="w-4 h-4" /> Available Tasks
           </button>
@@ -2381,611 +2690,6 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onSaveGroupCode, 
         </Modal>
 
       </main>
-    </div>
-  );
-};
-
-const ExamWritingCoach = ({ question, userId, value, onChange, textareaRef }) => {
-  const taskType = Number(question.writingTaskType || 2);
-  const taskFormat = question.writingFormat || (taskType === 1 ? 'visual report' : 'essay');
-  const draft = typeof value === 'string' ? value : '';
-  const requestContext = React.useRef({ questionId: question.id, draft });
-  const [aiBusy, setAiBusy] = useState(false);
-  const [aiPhrases, setAiPhrases] = useState<string[]>([]);
-  const [aiError, setAiError] = useState('');
-  const [overlayScrollTop, setOverlayScrollTop] = useState(0);
-  const requestTimes = React.useRef({ date: '', count: 0, lastRequest: 0 });
-  const wordCount = draft.trim() ? draft.trim().split(/\s+/).length : 0;
-  const format = String(taskFormat).toLowerCase();
-  const taskOneOpening = format.includes('map') ? 'The maps illustrate…'
-    : format.includes('process') ? 'The diagram illustrates…'
-      : format.includes('table') ? 'The table shows…'
-        : format.includes('graph') ? 'The graph compares…'
-          : format.includes('chart') ? 'The chart compares…'
-            : 'The visual illustrates…';
-  const hasIntroduction = wordCount >= (taskType === 1 ? 20 : 35)
-    || (taskType === 1
-      ? /\b(?:the|this|following)\s+(?:given\s+)?(?:(?:line|bar|pie)\s+)?(?:graph|chart|table|diagram|maps?|visual)\b/i.test(draft)
-      : /\bthis essay\b/i.test(draft));
-  const hasOverview = /\b(overall|in general|clear that|the main feature)\b/i.test(draft);
-  const hasComparison = /\b(by contrast|in comparison|whereas|while|meanwhile|compared with|respectively)\b/i.test(draft);
-  const localPhrases = taskType === 1
-    ? !hasIntroduction
-      ? [
-          { phrase: taskOneOpening, why: 'Introduction · paraphrase what the visual shows.' },
-          { phrase: 'The figures are given in…', why: 'Introduction · mention the unit if the visual provides one.' },
-        ]
-      : !hasOverview
-        ? [
-            { phrase: 'Overall, …', why: 'Overview · summarize the most important trend or contrast.' },
-            { phrase: 'The most notable feature is that…', why: 'Overview · highlight a key pattern without listing every figure.' },
-            { phrase: 'It is clear that…', why: 'Overview · introduce the broad picture.' },
-          ]
-        : !hasComparison
-          ? [
-              { phrase: 'By contrast, …', why: 'Comparison · introduce a different category or period.' },
-              { phrase: 'Meanwhile, …', why: 'Comparison · move to another category’s trend.' },
-              { phrase: 'Whereas …, …', why: 'Comparison · connect two contrasting features.' },
-            ]
-          : [
-              { phrase: 'The figure rose from… to…', why: 'Detail · describe a change using the visual’s actual values.' },
-              { phrase: 'After reaching a peak of…, …', why: 'Detail · describe a peak only if shown in the visual.' },
-              { phrase: 'By the end of the period, …', why: 'Detail · summarize the final value or position.' },
-            ]
-    : !hasIntroduction
-      ? [
-          { phrase: 'This essay will argue that…', why: 'Introduction · state your position clearly.' },
-          { phrase: 'Although…, I believe…', why: 'Introduction · acknowledge another view and state your position.' },
-          { phrase: 'There are several reasons why…', why: 'Introduction · preview the main reasons.' },
-        ]
-      : !/\b(for example|for instance|such as)\b/i.test(draft)
-        ? [
-            { phrase: 'One reason for this is that…', why: 'Body paragraph · develop a supporting reason.' },
-            { phrase: 'For example, …', why: 'Body paragraph · connect a specific example to your point.' },
-            { phrase: 'As a result, …', why: 'Body paragraph · explain the consequence of your reasoning.' },
-          ]
-        : [
-            { phrase: 'However, it is also important to consider…', why: 'Development · acknowledge a relevant counterpoint.' },
-            { phrase: 'This suggests that…', why: 'Development · explain what your example demonstrates.' },
-            { phrase: 'In conclusion, …', why: 'Conclusion · summarize your position without adding a new point.' },
-          ];
-  const completionWords = taskType === 1
-    ? [
-          { prefix: 'increas', suffix: 'ed steadily' },
-          { prefix: 'declin', suffix: 'ed gradually' },
-          { prefix: 'remain', suffix: 'ed relatively stable' },
-          { prefix: 'fluctu', suffix: 'ated over the period' },
-          { prefix: 'respectiv', suffix: 'ely' },
-      ]
-    : [
-          { prefix: 'importan', suffix: 't to consider' },
-          { prefix: 'contribut', suffix: 'es to' },
-          { prefix: 'consequen', suffix: 'tly, ' },
-          { prefix: 'therefor', suffix: 'e, ' },
-          { prefix: 'howev', suffix: 'er, ' },
-      ];
-  const partialWord = draft.match(/[A-Za-z]+$/)?.[0]?.toLowerCase() || '';
-  const partialWordCompletion = partialWord.length >= 4
-    ? completionWords.find(item => item.prefix.startsWith(partialWord) && item.prefix !== partialWord)?.suffix
-      || completionWords.find(item => item.prefix === partialWord)?.suffix
-    : undefined;
-  const trimmedDraft = draft.trimEnd();
-  const needsSentenceSeparator = trimmedDraft.length > 0 && !/[.!?…]$/.test(trimmedDraft);
-  const activeLocalPhrase = localPhrases[0]?.phrase.replace(/…$/, '').trim() || '';
-  const inlineCompletion = aiPhrases[0]
-    ? `${/\s$/.test(draft) ? '' : ' '}${aiPhrases[0]}`
-    : partialWordCompletion
-      ? partialWordCompletion
-      : !draft
-          ? taskType === 1 ? taskOneOpening : 'This essay will argue that…'
-          : needsSentenceSeparator && taskType === 1 && /\bclear that\b/i.test(draft) && hasOverview
-            ? ' the main trends differed across the four countries.'
-            : `${needsSentenceSeparator ? '. ' : '\n\n'}${activeLocalPhrase}${activeLocalPhrase.endsWith(',') ? ' ' : ''}`;
-
-  useEffect(() => {
-    requestContext.current = { questionId: question.id, draft };
-    setAiPhrases([]);
-    setAiError('');
-  }, [question.id, draft]);
-
-  const insertPhrase = (phrase: string) => {
-    const textarea = textareaRef.current;
-    const start = textarea?.selectionStart ?? draft.length;
-    const end = textarea?.selectionEnd ?? draft.length;
-    const suffix = draft.slice(end);
-    const insertion = `${phrase}${/\s$/.test(phrase) || /^\s/.test(suffix) ? '' : ' '}`;
-    onChange(`${draft.slice(0, start)}${insertion}${suffix}`);
-    requestAnimationFrame(() => {
-      textarea?.focus();
-      textarea?.setSelectionRange(start + insertion.length, start + insertion.length);
-    });
-  };
-
-  const acceptInlineCompletion = () => {
-    const textarea = textareaRef.current;
-    const start = textarea?.selectionStart ?? draft.length;
-    const end = textarea?.selectionEnd ?? draft.length;
-    if (start !== draft.length || end !== draft.length || !inlineCompletion) return false;
-    onChange(`${draft}${inlineCompletion}`);
-    requestAnimationFrame(() => {
-      textarea?.focus();
-      textarea?.setSelectionRange(draft.length + inlineCompletion.length, draft.length + inlineCompletion.length);
-    });
-    return true;
-  };
-
-  const requestPhrases = async () => {
-    if (aiBusy) return;
-    setAiError('');
-    if (!appCheckSiteKey) {
-      setAiError('AI suggestions need Firebase App Check. Configure VITE_RECAPTCHA_V3_SITE_KEY; phrase suggestions above are available now.');
-      return;
-    }
-    if (draft.length > 5000) {
-      setAiError('Shorten your draft to 5,000 characters before requesting AI suggestions. Your local phrase suggestions are still available.');
-      return;
-    }
-
-    const consentKey = `writingCoachConsent:v1:${userId}`;
-    try {
-      if (!localStorage.getItem(consentKey)) {
-        const accepted = window.confirm('The selected IELTS prompt and your current draft (up to 5,000 characters) will be sent to Google Gemini through Firebase AI Logic to generate optional phrase suggestions. The Gemini Developer API free tier may use submitted content to improve Google products. Continue?');
-        if (!accepted) return;
-        localStorage.setItem(consentKey, 'accepted');
-      }
-    } catch {
-      if (!window.confirm('The selected IELTS prompt and your current draft will be sent to Google Gemini for optional phrase suggestions. Continue?')) return;
-    }
-
-    const now = Date.now();
-    const today = new Date().toISOString().slice(0, 10);
-    if (requestTimes.current.date !== today) requestTimes.current = { date: today, count: 0, lastRequest: 0 };
-    const dayKey = `writingCoachUsage:${userId}:${today}`;
-    try {
-      const usage = JSON.parse(localStorage.getItem(dayKey) || '{"count":0,"lastRequest":0}');
-      const count = Math.max(requestTimes.current.count, Number(usage.count) || 0);
-      const lastRequest = Math.max(requestTimes.current.lastRequest, Number(usage.lastRequest) || 0);
-      if (now - lastRequest < 15000) {
-        setAiError('Please wait 15 seconds between AI requests. Phrase suggestions above are still available.');
-        return;
-      }
-      if (count >= 8) {
-        setAiError('You have reached this browser’s limit of 8 AI requests today. Phrase suggestions above are still available.');
-        return;
-      }
-      requestTimes.current = { date: today, count: count + 1, lastRequest: now };
-      localStorage.setItem(dayKey, JSON.stringify({ count: count + 1, lastRequest: now }));
-    } catch {
-      if (now - requestTimes.current.lastRequest < 15000 || requestTimes.current.count >= 8) {
-        setAiError('Please wait 15 seconds between AI requests. Phrase suggestions above are still available.');
-        return;
-      }
-      requestTimes.current = { date: today, count: requestTimes.current.count + 1, lastRequest: now };
-    }
-
-    setAiBusy(true);
-    setAiPhrases([]);
-    try {
-      const response = await writingAI.generateContent(`You are a supportive IELTS writing practice coach. This is IELTS Writing Task ${taskType} (${taskFormat}). Suggest exactly three short, natural sentence starters or linking phrases that fit the next step in the student's draft. Return one phrase per line, with no numbering, bullets, or explanations. Never write a complete answer or invent chart data; the student must take all factual details from the visual.\n\nTASK PROMPT:\n${String(question.text || '').slice(0, 1500)}\n\nSTUDENT DRAFT:\n${draft.slice(0, 5000)}`);
-      if (requestContext.current.questionId !== question.id || requestContext.current.draft !== draft) return;
-      const phrases = response.response.text()
-        .split(/\r?\n/)
-        .map((line: string) => line.trim().replace(/^(?:[-*•]|\d+[.)])\s*/, '').replace(/^["'“”‘’]|["'“”‘’]$/g, '').trim())
-        .filter(Boolean)
-        .slice(0, 3);
-      if (!phrases.length) throw new Error('Gemini returned no usable phrase suggestions.');
-      setAiPhrases(phrases);
-    } catch (error) {
-      console.error('IELTS exam writing coach request failed:', error);
-      const code = String(error?.code || '').toLowerCase();
-      const details = String(error?.message || '').toLowerCase();
-      setAiError(code.includes('quota') || code.includes('resource-exhausted') || details.includes('quota') || details.includes('rate')
-        ? 'The Gemini free-tier quota or request limit is currently exhausted. Try again later; phrase suggestions above are still available.'
-        : code.includes('permission') || details.includes('app check') || details.includes('app_check')
-          ? 'Firebase denied this AI request. Check Firebase AI Logic and this site’s App Check registration. Phrase suggestions above are still available.'
-          : 'AI suggestions are temporarily unavailable. Your draft is saved; phrase suggestions above are still available.');
-    } finally {
-      setAiBusy(false);
-    }
-  };
-
-  return (
-    <section className="mt-4 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50/70 dark:bg-indigo-950/30 p-4 space-y-3" aria-label={`IELTS Task ${taskType} writing coach`}>
-      <div className="relative overflow-hidden rounded-lg">
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0 z-0 overflow-hidden whitespace-pre-wrap break-words border border-transparent p-4 leading-relaxed text-slate-800 dark:text-white"
-          style={{ transform: `translateY(-${overlayScrollTop}px)` }}
-        >
-          <span>{draft}</span><span className="font-semibold text-indigo-600 dark:text-indigo-300">{inlineCompletion}</span>
-        </div>
-        <textarea
-          ref={textareaRef}
-          rows={8}
-          maxLength={12000}
-          className="relative z-10 w-full rounded-lg border border-slate-300 bg-transparent p-4 leading-relaxed text-transparent caret-slate-900 selection:bg-blue-200 placeholder:text-transparent dark:border-slate-600 dark:caret-white dark:selection:bg-blue-800"
-          style={{ color: 'transparent', WebkitTextFillColor: 'transparent', backgroundColor: 'transparent' }}
-          placeholder="Write your response"
-          value={draft}
-          onChange={event => onChange(event.target.value)}
-          onScroll={event => setOverlayScrollTop(event.currentTarget.scrollTop)}
-          onKeyDown={event => {
-            if (event.key === 'Tab' && acceptInlineCompletion()) event.preventDefault();
-          }}
-          aria-describedby="writing-coach-tab-hint"
-        />
-      </div>
-      <p id="writing-coach-tab-hint" className="-mt-2 text-xs text-slate-600 dark:text-slate-300">Faint text is a suggested continuation. Press Tab to accept it, or keep typing to ignore it.</p>
-      <div>
-        <h3 className="font-semibold text-indigo-950 dark:text-indigo-100">Task {taskType} writing coach</h3>
-        <p className="text-sm text-slate-700 dark:text-slate-300">Suggestions update as your draft structure changes. Choose a phrase to insert at your cursor; your writing is never replaced.</p>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-        {localPhrases.map(item => <div key={item.phrase} className="rounded-lg bg-white dark:bg-slate-800 p-3">
-          <button type="button" onClick={() => insertPhrase(item.phrase)} className="text-left font-semibold text-blue-700 dark:text-blue-300 underline">{item.phrase}</button>
-          <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">{item.why}</p>
-        </div>)}
-      </div>
-      <button type="button" onClick={requestPhrases} disabled={aiBusy} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
-        {aiBusy ? 'Getting AI phrase suggestions…' : 'Get AI phrase suggestions'}
-      </button>
-      {aiError && <p role="status" className="text-sm text-amber-800 dark:text-amber-200">{aiError}</p>}
-      {aiPhrases.length > 0 && <div className="grid grid-cols-1 sm:grid-cols-3 gap-2" aria-label="AI phrase suggestions">
-        {aiPhrases.map((phrase, index) => <button key={`${phrase}-${index}`} type="button" onClick={() => insertPhrase(phrase)} className="rounded-lg bg-white dark:bg-slate-800 p-3 text-left font-semibold text-indigo-800 dark:text-indigo-200 underline">{phrase}</button>)}
-      </div>}
-    </section>
-  );
-};
-
-const ExamInterface = ({ test, user, onComplete }) => {
-  const storageKey = `examAttempt:${user.uid}:${test.id}`;
-  const questions = Array.isArray(test.questions) ? test.questions : [];
-  const [initialAttempt] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(storageKey) || 'null'); } catch { return null; }
-  });
-  const [attemptId] = useState(() => initialAttempt?.attemptId || crypto.randomUUID());
-  const [startedAtMs] = useState(() => initialAttempt?.startedAtMs || Date.now());
-  const moduleSize = Number(test.practiceMetadata?.moduleSize || 0);
-  const moduleDurationSeconds = Number(test.practiceMetadata?.moduleDurationSeconds || 0);
-  const modulePlan = Array.isArray(test.practiceMetadata?.modulePlan) ? test.practiceMetadata.modulePlan : moduleSize > 0 && moduleDurationSeconds > 0
-    ? [{ start: 0, end: moduleSize, durationSeconds: moduleDurationSeconds, label: 'Module 1' }, { start: moduleSize, end: questions.length, durationSeconds: moduleDurationSeconds, label: 'Module 2' }]
-    : [];
-  const initialModule = modulePlan.find(module => initialAttempt?.currentQuestionIndex >= module.start && initialAttempt?.currentQuestionIndex < module.end) || modulePlan[0];
-  const initialDuration = initialAttempt?.isOnOptionalBreak ? Number(test.practiceMetadata?.breakSeconds || 600) : Number(initialModule?.durationSeconds || test.durationSeconds || 30 * 60);
-  const [isOnOptionalBreak, setIsOnOptionalBreak] = useState(Boolean(initialAttempt?.isOnOptionalBreak));
-  const [deadlineTimestamp, setDeadlineTimestamp] = useState(initialAttempt?.deadlineTimestamp || Date.now() + initialDuration * 1000);
-  const [timeLeft, setTimeLeft] = useState(Math.max(0, Math.ceil((deadlineTimestamp - Date.now()) / 1000)));
-  const [answers, setAnswers] = useState<Record<string, unknown>>(initialAttempt?.answers || {});
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(initialAttempt?.currentQuestionIndex || 0);
-  const [flaggedQuestions, setFlaggedQuestions] = useState<number[]>(initialAttempt?.flaggedQuestions || []);
-  const [isConfirmSubmitOpen, setIsConfirmSubmitOpen] = useState(false);
-  const submissionStarted = React.useRef(false);
-  const writingTextareaRef = React.useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => {
-    const updateRemaining = () => setTimeLeft(Math.max(0, Math.ceil((deadlineTimestamp - Date.now()) / 1000)));
-    updateRemaining();
-    const timer = setInterval(updateRemaining, 500);
-    return () => clearInterval(timer);
-  }, [deadlineTimestamp]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(storageKey, JSON.stringify({ attemptId, startedAtMs, answers, currentQuestionIndex, flaggedQuestions, deadlineTimestamp, isOnOptionalBreak }));
-    } catch (error) {
-      console.warn('Could not save this attempt in local storage:', error);
-    }
-  }, [attemptId, startedAtMs, answers, currentQuestionIndex, flaggedQuestions, deadlineTimestamp, isOnOptionalBreak, storageKey]);
-
-  useEffect(() => {
-    if (timeLeft <= 0) handleAutoSubmit();
-  }, [timeLeft]);
-
-  const handleAnswerChange = (questionId, value) => {
-    setAnswers(prev => ({ ...prev, [questionId]: value }));
-  };
-
-  const calculateScore = () => {
-    let score = 0;
-    let maxAutoScore = 0;
-    let manualReviewCount = 0;
-    let ungradedCount = 0;
-    const questionReviews = questions.map(question => {
-      const grade = gradeQuestion(question, answers[question.id]);
-      if (grade.status === 'graded') {
-        maxAutoScore += grade.possiblePoints;
-        score += grade.earnedPoints;
-      } else if (grade.status === 'manual-review') manualReviewCount += 1;
-      else if (grade.status === 'ungraded') ungradedCount += 1;
-      return {
-        questionId: question.id,
-        questionText: question.text,
-        studentAnswer: answers[question.id] ?? '',
-        correctAnswer: question.correctAnswer || '',
-        answerKey: {
-          responseType: resolveResponseType(question),
-          correctAnswer: question.correctAnswer ?? null,
-          acceptedAnswers: question.acceptedAnswers || [],
-          answerSlots: question.answerSlots || [],
-          correctOrder: question.correctOrder || [],
-        },
-        acceptedAnswers: question.acceptedAnswers || [],
-        explanation: question.explanation || '',
-        section: question.section || '',
-        satDomain: question.satDomain || '',
-        satSkill: question.satSkill || '',
-        status: grade.status,
-        graded: grade.status === 'graded',
-        isCorrect: grade.isCorrect,
-        earnedPoints: grade.earnedPoints,
-        points: grade.possiblePoints
-      };
-    });
-    return { score, maxAutoScore, manualReviewCount, ungradedCount, questionReviews };
-  };
-
-  const submitTest = async (isAutoSubmit = false) => {
-    if (isSubmitting || submissionStarted.current) return;
-    submissionStarted.current = true;
-    setIsSubmitting(true);
-    try {
-      const { score, maxAutoScore, manualReviewCount, ungradedCount, questionReviews } = calculateScore();
-      await onComplete({
-        testId: test.practiceSourceTestId || test.id,
-        assessmentIds: test.practiceSourceTestIds || [test.practiceSourceTestId || test.id],
-        attemptId,
-        startedAtMs,
-        answers,
-        score,
-        maxPossibleScore: maxAutoScore,
-        manualReviewCount,
-        ungradedCount,
-        questionReviews,
-        displayTitle: test.title,
-        practiceMetadata: test.practiceMetadata || null,
-        submittedAt: new Date().toISOString(),
-        isAutoSubmitted: isAutoSubmit
-      });
-      try { localStorage.removeItem(storageKey); } catch { /* Storage may be unavailable. */ }
-    } catch (error) {
-      console.error('Could not submit this exam attempt:', error);
-      submissionStarted.current = false;
-      setIsSubmitting(false);
-      const cause = error?.cause;
-      const errorCode = String(cause?.code || error?.code || '');
-      const errorMessage = cause instanceof Error ? cause.message : error instanceof Error ? error.message : String(error || '');
-      const isPermissionError = errorCode === 'permission-denied' || /missing or insufficient permissions/i.test(errorMessage);
-      alert(isPermissionError
-        ? 'Firestore rejected this submission. Your answers are still saved on this device. Ensure the latest firestore.rules are published and that your account is authorized for this assessment.'
-        : `Your answers are still saved on this device. Submission failed${errorCode ? ` (${errorCode})` : ''}: ${errorMessage}`);
-    }
-  };
-
-  const handleManualSubmit = () => {
-    setIsConfirmSubmitOpen(true);
-  };
-
-  const handleAutoSubmit = () => {
-    if (isOnOptionalBreak) {
-      const nextModule = modulePlan[2];
-      if (!nextModule) return submitTest(true);
-      setIsOnOptionalBreak(false);
-      setCurrentQuestionIndex(nextModule.start);
-      const nextDeadline = Date.now() + nextModule.durationSeconds * 1000;
-      setDeadlineTimestamp(nextDeadline);
-      setTimeLeft(nextModule.durationSeconds);
-      return;
-    }
-    const currentModuleIndex = modulePlan.findIndex(module => currentQuestionIndex >= module.start && currentQuestionIndex < module.end);
-    const currentModule = modulePlan[currentModuleIndex];
-    if (currentModule?.breakAfter && Number(test.practiceMetadata?.breakSeconds) > 0) {
-      setIsOnOptionalBreak(true);
-      const nextDeadline = Date.now() + Number(test.practiceMetadata.breakSeconds) * 1000;
-      setDeadlineTimestamp(nextDeadline);
-      setTimeLeft(Number(test.practiceMetadata.breakSeconds));
-      return;
-    }
-    const nextModule = modulePlan[currentModuleIndex + 1];
-    if (nextModule) {
-      setCurrentQuestionIndex(nextModule.start);
-      const nextDeadline = Date.now() + nextModule.durationSeconds * 1000;
-      setDeadlineTimestamp(nextDeadline);
-      setTimeLeft(nextModule.durationSeconds);
-      return;
-    }
-    submitTest(true);
-  };
-  const continueSatModule = () => {
-    const currentModuleIndex = modulePlan.findIndex(module => currentQuestionIndex >= module.start && currentQuestionIndex < module.end);
-    const nextModule = modulePlan[currentModuleIndex + 1];
-    if (!nextModule) return;
-    if (!window.confirm(`Finish ${modulePlan[currentModuleIndex].label || `Module ${currentModuleIndex + 1}`} and lock its answers? You will not be able to return.`)) return;
-    const currentModule = modulePlan[currentModuleIndex];
-    if (currentModule?.breakAfter && Number(test.practiceMetadata?.breakSeconds) > 0) {
-      setIsOnOptionalBreak(true);
-      const breakSeconds = Number(test.practiceMetadata.breakSeconds);
-      const breakDeadline = Date.now() + breakSeconds * 1000;
-      setDeadlineTimestamp(breakDeadline);
-      setTimeLeft(breakSeconds);
-      return;
-    }
-    setCurrentQuestionIndex(nextModule.start);
-    const nextDeadline = Date.now() + nextModule.durationSeconds * 1000;
-    setDeadlineTimestamp(nextDeadline);
-    setTimeLeft(nextModule.durationSeconds);
-  };
-  const skipOptionalBreak = () => {
-    const nextModule = modulePlan.find(module => module.start > currentQuestionIndex);
-    if (!nextModule) return submitTest(true);
-    setIsOnOptionalBreak(false);
-    setCurrentQuestionIndex(nextModule.start);
-    const nextDeadline = Date.now() + nextModule.durationSeconds * 1000;
-    setDeadlineTimestamp(nextDeadline);
-    setTimeLeft(nextModule.durationSeconds);
-  };
-  const toggleFlag = (questionIndex) => setFlaggedQuestions(previous => previous.includes(questionIndex)
-    ? previous.filter(index => index !== questionIndex)
-    : [...previous, questionIndex]);
-  const isAnswered = (question) => isAnswerPresent(answers[question.id]);
-
-  const isWarningTime = timeLeft <= 60;
-  const currentModuleIndex = modulePlan.findIndex(module => currentQuestionIndex >= module.start && currentQuestionIndex < module.end);
-  const currentModule = modulePlan[currentModuleIndex];
-  const currentQuestion = isOnOptionalBreak ? null : questions[currentQuestionIndex];
-  const currentSectionId = currentQuestion?.section;
-  const rawSection = currentSectionId && currentSectionId !== 'general' ? test.sections?.[currentSectionId] : null;
-  const currentSection = currentSectionId === 'reading'
-    ? (() => {
-        const passage = rawSection?.passages?.find(item => item.passageNumber === (currentQuestion?.passageNumber || 1));
-        return { ...rawSection, passage: passage?.content || rawSection?.passage || '', title: passage?.title || `Passage ${currentQuestion?.passageNumber || 1}` };
-      })()
-    : currentSectionId === 'listening'
-      ? (() => {
-          const partNumber = currentQuestion?.listeningSectionNumber || 1;
-          const part = rawSection?.parts?.find(item => item.sectionNumber === partNumber);
-          return { ...rawSection, ...part, audioUrl: part?.audioUrl || (partNumber === 1 ? rawSection?.audioUrl : '') };
-        })()
-      : rawSection;
-  const currentSectionTitle = currentSectionId ? `${currentSectionId[0].toUpperCase()}${currentSectionId.slice(1)}` : '';
-  const readingLayout = currentSectionId === 'reading';
-  const currentIsIeltsWriting = test.type === 'IELTS'
-    && currentQuestion?.section === 'writing'
-    && resolveResponseType(currentQuestion) === 'long-text';
-  const unansweredQuestions = ((test.questions || []) as Array<{ id: string }>).reduce<number[]>((unanswered, question, index) => {
-      const answer = answers[question.id];
-      if (!isAnswerPresent(answer)) unanswered.push(index + 1);
-      return unanswered;
-    }, []);
-
-  return (
-    <div className="exam-interface min-h-screen w-full bg-slate-100 dark:bg-slate-900 flex flex-col font-sans transition-colors duration-300">
-      <header className="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 shadow-sm sticky top-0 z-20 transition-colors w-full">
-        <div className="max-w-6xl mx-auto px-4 sm:px-8 py-3 flex items-center justify-between">
-          <div className="text-left">
-            <h2 className="font-bold text-lg text-slate-800 dark:text-white line-clamp-1">{test.title}</h2>
-            <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{test.type} {test.category}{currentSectionId ? ` • ${currentSectionTitle}${currentSectionId === 'listening' ? ` ${currentQuestion?.listeningSectionNumber || 1}` : currentSectionId === 'reading' ? ` ${currentQuestion?.passageNumber || 1}` : ''}` : ''}</div>
-          </div>
-          <div className={`flex items-center gap-2 px-4 py-2 rounded-lg font-mono text-xl font-bold transition-colors ${isWarningTime ? 'bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 animate-pulse' : 'bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-white'}`}>
-            <Clock className="w-5 h-5" />
-            {formatTime(timeLeft)}
-          </div>
-        </div>
-      </header>
-
-      <div className="w-full bg-amber-50 dark:bg-amber-900/40 border-b border-amber-200 dark:border-amber-800 px-4 py-2 text-center text-sm text-amber-800 dark:text-amber-400 flex items-center justify-center gap-2">
-        <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-        {modulePlan.length ? 'Your answers, flags, and module deadline are saved on this device. At each module boundary, earlier answers lock. This is unofficial practice.' : 'Your answers, current question, flags, and deadline are saved on this device while the attempt is active. Keep this browser profile available; the exam submits automatically when the timer runs out.'}
-      </div>
-
-      <main className="flex-grow max-w-6xl w-full mx-auto p-4 sm:p-8 text-left">
-        {isOnOptionalBreak ? <section className="max-w-2xl mx-auto mt-12 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-8 text-center space-y-4"><h2 className="text-2xl font-bold">Optional 10-minute break</h2><p className="text-slate-600 dark:text-slate-300">Reading and Writing is complete. Your Module 1 and Module 2 answers are locked. Continue when ready or skip the rest of the break.</p><button onClick={skipOptionalBreak} className="px-5 py-3 rounded-lg bg-blue-600 text-white font-bold">Continue to Math</button></section> : <div className={readingLayout ? 'grid grid-cols-1 lg:grid-cols-2 gap-6 items-start text-left' : 'space-y-6 text-left'}>
-        <div className={readingLayout ? 'grid grid-cols-1 lg:grid-cols-2 gap-6 items-start text-left' : 'space-y-6 text-left'}>
-          
-          {test.description && (
-            <div className="lg:col-span-2 bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-5 sm:p-8 text-left transition-colors">
-               <h3 className="font-bold text-slate-800 dark:text-white mb-2 border-b border-slate-100 dark:border-slate-700 pb-2">Instructions / Reading Material</h3>
-               <p className="whitespace-pre-wrap text-slate-700 dark:text-slate-300 leading-relaxed text-sm text-left">{test.description}</p>
-            </div>
-          )}
-
-          {currentSection && (
-            <section className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-purple-200 dark:border-purple-800 p-5 sm:p-8 text-left">
-              <h3 className="font-bold text-slate-800 dark:text-white mb-3">IELTS {currentSectionTitle}{currentSection.title ? ` — ${currentSection.title}` : ''}</h3>
-              {currentSection.instructions && <p className="whitespace-pre-wrap text-slate-700 dark:text-slate-300 leading-relaxed mb-4">{currentSection.instructions}</p>}
-              {currentSection.passage && <div className="whitespace-pre-wrap text-slate-700 dark:text-slate-300 leading-relaxed border-t border-slate-100 dark:border-slate-700 pt-4">{currentSection.passage}</div>}
-              {currentSection.audioUrl && (
-                <audio controls preload="metadata" className="w-full mt-2">
-                  <source src={currentSection.audioUrl} />
-                  Your browser does not support audio playback.
-                </audio>
-              )}
-            </section>
-          )}
-
-          {currentQuestion && (
-            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 sm:p-8 animate-in fade-in duration-300 transition-colors w-full overflow-hidden">
-              <div className="flex gap-4 text-left w-full overflow-hidden">
-                <div className="flex-shrink-0 w-8 h-8 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-full flex items-center justify-center font-bold text-sm">
-                  {currentQuestionIndex + 1}
-                </div>
-                <div className="flex-grow min-w-0 space-y-4 text-left w-full overflow-hidden">
-                  <div className="flex justify-end">
-                    <button onClick={() => toggleFlag(currentQuestionIndex)} aria-pressed={flaggedQuestions.includes(currentQuestionIndex)} className={`px-3 py-1.5 rounded-lg border text-sm font-medium ${flaggedQuestions.includes(currentQuestionIndex) ? 'bg-amber-100 border-amber-400 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200' : 'border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300'}`}>
-                      {flaggedQuestions.includes(currentQuestionIndex) ? 'Flagged for review' : 'Flag for review'}
-                    </button>
-                  </div>
-                  <p className="text-lg text-slate-800 dark:text-white font-medium leading-relaxed whitespace-pre-wrap text-left w-full block">
-                    {currentQuestion.text}
-                  </p>
-                  
-                  {currentQuestion.imageUrl && (
-                    <div className="my-6 w-full bg-slate-50 dark:bg-slate-900 rounded-lg p-2 border border-slate-100 dark:border-slate-700 overflow-hidden flex justify-center box-border">
-                      <img src={currentQuestion.imageUrl} alt="Question Figure" className="max-w-full h-auto object-contain rounded shadow-sm" style={{ maxWidth: '100%', display: 'block' }} />
-                    </div>
-                  )}
-                  
-                  <div className="mt-4 text-left w-full">
-                    {currentIsIeltsWriting ? (
-                      <ExamWritingCoach
-                        question={currentQuestion}
-                        userId={user.uid}
-                        value={answers[currentQuestion.id]}
-                        onChange={value => handleAnswerChange(currentQuestion.id, value)}
-                        textareaRef={writingTextareaRef}
-                      />
-                    ) : <QuestionResponse question={currentQuestion} value={answers[currentQuestion.id]} onChange={value => handleAnswerChange(currentQuestion.id, value)} />}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {questions.length > 0 && (
-            <div className="lg:col-span-2 bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 transition-colors">
-              <div className="flex flex-wrap gap-2 mb-4" aria-label="Question navigation">
-                {questions.map((question, index) => { const questionModuleIndex = modulePlan.findIndex(module => index >= module.start && index < module.end); const locked = modulePlan.length > 0 && questionModuleIndex !== currentModuleIndex; return <button key={question.id} onClick={() => !locked && setCurrentQuestionIndex(index)} disabled={locked} aria-current={index === currentQuestionIndex ? 'step' : undefined} aria-label={`Question ${index + 1}${locked ? ', locked' : isAnswered(question) ? ', answered' : ', unanswered'}${flaggedQuestions.includes(index) ? ', flagged for review' : ''}`} className={`w-10 h-10 rounded-lg border text-sm font-semibold disabled:opacity-30 disabled:cursor-not-allowed ${index === currentQuestionIndex ? 'ring-2 ring-blue-500 border-blue-500' : ''} ${flaggedQuestions.includes(index) ? 'bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-900/40 dark:text-amber-100' : isAnswered(question) ? 'bg-green-100 text-green-800 border-green-300 dark:bg-green-900/30 dark:text-green-200' : 'bg-slate-50 text-slate-600 border-slate-300 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-600'}`}>
-                  {index + 1}
-                </button>; })}
-              </div>
-              <div className="flex justify-between items-center gap-3">
-                <button onClick={() => setCurrentQuestionIndex(prev => Math.max(currentModule?.start || 0, prev - 1))} disabled={currentQuestionIndex === 0 || Boolean(currentModule && currentQuestionIndex === currentModule.start)} className="px-5 py-2.5 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-white font-medium rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">← Previous</button>
-                <span className="text-slate-500 dark:text-slate-400 font-medium text-sm">{modulePlan.length ? `${currentModule?.label || `Module ${currentModuleIndex + 1}`} · ` : ''}Question {currentQuestionIndex + 1} of {questions.length} • {questions.filter(isAnswered).length} answered • {flaggedQuestions.length} flagged</span>
-                {currentModule && currentQuestionIndex === currentModule.end - 1 && currentModuleIndex < modulePlan.length - 1 ? <button onClick={continueSatModule} className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg">{currentModule.breakAfter ? 'Take optional break →' : `Continue to ${modulePlan[currentModuleIndex + 1].label || `Module ${currentModuleIndex + 2}`} →`}</button> : currentQuestionIndex === questions.length - 1 ? <button onClick={handleManualSubmit} disabled={isSubmitting} className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition-colors disabled:opacity-70">Submit Final Answers</button> : <button onClick={() => setCurrentQuestionIndex(prev => Math.min(currentModule ? currentModule.end - 1 : questions.length - 1, prev + 1))} className="px-5 py-2.5 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-white font-medium rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">Next →</button>}
-              </div>
-            </div>
-          )}
-
-        </div>
-        </div>}
-      </main>
-
-      <Modal
-        isOpen={isConfirmSubmitOpen}
-        title="Submit your answers?"
-        onClose={() => setIsConfirmSubmitOpen(false)}
-      >
-        <p className="mb-4 text-slate-700 dark:text-slate-300">
-          {unansweredQuestions.length > 0
-            ? `You have not answered question${unansweredQuestions.length === 1 ? '' : 's'} ${unansweredQuestions.join(', ')}. Do you want to submit anyway?`
-            : 'Are you sure you want to submit your answers? You will not be able to change them after submission.'}
-        </p>
-        <div className="mt-6 flex justify-end gap-3">
-          <button
-            onClick={() => setIsConfirmSubmitOpen(false)}
-            className="px-5 py-3 bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-white font-medium rounded-lg hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors"
-          >
-            No, review answers
-          </button>
-          <button
-            onClick={() => submitTest(false)}
-            disabled={isSubmitting}
-            className="px-5 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition-colors disabled:opacity-70"
-          >
-            {isSubmitting ? 'Submitting...' : 'Yes, submit'}
-          </button>
-        </div>
-      </Modal>
     </div>
   );
 };
