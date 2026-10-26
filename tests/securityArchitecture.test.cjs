@@ -45,6 +45,8 @@ test('students can check only their own submission ID when the document does not
 
 test('IELTS assessment writing accepts inline suggestions with Tab', () => {
   assert.match(appSource, /aria-hidden="true"[\s\S]*?inlineCompletion/);
+  assert.match(appSource, /WebkitTextFillColor: 'transparent'/);
+  assert.match(appSource, /font-semibold text-indigo-600 dark:text-indigo-300/);
   assert.match(appSource, /event\.key === 'Tab' && acceptInlineCompletion\(\)/);
   assert.match(appSource, /Faint text is a suggested continuation\. Press Tab to accept it/);
 });

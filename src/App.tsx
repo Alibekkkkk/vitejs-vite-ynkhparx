@@ -2597,13 +2597,14 @@ const ExamWritingCoach = ({ question, userId, value, onChange, textareaRef }) =>
           className="pointer-events-none absolute inset-0 z-0 overflow-hidden whitespace-pre-wrap break-words border border-transparent p-4 leading-relaxed text-slate-800 dark:text-white"
           style={{ transform: `translateY(-${overlayScrollTop}px)` }}
         >
-          <span>{draft}</span><span className="text-slate-400 dark:text-slate-500">{inlineCompletion}</span>
+          <span>{draft}</span><span className="font-semibold text-indigo-600 dark:text-indigo-300">{inlineCompletion}</span>
         </div>
         <textarea
           ref={textareaRef}
           rows={8}
           maxLength={12000}
           className="relative z-10 w-full rounded-lg border border-slate-300 bg-transparent p-4 leading-relaxed text-transparent caret-slate-900 selection:bg-blue-200 placeholder:text-transparent dark:border-slate-600 dark:caret-white dark:selection:bg-blue-800"
+          style={{ color: 'transparent', WebkitTextFillColor: 'transparent', backgroundColor: 'transparent' }}
           placeholder="Write your response"
           value={draft}
           onChange={event => onChange(event.target.value)}
