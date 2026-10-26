@@ -1,0 +1,26 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isAuthorizedTeacher() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.firebase.sign_in_provider == 'google.com'
+        && (
+          request.auth.token.email == 'alibek.alpysbayev@gmail.com'
+          || request.auth.token.email == 'alibek.alpysbayev@nu.edu.kz'
+          || request.auth.token.email == 'aalpysbayev2@gmail.com'
+          || request.auth.token.email == 'nurbakyt.zholaman@nu.edu.kz'
+        );
+    }
+
+    match /assessment-assets/{teacherUid}/{assessmentId}/{questionId}/{assetName} {
+      allow read: if true;
+      allow create: if isAuthorizedTeacher()
+        && request.auth.uid == teacherUid
+        && request.resource.size > 0
+        && request.resource.size <= 5 * 1024 * 1024
+        && request.resource.contentType in ['image/png', 'image/jpeg', 'image/webp'];
+      allow update, delete: if false;
+    }
+  }
+}

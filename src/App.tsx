@@ -8,6 +8,7 @@ import {
 import { initializeApp } from "firebase/app";
 import { getAI, getGenerativeModel, GoogleAIBackend } from 'firebase/ai';
 import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check';
+import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { 
   getAuth, 
   onAuthStateChanged, 
@@ -33,6 +34,16 @@ import {
 } from './questionEngine';
 import { parseQuestionBank } from './questionBank';
 import { getLocalWritingSuggestions } from './writingSuggestions';
+import { PromptFigure } from './PromptFigure';
+import {
+  normalizeFigureUrl,
+  readFigureDimensions,
+  requiresTaskFigure,
+  validateFigureDimensions,
+  validateFigureFile,
+  verifyFigureUrl,
+  type FigureAsset,
+} from './figureAssets';
 
 const firebaseConfig = {
   apiKey: "AIzaSyBj6nrhP7w-KbMeYHV7wtEMk-yHftG8H4c",
@@ -57,6 +68,7 @@ if (appCheckSiteKey) {
 }
 const auth = getAuth(app);
 const db = getFirestore(app);
+const storage = getStorage(app);
 const writingAI = getGenerativeModel(getAI(app, { backend: new GoogleAIBackend() }), {
   model: 'gemini-3.8-flash',
   generationConfig: { maxOutputTokens: 220, temperature: 0.3 },
@@ -317,6 +329,10 @@ type AssessmentQuestion = EngineQuestion & {
   ungraded?: boolean;
   text?: string;
   imageUrl?: string;
+  imageAlt?: string;
+  figureCaption?: string;
+  figureMode?: 'visual' | 'text-only';
+  imageAsset?: FigureAsset;
 };
 
 type AssessmentRecord = {
@@ -679,6 +695,8 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
   const [validationErrors, setValidationErrors] = useState<Record<string, string[]>>({});
   const [previewQuestionId, setPreviewQuestionId] = useState<string | null>(null);
   const [questionBankError, setQuestionBankError] = useState('');
+  const [figureStates, setFigureStates] = useState<Record<string, { status: 'uploading' | 'available' | 'error'; message: string }>>({});
+  const [figureTestRevision, setFigureTestRevision] = useState<Record<string, number>>({});
   const [confirmPrompt, setConfirmPrompt] = useState<null | { title: string; message: string; confirmLabel: string; destructive?: boolean; onConfirm: () => void; onCancel: () => void; }>(null);
   const [alertPrompt, setAlertPrompt] = useState<null | { title: string; message: string; onClose: () => void; }>(null);
 
@@ -790,6 +808,7 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
         questionType: writing ? 'writing-task' : type === 'mcq' ? 'multiple-choice' : 'short-answer',
         responseType,
         ...(writing ? { manualReview: true } : {}),
+        ...(writing ? { writingTaskType: 2, writingFormat: 'essay', figureMode: 'visual' } : {}),
         text: '',
         imageUrl: '',
         options: type === 'mcq' ? ['', '', '', ''] : undefined,
@@ -884,11 +903,26 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
   };
 
   const handleUpdateQuestion = (index, field, value) => {
+    const questionId = newTest.questions[index]?.id;
+    if (field === 'imageUrl' && questionId) {
+      setFigureStates(previous => {
+        const next = { ...previous };
+        delete next[questionId];
+        return next;
+      });
+    }
     setNewTest(prev => {
       const updated = [...prev.questions];
       updated[index] = { ...updated[index] };
     if (field === 'imageUrl') {
       updated[index][field] = extractImageUrl(value);
+      delete updated[index].imageAsset;
+    } else if (field === 'imageAlt' && updated[index].imageAsset) {
+      updated[index].imageAlt = value;
+      updated[index].imageAsset = { ...updated[index].imageAsset, alt: value };
+    } else if (field === 'figureCaption' && updated[index].imageAsset) {
+      updated[index].figureCaption = value;
+      updated[index].imageAsset = { ...updated[index].imageAsset, caption: value };
     } else if (field === 'responseType') {
       const responseType = value as ResponseType;
       updated[index].responseType = responseType;
@@ -926,6 +960,84 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
     }
       return { ...prev, questions: updated };
     });
+  };
+
+  const uploadQuestionFigure = async (index: number, file?: File) => {
+    if (!file) return;
+    const question = newTest.questions[index];
+    if (!question) return;
+    const fileError = validateFigureFile(file);
+    if (fileError) {
+      setFigureStates(previous => ({ ...previous, [question.id]: { status: 'error', message: fileError } }));
+      return;
+    }
+
+    setFigureStates(previous => ({ ...previous, [question.id]: { status: 'uploading', message: 'Validating and uploading figure…' } }));
+    try {
+      const dimensions = await readFigureDimensions(file);
+      const dimensionError = validateFigureDimensions(dimensions.width, dimensions.height);
+      if (dimensionError) throw new Error(dimensionError);
+      const extension = file.type === 'image/jpeg' ? 'jpg' : file.type.split('/')[1];
+      const assessmentFolder = editingId || 'draft';
+      const assetId = crypto.randomUUID();
+      const path = `assessment-assets/${user.uid}/${assessmentFolder}/${question.id}/${assetId}.${extension}`;
+      const reference = storageRef(storage, path);
+      await uploadBytes(reference, file, {
+        contentType: file.type,
+        customMetadata: { uploadedBy: user.uid, assetVersion: String((question.imageAsset?.assetVersion || 0) + 1) },
+      });
+      const downloadUrl = await getDownloadURL(reference);
+      const asset: FigureAsset = {
+        storagePath: path,
+        downloadUrl,
+        contentType: file.type,
+        byteSize: file.size,
+        width: dimensions.width,
+        height: dimensions.height,
+        alt: question.imageAlt || '',
+        caption: question.figureCaption || '',
+        assetVersion: (question.imageAsset?.assetVersion || 0) + 1,
+        uploadedAt: new Date().toISOString(),
+        uploadedBy: user.uid,
+      };
+      setNewTest(previous => ({
+        ...previous,
+        questions: previous.questions.map((item, itemIndex) => itemIndex === index
+          ? { ...item, imageUrl: downloadUrl, imageAsset: asset }
+          : item),
+      }));
+      setFigureStates(previous => ({ ...previous, [question.id]: { status: 'available', message: 'Figure uploaded successfully. Its asset URL will be saved with this assessment.' } }));
+    } catch (error) {
+      console.error('Figure upload failed:', error);
+      setFigureStates(previous => ({
+        ...previous,
+        [question.id]: {
+          status: 'error',
+          message: error instanceof Error
+            ? `Figure upload failed: ${error.message}`
+            : 'Figure upload failed. Confirm Firebase Storage is enabled and its rules are deployed.',
+        },
+      }));
+    }
+  };
+
+  const testQuestionFigureUrl = async (question: AssessmentQuestion) => {
+    const normalizedUrl = normalizeFigureUrl(question.imageUrl || question.imageAsset?.downloadUrl || '');
+    if (!normalizedUrl) {
+      setFigureStates(previous => ({ ...previous, [question.id]: { status: 'error', message: 'Enter a valid HTTPS image URL first.' } }));
+      return;
+    }
+    setFigureStates(previous => ({ ...previous, [question.id]: { status: 'uploading', message: 'Testing whether this browser can render the image…' } }));
+    try {
+      await verifyFigureUrl(normalizedUrl);
+      setFigureStates(previous => ({ ...previous, [question.id]: { status: 'available', message: 'The URL loaded as an image in this browser.' } }));
+      setFigureTestRevision(previous => ({ ...previous, [question.id]: (previous[question.id] || 0) + 1 }));
+    } catch (error) {
+      setFigureStates(previous => ({
+        ...previous,
+        [question.id]: { status: 'error', message: error instanceof Error ? error.message : 'The image URL could not be rendered.' },
+      }));
+    }
   };
 
   const handleUpdateOption = (qIndex, optIndex, value) => {
@@ -1044,6 +1156,11 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
       const messages = validateQuestion(question);
       if (newTest.type === 'SAT' && (!question.satDomain || !question.satSkill)) messages.push('Choose a SAT domain and skill.');
       if (newTest.type === 'IELTS' && question.section === 'writing' && ![1, 2].includes(Number(question.writingTaskType || 0))) messages.push('Choose IELTS Writing Task 1 or Task 2.');
+      const figureInput = question.imageUrl || question.imageAsset?.downloadUrl || '';
+      if (figureInput && !normalizeFigureUrl(figureInput)) messages.push('Task figure URLs must use HTTPS and be a direct image URL.');
+      if (newTest.groupCode.trim() && requiresTaskFigure(question) && !normalizeFigureUrl(figureInput)) {
+        messages.push('Add and test a Task 1 figure, or explicitly mark this prompt as text-only before publishing.');
+      }
       return [question.id || String(index), messages];
     }).filter(([, messages]) => messages.length));
     setValidationErrors(errors);
@@ -1590,28 +1707,57 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
                          <textarea value={q.explanation || ''} onChange={event => handleUpdateQuestion(qIndex, 'explanation', event.target.value)} rows={2} className="mt-1 w-full p-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white" />
                        </label>
 
-                       <div className="mb-4 bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg border border-blue-200 dark:border-blue-800 shadow-sm text-left">
-                          <label className="flex items-center gap-2 text-sm font-medium text-blue-800 dark:text-blue-300 mb-1">
-                            <ImageIcon className="w-4 h-4 text-blue-500" /> ✨ Magic Extractor Active (Attach Figure)
-                          </label>
-                          <input 
-                            type="text"
-                            value={q.imageUrl || ''}
-                            onChange={(e) => handleUpdateQuestion(qIndex, 'imageUrl', e.target.value)}
-                            placeholder="Paste your link or ImgBB BBCode here!"
-                            className="w-full p-2 text-sm rounded border border-blue-300 dark:border-blue-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
-                          />
-                          <p className="text-xs text-blue-600 dark:text-blue-400 font-medium mt-1">
-                            Paste the "BBCode full linked" from ImgBB. The app will magically extract the picture!
-                          </p>
-                          {q.imageUrl && q.imageUrl.startsWith('http') && (
-                            <div className="mt-4 w-full bg-white dark:bg-slate-800 p-2 rounded border border-slate-200 dark:border-slate-700 overflow-hidden flex justify-center">
-                              <img src={q.imageUrl} alt="Preview" className="max-w-full h-auto object-contain rounded shadow-sm" />
-                            </div>
-                          )}
+                       <div className="mb-4 space-y-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-left dark:border-blue-800 dark:bg-blue-900/20">
+                         <h4 className="flex items-center gap-2 text-sm font-semibold text-blue-800 dark:text-blue-300">
+                           <ImageIcon className="h-4 w-4" /> Task figure
+                         </h4>
+                         <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">
+                           Upload from this device (PNG, JPEG, or WebP; maximum 5 MB)
+                           <input
+                             type="file"
+                             accept="image/png,image/jpeg,image/webp"
+                             onChange={event => {
+                               const file = event.target.files?.[0];
+                               void uploadQuestionFigure(qIndex, file);
+                               event.target.value = '';
+                             }}
+                             className="mt-1 block w-full text-sm"
+                           />
+                         </label>
+                         <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">
+                           Or use a trusted direct HTTPS image URL
+                           <input
+                             type="url"
+                             value={q.imageUrl || q.imageAsset?.downloadUrl || ''}
+                             onChange={event => handleUpdateQuestion(qIndex, 'imageUrl', event.target.value)}
+                             placeholder="https://example.com/task-figure.png"
+                             className="mt-1 w-full rounded border border-blue-300 bg-white p-2 text-sm text-slate-800 dark:border-blue-700 dark:bg-slate-800 dark:text-white"
+                           />
+                         </label>
+                         <div className="grid gap-3 sm:grid-cols-2">
+                           <label className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                             Alternative text
+                             <input value={q.imageAlt || q.imageAsset?.alt || ''} onChange={event => handleUpdateQuestion(qIndex, 'imageAlt', event.target.value)} className="mt-1 w-full rounded border p-2 dark:border-slate-600 dark:bg-slate-800" />
+                           </label>
+                           <label className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                             Figure caption / source (optional)
+                             <input value={q.figureCaption || q.imageAsset?.caption || ''} onChange={event => handleUpdateQuestion(qIndex, 'figureCaption', event.target.value)} className="mt-1 w-full rounded border p-2 dark:border-slate-600 dark:bg-slate-800" />
+                           </label>
+                         </div>
+                         <button type="button" onClick={() => void testQuestionFigureUrl(q)} disabled={figureStates[q.id]?.status === 'uploading'} className="rounded border border-blue-400 px-3 py-1.5 text-sm font-medium text-blue-800 disabled:opacity-50 dark:border-blue-700 dark:text-blue-300">
+                           {figureStates[q.id]?.status === 'uploading' ? 'Checking…' : 'Test image URL'}
+                         </button>
+                         {figureStates[q.id] && <p className={`text-sm ${figureStates[q.id].status === 'error' ? 'text-red-700 dark:text-red-300' : 'text-slate-700 dark:text-slate-200'}`} role={figureStates[q.id].status === 'error' ? 'alert' : 'status'}>{figureStates[q.id].message}</p>}
+                         <PromptFigure key={`${q.id}-${figureTestRevision[q.id] || 0}`} question={q} assessmentId={editingId || newTest.id || 'draft'} teacherFacing />
+                         {q.section === 'writing' && Number(q.writingTaskType || 2) === 1 && (
+                           <label className="flex items-start gap-2 text-sm text-slate-700 dark:text-slate-200">
+                             <input type="checkbox" checked={q.figureMode === 'text-only'} onChange={event => handleUpdateQuestion(qIndex, 'figureMode', event.target.checked ? 'text-only' : 'visual')} />
+                             <span>This is a text-only Task 1 prompt; all information needed is included in the prompt text.</span>
+                           </label>
+                         )}
                        </div>
 
-                        {previewQuestionId === q.id && <div className="mb-4 rounded-lg border border-blue-300 bg-white dark:bg-slate-800 p-4"><p className="font-medium mb-3">Student preview: {q.text || 'Question prompt'}</p><QuestionResponse question={q} value={undefined} onChange={() => {}} preview /></div>}
+                        {previewQuestionId === q.id && <div className="mb-4 rounded-lg border border-blue-300 bg-white p-4 dark:bg-slate-800"><p className="font-medium mb-3">Student preview: {q.text || 'Question prompt'}</p><PromptFigure question={q} assessmentId={editingId || newTest.id || 'draft'} teacherFacing /><QuestionResponse question={q} value={undefined} onChange={() => {}} preview /></div>}
                         {(validationErrors[q.id] || []).map(message => <p key={message} className="mb-2 text-sm text-red-600" role="alert">{message}</p>)}
                         {resolveResponseType(q) === 'single-choice' && q.type === 'mcq' && (
                          <div className="space-y-2 ml-4 border-l-2 border-slate-200 dark:border-slate-600 pl-4 text-left">
@@ -1679,9 +1825,8 @@ const WritingPractice = ({ tests, userId, onBack }) => {
   const [aiMessage, setAiMessage] = useState('');
   const [aiPhraseOptions, setAiPhraseOptions] = useState<string[]>([]);
   const [aiError, setAiError] = useState('');
-  const [inlineCompletion, setInlineCompletion] = useState('');
+  const [localSuggestionDismissed, setLocalSuggestionDismissed] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<null | { title: string; message: string; onConfirm: () => void; onCancel: () => void; }>(null);
-  const suggestedContinuation = draft && localSuggestions[0] ? localSuggestions[0].phrase : ' ';
   const textareaRef = React.useRef(null);
   const responseCache = React.useRef(new Map());
   const aiUsage = React.useRef({ date: '', count: 0, lastRequest: 0 });
@@ -1747,6 +1892,7 @@ const WritingPractice = ({ tests, userId, onBack }) => {
     const insertion = `${phrase}${/\s$/.test(phrase) || /^\s/.test(suffix) ? '' : ' '}`;
     const updated = `${draft.slice(0, start)}${insertion}${suffix}`;
     setDraft(updated);
+    setLocalSuggestionDismissed(true);
     requestAnimationFrame(() => {
       textarea?.focus();
       textarea?.setSelectionRange(start + insertion.length, start + insertion.length);
@@ -1758,13 +1904,6 @@ const WritingPractice = ({ tests, userId, onBack }) => {
     .map(line => line.trim().replace(/^(?:[-*•]|\d+[.)])\s*/, '').replace(/^["'“”‘’]|["'“”‘’]$/g, '').trim())
     .filter(Boolean)
     .slice(0, 3);
-
-  const acceptInlineCompletion = () => {
-    if (!inlineCompletion) return false;
-    setDraft(previous => `${previous}${inlineCompletion}`);
-    setInlineCompletion('');
-    return true;
-  };
 
   const showConfirm = async (title: string, message: string) => new Promise<boolean>(resolve => {
     setConfirmDialog({ title, message, onConfirm: () => { setConfirmDialog(null); resolve(true); }, onCancel: () => { setConfirmDialog(null); resolve(false); } });
@@ -1905,7 +2044,7 @@ const WritingPractice = ({ tests, userId, onBack }) => {
                 </select>
               </label>
               <p className="mt-4 whitespace-pre-wrap text-slate-800 dark:text-slate-100">{selectedPrompt.question.text}</p>
-              {selectedPrompt.question.imageUrl && <img src={selectedPrompt.question.imageUrl} alt="Writing prompt figure" className="mt-4 max-w-full rounded-lg" />}
+              <PromptFigure question={selectedPrompt.question} assessmentId={selectedPrompt.test.id} />
               <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">Suggested practice length: {taskType === 1 ? 'about 150 words' : 'about 250 words'}. This is guidance, not scoring.</p>
             </div>
             <div className="p-5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
@@ -1924,14 +2063,19 @@ const WritingPractice = ({ tests, userId, onBack }) => {
                   onChange={event => {
                     const value = event.target.value;
                     setDraft(value);
+                    setLocalSuggestionDismissed(false);
                     setAiMessage('');
                     setAiPhraseOptions([]);
                     setAiError('');
                     try { if (selectedPrompt) localStorage.setItem(getDraftStorageKey(selectedPrompt.id), value); } catch { /* Storage may be unavailable in private browsing. */ }
                   }}
                   onKeyDown={event => {
-                    if (event.key === 'Tab' && acceptInlineCompletion()) {
+                    if (event.key === 'Tab' && localSuggestions[0] && !localSuggestionDismissed) {
                       event.preventDefault();
+                      insertPhrase(localSuggestions[0].phrase);
+                    } else if (event.key === 'Escape' && localSuggestions[0] && !localSuggestionDismissed) {
+                      event.preventDefault();
+                      setLocalSuggestionDismissed(true);
                     }
                   }}
                   rows={16}
@@ -1939,15 +2083,11 @@ const WritingPractice = ({ tests, userId, onBack }) => {
                   placeholder="Write your response here. Your text stays on this device unless you explicitly request AI feedback."
                   className="w-full p-4 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white leading-relaxed"
                 />
-                {inlineCompletion && (
-                  <div aria-hidden="true" className="pointer-events-none absolute inset-0 mt-4 ml-4 mr-4 rounded-lg border border-dashed border-indigo-300 bg-transparent px-4 py-4 text-left text-sm leading-relaxed text-indigo-600 dark:text-indigo-300"
-                    style={{ WebkitTextFillColor: 'transparent' }}>
-                    <span className="inlineCompletion">{inlineCompletion}</span>
-                  </div>
-                )}
               </div>
-              {inlineCompletion && (
-                <p className="mt-2 text-xs font-semibold text-indigo-600 dark:text-indigo-300">Faint text is a suggested continuation. Press Tab to accept it.</p>
+              {localSuggestions[0] && !localSuggestionDismissed && (
+                <p className="mt-2 text-xs text-slate-600 dark:text-slate-300" role="status">
+                  Optional local suggestion: <span className="font-medium">{localSuggestions[0].phrase}</span> Press Tab to insert it at your cursor, or Escape to dismiss.
+                </p>
               )}
             </div>
           </div>
@@ -1976,13 +2116,19 @@ const WritingPractice = ({ tests, userId, onBack }) => {
   );
 };
 
-const ExamInterface = ({ test, user, onComplete }) => {
+const ExamInterface = ({ test, onComplete }) => {
   const questions = Array.isArray(test?.questions) ? test.questions : [];
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, unknown>>({});
+  const [finishConfirmationOpen, setFinishConfirmationOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submissionError, setSubmissionError] = useState('');
+  const [attemptId] = useState(() => crypto.randomUUID());
+  const [startedAtMs] = useState(() => Date.now());
   const currentQuestion = questions[currentIndex] || null;
   const currentResponseType = currentQuestion ? resolveResponseType(normalizeQuestion(currentQuestion as any)) : 'short-text';
   const currentValue = currentQuestion ? answers[currentQuestion.id] ?? '' : '';
+  const unansweredCount = questions.filter(question => !isAnswerPresent(answers[question.id])).length;
 
   const updateAnswer = (value: unknown) => {
     if (!currentQuestion) return;
@@ -2049,18 +2195,23 @@ const ExamInterface = ({ test, user, onComplete }) => {
     return <input type="text" value={String(currentValue || '')} onChange={event => updateAnswer(event.target.value)} className={baseClass} placeholder="Answer" />;
   };
 
-  const handleSubmit = () => {
-    const result = {
-      assessmentId: test?.id || 'local-exam',
-      assessmentTitle: test?.title || 'Practice exam',
-      submittedAt: new Date().toISOString(),
-      userUid: user?.uid || 'anonymous',
-      answers,
-      score: 0,
-      totalQuestions: questions.length,
-      status: 'submitted',
-    };
-    onComplete?.(result);
+  const handleSubmit = async () => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    setSubmissionError('');
+    try {
+      await onComplete?.({
+        attemptId,
+        answers,
+        startedAtMs,
+        submittedAt: new Date().toISOString(),
+        isAutoSubmitted: false,
+      });
+    } catch (error) {
+      console.error('Failed to submit assessment:', error);
+      setSubmissionError(error instanceof Error ? error.message : 'Could not submit your answers. Please try again.');
+      setIsSubmitting(false);
+    }
   };
 
   if (!questions.length) {
@@ -2073,6 +2224,26 @@ const ExamInterface = ({ test, user, onComplete }) => {
   }
 
   return (
+    <>
+    <Modal
+      isOpen={finishConfirmationOpen}
+      title="Finish and submit exam?"
+      onClose={() => { if (!isSubmitting) setFinishConfirmationOpen(false); }}
+      actions={[
+        { label: 'Keep working', onClick: () => setFinishConfirmationOpen(false), disabled: isSubmitting },
+        { label: isSubmitting ? 'Submitting…' : 'Submit answers', onClick: handleSubmit, disabled: isSubmitting },
+      ]}
+    >
+      <p>
+        Are you sure you want to finish <strong>{test?.title || 'this exam'}</strong>? You will not be able to change your answers after submitting.
+      </p>
+      {unansweredCount > 0 && (
+        <p className="mt-3 font-medium text-amber-700 dark:text-amber-300" role="status">
+          {unansweredCount} {unansweredCount === 1 ? 'question is' : 'questions are'} unanswered.
+        </p>
+      )}
+      {submissionError && <p className="mt-3 text-sm text-red-600 dark:text-red-400" role="alert">{submissionError}</p>}
+    </Modal>
     <section className="mx-auto max-w-4xl rounded-xl border border-slate-200 bg-white p-6 text-left shadow-sm dark:border-slate-700 dark:bg-slate-800">
       <div className="mb-5 flex items-center justify-between gap-3 border-b border-slate-200 pb-4 dark:border-slate-700">
         <div>
@@ -2085,6 +2256,7 @@ const ExamInterface = ({ test, user, onComplete }) => {
       <div className="space-y-5">
         <div className="rounded-lg bg-slate-50 p-4 dark:bg-slate-700/50">
           <p className="whitespace-pre-wrap text-base font-medium text-slate-800 dark:text-slate-100">{currentQuestion.text || 'Question prompt'}</p>
+          <PromptFigure question={currentQuestion} assessmentId={test?.id || 'unknown'} />
         </div>
 
         {renderAnswerInput()}
@@ -2110,7 +2282,7 @@ const ExamInterface = ({ test, user, onComplete }) => {
         ) : (
           <button
             type="button"
-            onClick={handleSubmit}
+            onClick={() => setFinishConfirmationOpen(true)}
             className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white"
           >
             Finish exam
@@ -2118,6 +2290,7 @@ const ExamInterface = ({ test, user, onComplete }) => {
         )}
       </div>
     </section>
+    </>
   );
 };
 
@@ -3092,7 +3265,7 @@ export default function App() {
       {currentView === 'login' && <LoginScreen onAuthAction={handleAuthAction} />}
       {currentView === 'teacher_dashboard' && <TeacherDashboard user={user} tests={tests} submissions={submissions} submissionsLoading={submissionsLoading} submissionsError={submissionsError} onSaveReview={saveTeacherReview} onBackfillLegacy={backfillLegacySubmissions} onSecureAnswerKeys={secureExistingAnswerKeys} onLogout={handleLogout} />}
       {currentView === 'student_dashboard' && <StudentDashboard user={user} tests={tests} results={results} onStartTest={startTest} onSaveGroupCode={saveStudentGroupCode} onLogout={handleLogout} />}
-      {currentView === 'exam' && activeTest && user && <ExamInterface key={`${user.uid}:${activeTest.id}`} test={activeTest} user={user} onComplete={completeTest} />}
+      {currentView === 'exam' && activeTest && user && <ExamInterface key={`${user.uid}:${activeTest.id}`} test={activeTest} onComplete={completeTest} />}
 
       <Modal isOpen={modalInfo.isOpen} title={modalInfo.title} onClose={() => setModalInfo(prev => ({ ...prev, isOpen: false }))}>
         <p className="whitespace-pre-wrap text-left">{modalInfo.message}</p>

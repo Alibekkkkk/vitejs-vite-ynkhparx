@@ -43,12 +43,20 @@ test('students can check only their own submission ID when the document does not
   assert.match(rules, /allow list: if isAuthorizedTeacher\(\)[\s\S]*?resource\.data\.get\('studentUid', ''\) == request\.auth\.uid/);
 });
 
-test('IELTS assessment writing accepts inline suggestions with Tab', () => {
-  assert.match(appSource, /aria-hidden="true"[\s\S]*?inlineCompletion/);
-  assert.match(appSource, /WebkitTextFillColor: 'transparent'/);
-  assert.match(appSource, /font-semibold text-indigo-600 dark:text-indigo-300/);
-  assert.match(appSource, /event\.key === 'Tab' && acceptInlineCompletion\(\)/);
-  assert.match(appSource, /Faint text is a suggested continuation\. Press Tab to accept it/);
+test('IELTS writing suggestions are visible locally and can be accepted or dismissed accessibly', () => {
+  assert.match(appSource, /getLocalWritingSuggestions\(/);
+  assert.match(appSource, /event\.key === 'Tab' && localSuggestions\[0\] && !localSuggestionDismissed/);
+  assert.match(appSource, /insertPhrase\(localSuggestions\[0\]\.phrase\)/);
+  assert.match(appSource, /event\.key === 'Escape' && localSuggestions\[0\] && !localSuggestionDismissed/);
+  assert.match(appSource, /Optional local suggestion:[\s\S]*?Press Tab to insert it at your cursor, or Escape to dismiss/);
+});
+
+test('exam completion requires an in-app confirmation before submission', () => {
+  assert.match(appSource, /title="Finish and submit exam\?"/);
+  assert.match(appSource, /Are you sure you want to finish/);
+  assert.match(appSource, /label: 'Keep working'/);
+  assert.match(appSource, /label: isSubmitting \? 'Submitting…' : 'Submit answers'/);
+  assert.match(appSource, /onClick=\{\(\) => setFinishConfirmationOpen\(true\)\}/);
 });
 
 test('combined SAT records both source assessments and checks student access to the second section', () => {
