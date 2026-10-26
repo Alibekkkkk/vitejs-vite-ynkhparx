@@ -38,6 +38,17 @@ test('approved teachers may submit practice attempts while scores remain server-
   assert.match(rules, /request\.resource\.data\.get\('score', null\) == null/);
 });
 
+test('students can check only their own submission ID when the document does not exist', () => {
+  assert.match(rules, /allow get: if isAuthorizedTeacher\(\)[\s\S]*?submissionId\.matches\(request\.auth\.uid \+ '_\.\*'\)[\s\S]*?resource == null/);
+  assert.match(rules, /allow list: if isAuthorizedTeacher\(\)[\s\S]*?resource\.data\.get\('studentUid', ''\) == request\.auth\.uid/);
+});
+
+test('IELTS assessment writing accepts inline suggestions with Tab', () => {
+  assert.match(appSource, /aria-hidden="true"[\s\S]*?inlineCompletion/);
+  assert.match(appSource, /event\.key === 'Tab' && acceptInlineCompletion\(\)/);
+  assert.match(appSource, /Faint text is a suggested continuation\. Press Tab to accept it/);
+});
+
 test('combined SAT records both source assessments and checks student access to the second section', () => {
   assert.match(appSource, /practiceSourceTestIds: practiceMetadata\.sourceTestIds \|\| \[test\.id\]/);
   assert.match(appSource, /sourceTestIds: \[readingWriting\.id, math\.id\]/);

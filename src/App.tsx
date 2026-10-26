@@ -2393,6 +2393,7 @@ const ExamWritingCoach = ({ question, userId, value, onChange, textareaRef }) =>
   const [aiBusy, setAiBusy] = useState(false);
   const [aiPhrases, setAiPhrases] = useState<string[]>([]);
   const [aiError, setAiError] = useState('');
+  const [overlayScrollTop, setOverlayScrollTop] = useState(0);
   const requestTimes = React.useRef({ date: '', count: 0, lastRequest: 0 });
   const wordCount = draft.trim() ? draft.trim().split(/\s+/).length : 0;
   const format = String(taskFormat).toLowerCase();
@@ -2406,7 +2407,7 @@ const ExamWritingCoach = ({ question, userId, value, onChange, textareaRef }) =>
     || (taskType === 1
       ? /\b(?:the|this|following)\s+(?:given\s+)?(?:(?:line|bar|pie)\s+)?(?:graph|chart|table|diagram|maps?|visual)\b/i.test(draft)
       : /\bthis essay\b/i.test(draft));
-  const hasOverview = /\b(overall|in general|it is clear that|the main feature)\b/i.test(draft);
+  const hasOverview = /\b(overall|in general|clear that|the main feature)\b/i.test(draft);
   const hasComparison = /\b(by contrast|in comparison|whereas|while|meanwhile|compared with|respectively)\b/i.test(draft);
   const localPhrases = taskType === 1
     ? !hasIntroduction
@@ -2448,6 +2449,38 @@ const ExamWritingCoach = ({ question, userId, value, onChange, textareaRef }) =>
             { phrase: 'This suggests that…', why: 'Development · explain what your example demonstrates.' },
             { phrase: 'In conclusion, …', why: 'Conclusion · summarize your position without adding a new point.' },
           ];
+  const completionWords = taskType === 1
+    ? [
+          { prefix: 'increas', suffix: 'ed steadily' },
+          { prefix: 'declin', suffix: 'ed gradually' },
+          { prefix: 'remain', suffix: 'ed relatively stable' },
+          { prefix: 'fluctu', suffix: 'ated over the period' },
+          { prefix: 'respectiv', suffix: 'ely' },
+      ]
+    : [
+          { prefix: 'importan', suffix: 't to consider' },
+          { prefix: 'contribut', suffix: 'es to' },
+          { prefix: 'consequen', suffix: 'tly, ' },
+          { prefix: 'therefor', suffix: 'e, ' },
+          { prefix: 'howev', suffix: 'er, ' },
+      ];
+  const partialWord = draft.match(/[A-Za-z]+$/)?.[0]?.toLowerCase() || '';
+  const partialWordCompletion = partialWord.length >= 4
+    ? completionWords.find(item => item.prefix.startsWith(partialWord) && item.prefix !== partialWord)?.suffix
+      || completionWords.find(item => item.prefix === partialWord)?.suffix
+    : undefined;
+  const trimmedDraft = draft.trimEnd();
+  const needsSentenceSeparator = trimmedDraft.length > 0 && !/[.!?…]$/.test(trimmedDraft);
+  const activeLocalPhrase = localPhrases[0]?.phrase.replace(/…$/, '').trim() || '';
+  const inlineCompletion = aiPhrases[0]
+    ? `${/\s$/.test(draft) ? '' : ' '}${aiPhrases[0]}`
+    : partialWordCompletion
+      ? partialWordCompletion
+      : !draft
+          ? taskType === 1 ? taskOneOpening : 'This essay will argue that…'
+          : needsSentenceSeparator && taskType === 1 && /\bclear that\b/i.test(draft) && hasOverview
+            ? ' the main trends differed across the four countries.'
+            : `${needsSentenceSeparator ? '. ' : '\n\n'}${activeLocalPhrase}${activeLocalPhrase.endsWith(',') ? ' ' : ''}`;
 
   useEffect(() => {
     requestContext.current = { questionId: question.id, draft };
@@ -2466,6 +2499,19 @@ const ExamWritingCoach = ({ question, userId, value, onChange, textareaRef }) =>
       textarea?.focus();
       textarea?.setSelectionRange(start + insertion.length, start + insertion.length);
     });
+  };
+
+  const acceptInlineCompletion = () => {
+    const textarea = textareaRef.current;
+    const start = textarea?.selectionStart ?? draft.length;
+    const end = textarea?.selectionEnd ?? draft.length;
+    if (start !== draft.length || end !== draft.length || !inlineCompletion) return false;
+    onChange(`${draft}${inlineCompletion}`);
+    requestAnimationFrame(() => {
+      textarea?.focus();
+      textarea?.setSelectionRange(draft.length + inlineCompletion.length, draft.length + inlineCompletion.length);
+    });
+    return true;
   };
 
   const requestPhrases = async () => {
@@ -2545,6 +2591,30 @@ const ExamWritingCoach = ({ question, userId, value, onChange, textareaRef }) =>
 
   return (
     <section className="mt-4 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50/70 dark:bg-indigo-950/30 p-4 space-y-3" aria-label={`IELTS Task ${taskType} writing coach`}>
+      <div className="relative overflow-hidden rounded-lg">
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 z-0 overflow-hidden whitespace-pre-wrap break-words border border-transparent p-4 leading-relaxed text-slate-800 dark:text-white"
+          style={{ transform: `translateY(-${overlayScrollTop}px)` }}
+        >
+          <span>{draft}</span><span className="text-slate-400 dark:text-slate-500">{inlineCompletion}</span>
+        </div>
+        <textarea
+          ref={textareaRef}
+          rows={8}
+          maxLength={12000}
+          className="relative z-10 w-full rounded-lg border border-slate-300 bg-transparent p-4 leading-relaxed text-transparent caret-slate-900 selection:bg-blue-200 placeholder:text-transparent dark:border-slate-600 dark:caret-white dark:selection:bg-blue-800"
+          placeholder="Write your response"
+          value={draft}
+          onChange={event => onChange(event.target.value)}
+          onScroll={event => setOverlayScrollTop(event.currentTarget.scrollTop)}
+          onKeyDown={event => {
+            if (event.key === 'Tab' && acceptInlineCompletion()) event.preventDefault();
+          }}
+          aria-describedby="writing-coach-tab-hint"
+        />
+      </div>
+      <p id="writing-coach-tab-hint" className="-mt-2 text-xs text-slate-600 dark:text-slate-300">Faint text is a suggested continuation. Press Tab to accept it, or keep typing to ignore it.</p>
       <div>
         <h3 className="font-semibold text-indigo-950 dark:text-indigo-100">Task {taskType} writing coach</h3>
         <p className="text-sm text-slate-700 dark:text-slate-300">Suggestions update as your draft structure changes. Choose a phrase to insert at your cursor; your writing is never replaced.</p>
@@ -2681,10 +2751,13 @@ const ExamInterface = ({ test, user, onComplete }) => {
       console.error('Could not submit this exam attempt:', error);
       submissionStarted.current = false;
       setIsSubmitting(false);
-      const isPermissionError = error?.code === 'permission-denied' || /missing or insufficient permissions/i.test(String(error?.message || ''));
+      const cause = error?.cause;
+      const errorCode = String(cause?.code || error?.code || '');
+      const errorMessage = cause instanceof Error ? cause.message : error instanceof Error ? error.message : String(error || '');
+      const isPermissionError = errorCode === 'permission-denied' || /missing or insufficient permissions/i.test(errorMessage);
       alert(isPermissionError
-        ? 'Firestore rejected this submission. Your answers are still saved on this device. Publish the latest firestore.rules; students must use an assigned group, and teacher practice submissions require an approved teacher account.'
-        : `Your answers are still saved on this device. Submission failed: ${error instanceof Error ? error.message : 'please try again.'}`);
+        ? 'Firestore rejected this submission. Your answers are still saved on this device. Ensure the latest firestore.rules are published and that your account is authorized for this assessment.'
+        : `Your answers are still saved on this device. Submission failed${errorCode ? ` (${errorCode})` : ''}: ${errorMessage}`);
     }
   };
 
@@ -2852,16 +2925,7 @@ const ExamInterface = ({ test, user, onComplete }) => {
                   )}
                   
                   <div className="mt-4 text-left w-full">
-                    {currentIsIeltsWriting ? <>
-                      <textarea
-                        ref={writingTextareaRef}
-                        rows={8}
-                        maxLength={12000}
-                        className="w-full p-4 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white leading-relaxed"
-                        placeholder="Write your response"
-                        value={typeof answers[currentQuestion.id] === 'string' ? String(answers[currentQuestion.id]) : ''}
-                        onChange={event => handleAnswerChange(currentQuestion.id, event.target.value)}
-                      />
+                    {currentIsIeltsWriting ? (
                       <ExamWritingCoach
                         question={currentQuestion}
                         userId={user.uid}
@@ -2869,7 +2933,7 @@ const ExamInterface = ({ test, user, onComplete }) => {
                         onChange={value => handleAnswerChange(currentQuestion.id, value)}
                         textareaRef={writingTextareaRef}
                       />
-                    </> : <QuestionResponse question={currentQuestion} value={answers[currentQuestion.id]} onChange={value => handleAnswerChange(currentQuestion.id, value)} />}
+                    ) : <QuestionResponse question={currentQuestion} value={answers[currentQuestion.id]} onChange={value => handleAnswerChange(currentQuestion.id, value)} />}
                   </div>
                 </div>
               </div>
