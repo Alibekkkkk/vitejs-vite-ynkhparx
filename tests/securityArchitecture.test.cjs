@@ -59,6 +59,20 @@ test('exam completion requires an in-app confirmation before submission', () => 
   assert.match(appSource, /onClick=\{\(\) => setFinishConfirmationOpen\(true\)\}/);
 });
 
+test('timed exams show a countdown and submit automatically when time expires', () => {
+  assert.match(appSource, /role="timer"/);
+  assert.match(appSource, /deadlineMs\.current - Date\.now\(\)/);
+  assert.match(appSource, /submitAttemptRef\.current\(true\)/);
+  assert.match(appSource, /Time is up\. Your answers are being submitted\./);
+});
+
+test('student dashboard distinguishes assigned assessments from coached practice', () => {
+  assert.match(appSource, /Available Tasks are assessments assigned by your teacher/);
+  assert.match(appSource, /Practice is self-directed skill work/);
+  assert.match(appSource, /AI coaching is not available during assigned tasks/);
+  assert.match(appSource, /Local suggestions are always available, including offline/);
+});
+
 test('combined SAT records both source assessments and checks student access to the second section', () => {
   assert.match(appSource, /practiceSourceTestIds: practiceMetadata\.sourceTestIds \|\| \[test\.id\]/);
   assert.match(appSource, /sourceTestIds: \[readingWriting\.id, math\.id\]/);

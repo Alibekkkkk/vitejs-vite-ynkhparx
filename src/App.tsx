@@ -2097,7 +2097,8 @@ const WritingPractice = ({ tests, userId, onBack }) => {
               {checklistItems.map(item => <label key={item} className="flex gap-2 items-start text-sm text-slate-700 dark:text-slate-300 mb-3"><input type="checkbox" checked={Boolean(checklist[item])} onChange={event => setChecklist(previous => ({ ...previous, [item]: event.target.checked }))} /><span>{item}</span></label>)}
             </div>
             <div className="p-5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
-              <h3 className="font-semibold text-slate-800 dark:text-white mb-3">Phrase suggestions</h3>
+              <h3 className="font-semibold text-slate-800 dark:text-white mb-1">Phrase suggestions</h3>
+              <p className="mb-3 text-xs font-medium text-emerald-700 dark:text-emerald-300">Local suggestions are always available, including offline. AI suggestions are optional and only requested when you click an AI button.</p>
               <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">AI is optional. The selected prompt and draft are sent only after you click an AI button; the free-tier provider may use submissions to improve its products.</p>
               <div className="space-y-2">{localSuggestions.map(suggestion => <div key={suggestion.phrase} className="p-3 rounded-lg bg-slate-50 dark:bg-slate-700"><button onClick={() => insertPhrase(suggestion.phrase)} className="text-left font-semibold text-blue-700 dark:text-blue-300 underline">{suggestion.phrase}</button><p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{suggestion.why}</p></div>)}</div>
               <button onClick={() => requestCoach('phrases')} disabled={aiBusy || !draft.trim()} className="w-full mt-4 px-3 py-2 rounded-lg bg-indigo-600 text-white font-semibold disabled:opacity-50">{aiBusy ? 'Preparing suggestions…' : 'Suggest 3 AI phrase options'}</button>
@@ -2125,6 +2126,13 @@ const ExamInterface = ({ test, onComplete }) => {
   const [submissionError, setSubmissionError] = useState('');
   const [attemptId] = useState(() => crypto.randomUUID());
   const [startedAtMs] = useState(() => Date.now());
+  const durationSeconds = Number(test?.durationSeconds);
+  const hasTimeLimit = Number.isFinite(durationSeconds) && durationSeconds > 0;
+  const [secondsRemaining, setSecondsRemaining] = useState(() => hasTimeLimit ? Math.ceil(durationSeconds) : null);
+  const [timeExpired, setTimeExpired] = useState(false);
+  const submissionStarted = React.useRef(false);
+  const deadlineMs = React.useRef(startedAtMs + (hasTimeLimit ? durationSeconds * 1000 : 0));
+  const submitAttemptRef = React.useRef<(autoSubmitted?: boolean) => Promise<void>>(async () => {});
   const currentQuestion = questions[currentIndex] || null;
   const currentResponseType = currentQuestion ? resolveResponseType(normalizeQuestion(currentQuestion as any)) : 'short-text';
   const currentValue = currentQuestion ? answers[currentQuestion.id] ?? '' : '';
@@ -2153,6 +2161,7 @@ const ExamInterface = ({ test, onComplete }) => {
                 name={question.id}
                 checked={String(currentValue) === String(option)}
                 onChange={() => updateAnswer(option)}
+                disabled={timeExpired || isSubmitting}
               />
               <span>{option}</span>
             </label>
@@ -2170,6 +2179,7 @@ const ExamInterface = ({ test, onComplete }) => {
               <input
                 type="checkbox"
                 checked={selected.includes(option)}
+                disabled={timeExpired || isSubmitting}
                 onChange={() => {
                   const next = selected.includes(option)
                     ? selected.filter(item => item !== option)
@@ -2185,18 +2195,19 @@ const ExamInterface = ({ test, onComplete }) => {
     }
 
     if (currentResponseType === 'numeric') {
-      return <input type="number" value={currentValue as string | number} onChange={event => updateAnswer(event.target.value)} className={baseClass} />;
+      return <input type="number" value={currentValue as string | number} onChange={event => updateAnswer(event.target.value)} disabled={timeExpired || isSubmitting} className={baseClass} />;
     }
 
     if (currentResponseType === 'long-text' || currentResponseType === 'short-text') {
-      return <textarea value={String(currentValue || '')} onChange={event => updateAnswer(event.target.value)} rows={6} className={baseClass} placeholder="Type your response here" />;
+      return <textarea value={String(currentValue || '')} onChange={event => updateAnswer(event.target.value)} rows={6} disabled={timeExpired || isSubmitting} className={baseClass} placeholder="Type your response here" />;
     }
 
-    return <input type="text" value={String(currentValue || '')} onChange={event => updateAnswer(event.target.value)} className={baseClass} placeholder="Answer" />;
+    return <input type="text" value={String(currentValue || '')} onChange={event => updateAnswer(event.target.value)} disabled={timeExpired || isSubmitting} className={baseClass} placeholder="Answer" />;
   };
 
-  const handleSubmit = async () => {
-    if (isSubmitting) return;
+  const handleSubmit = async (autoSubmitted = false) => {
+    if (submissionStarted.current) return;
+    submissionStarted.current = true;
     setIsSubmitting(true);
     setSubmissionError('');
     try {
@@ -2205,14 +2216,36 @@ const ExamInterface = ({ test, onComplete }) => {
         answers,
         startedAtMs,
         submittedAt: new Date().toISOString(),
-        isAutoSubmitted: false,
+        isAutoSubmitted: autoSubmitted,
       });
     } catch (error) {
       console.error('Failed to submit assessment:', error);
       setSubmissionError(error instanceof Error ? error.message : 'Could not submit your answers. Please try again.');
+      submissionStarted.current = false;
       setIsSubmitting(false);
     }
   };
+  submitAttemptRef.current = handleSubmit;
+
+  useEffect(() => {
+    if (!hasTimeLimit) return undefined;
+    const updateTimer = () => {
+      const remaining = Math.max(0, Math.ceil((deadlineMs.current - Date.now()) / 1000));
+      setSecondsRemaining(remaining);
+      if (remaining === 0) {
+        setTimeExpired(true);
+        setFinishConfirmationOpen(false);
+        void submitAttemptRef.current(true);
+        return true;
+      }
+      return false;
+    };
+    if (updateTimer()) return undefined;
+    const timer = window.setInterval(() => {
+      if (updateTimer()) window.clearInterval(timer);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [hasTimeLimit]);
 
   if (!questions.length) {
     return (
@@ -2250,8 +2283,25 @@ const ExamInterface = ({ test, onComplete }) => {
           <p className="text-sm font-medium uppercase tracking-wide text-blue-600 dark:text-blue-400">Exam</p>
           <h2 className="text-xl font-bold text-slate-800 dark:text-white">{test?.title || 'Practice exam'}</h2>
         </div>
-        <span className="rounded-full bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">{questionHeader}</span>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {hasTimeLimit ? (
+            <span
+              role="timer"
+              aria-label={`Time remaining ${formatTime(secondsRemaining)}`}
+              className={`rounded-full px-3 py-1 text-sm font-semibold tabular-nums ${secondsRemaining <= 300 ? 'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300' : 'bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200'}`}
+            >
+              <Clock className="mr-1 inline h-4 w-4" />{formatTime(secondsRemaining)}
+            </span>
+          ) : <span className="text-sm text-slate-500 dark:text-slate-400">No time limit</span>}
+          <span className="rounded-full bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">{questionHeader}</span>
+        </div>
       </div>
+
+      {timeExpired && (
+        <p className="mb-4 text-sm font-medium text-amber-800 dark:text-amber-200" role={submissionError ? 'alert' : 'status'}>
+          {submissionError ? `Time expired, but submission could not be completed: ${submissionError}` : 'Time is up. Your answers are being submitted.'}
+        </p>
+      )}
 
       <div className="space-y-5">
         <div className="rounded-lg bg-slate-50 p-4 dark:bg-slate-700/50">
@@ -2266,7 +2316,7 @@ const ExamInterface = ({ test, onComplete }) => {
         <button
           type="button"
           onClick={() => setCurrentIndex(previous => Math.max(0, previous - 1))}
-          disabled={currentIndex === 0}
+          disabled={currentIndex === 0 || timeExpired || isSubmitting}
           className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:text-slate-200"
         >
           Previous
@@ -2275,9 +2325,19 @@ const ExamInterface = ({ test, onComplete }) => {
           <button
             type="button"
             onClick={() => setCurrentIndex(previous => Math.min(questions.length - 1, previous + 1))}
+            disabled={timeExpired || isSubmitting}
             className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white"
           >
             Next
+          </button>
+        ) : timeExpired ? (
+          <button
+            type="button"
+            onClick={() => void handleSubmit(true)}
+            disabled={isSubmitting || !submissionError}
+            className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          >
+            {isSubmitting ? 'Submitting…' : 'Retry submission'}
           </button>
         ) : (
           <button
@@ -2742,9 +2802,20 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onSaveGroupCode, 
           </button>
         </div>
 
-        {activeTab === 'practice' && <PracticeHub tests={visibleTests} user={user} onStartTest={onStartTest} />}
+        {activeTab === 'practice' && (
+          <div className="space-y-4">
+            <p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-900 dark:bg-blue-900/20 dark:text-blue-100">
+              Practice is self-directed skill work. IELTS Writing practice includes always-available local suggestions and optional AI coaching. AI coaching is not available during assigned tasks.
+            </p>
+            <PracticeHub tests={visibleTests} user={user} onStartTest={onStartTest} />
+          </div>
+        )}
 
         {activeTab === 'tests' && (
+          <>
+          <p className="mb-4 rounded-lg bg-slate-100 p-3 text-sm text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+            Available Tasks are assessments assigned by your teacher. They are timed when a time limit is shown, and your submitted answers are sent for review. For coaching and AI suggestions, open Practice instead.
+          </p>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {visibleTests.length === 0 && (
                <div className="col-span-full py-12 text-center text-slate-500 dark:text-slate-400">
@@ -2784,6 +2855,7 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onSaveGroupCode, 
               );
             })}
           </div>
+          </>
         )}
 
         {activeTab === 'results' && (
