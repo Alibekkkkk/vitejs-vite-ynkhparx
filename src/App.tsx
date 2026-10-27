@@ -2679,8 +2679,8 @@ const ExamInterface = ({ test, onComplete, userId, writingResources, writingReso
       )}
       {submissionError && <p className="mt-3 text-sm text-red-600 dark:text-red-400" role="alert">{submissionError}</p>}
     </Modal>
-    <section className={`mx-auto ${isWritingQuestion ? 'max-w-6xl' : 'max-w-4xl'} rounded-xl border border-slate-200 bg-white p-6 text-left shadow-sm dark:border-slate-700 dark:bg-slate-800`}>
-      <div className="mb-5 flex items-center justify-between gap-3 border-b border-slate-200 pb-4 dark:border-slate-700">
+    <section className={`${isWritingQuestion ? 'exam-interface--writing' : 'mx-auto max-w-4xl'} rounded-xl border border-slate-200 bg-white p-6 text-left shadow-sm dark:border-slate-700 dark:bg-slate-800`}>
+      <div className="exam-interface__header mb-5 flex items-center justify-between gap-3 border-b border-slate-200 pb-4 dark:border-slate-700">
         <div>
           <p className="text-sm font-medium uppercase tracking-wide text-blue-600 dark:text-blue-400">Exam</p>
           <h2 className="text-xl font-bold text-slate-800 dark:text-white">{test?.title || 'Practice exam'}</h2>
@@ -2718,9 +2718,13 @@ const ExamInterface = ({ test, onComplete, userId, writingResources, writingReso
           disabled={timeExpired || isSubmitting}
         />
       ) : isWritingQuestion ? <ResizableSplitPane
-        workspaceKey={`exam-writing:${userId}:${test?.id}:${currentQuestion.id}`}
+        workspaceKey={`exam-writing-v2:${userId}:${test?.id}:${currentQuestion.id}`}
         leftLabel="Writing task and response"
         rightLabel="Vocabulary resource"
+        className="exam-writing-workspace"
+        defaultLeftPercent={50}
+        minLeftPercent={35}
+        maxLeftPercent={65}
         left={<div className="space-y-5">
           <div className="rounded-lg bg-slate-50 p-4 dark:bg-slate-700/50">
             <p className="whitespace-pre-wrap text-base font-medium text-slate-800 dark:text-slate-100">{currentQuestion.text || 'Question prompt'}</p>
@@ -2747,7 +2751,7 @@ const ExamInterface = ({ test, onComplete, userId, writingResources, writingReso
         {renderAnswerInput()}
       </div>}
 
-      <div className="mt-6 flex items-center justify-between gap-3 border-t border-slate-200 pt-4 dark:border-slate-700">
+      <div className="exam-interface__footer mt-6 flex items-center justify-between gap-3 border-t border-slate-200 pt-4 dark:border-slate-700">
         {isReadingPractice ? timeExpired ? (
           <button
             type="button"

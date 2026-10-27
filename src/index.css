@@ -135,6 +135,37 @@ html.dark #root {
   gap: 12px;
 }
 
+.exam-interface--writing {
+  box-sizing: border-box;
+  display: flex;
+  width: 100%;
+  max-width: none;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  margin: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 0;
+}
+
+.exam-interface--writing .exam-interface__header,
+.exam-interface--writing .exam-interface__footer {
+  flex: 0 0 auto;
+}
+
+.exam-interface--writing .exam-writing-workspace {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 0;
+}
+
+.exam-interface--writing .exam-writing-workspace > .split-pane__panel {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+}
+
 .split-pane__panel {
   min-width: 0;
   min-height: 0;
@@ -244,4 +275,12 @@ html.dark #root {
   .reading-workspace .split-pane { height: auto; min-height: 0; }
   .reading-workspace .split-pane__panel.is-active { height: 70vh; }
   .reading-workspace__scroll { max-height: none; }
+  .exam-interface--writing {
+    height: 100dvh;
+    padding: .75rem;
+  }
+  .exam-interface--writing .exam-writing-workspace .split-pane__panel {
+    max-height: none;
+    height: 100%;
+  }
 }

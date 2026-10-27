@@ -9,6 +9,7 @@ type Props = {
   defaultLeftPercent?: number;
   minLeftPercent?: number;
   maxLeftPercent?: number;
+  className?: string;
 };
 
 export function ResizableSplitPane({
@@ -20,6 +21,7 @@ export function ResizableSplitPane({
   defaultLeftPercent = 58,
   minLeftPercent = 35,
   maxLeftPercent = 72,
+  className = '',
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [leftPercent, setLeftPercent] = useState(defaultLeftPercent);
@@ -52,7 +54,7 @@ export function ResizableSplitPane({
   };
 
   return (
-    <div className={`split-pane ${dragging ? 'is-dragging' : ''}`} ref={containerRef} style={{ '--split-left': `${leftPercent}fr`, '--split-right': `${100 - leftPercent}fr` } as React.CSSProperties}>
+    <div className={`split-pane ${className} ${dragging ? 'is-dragging' : ''}`} ref={containerRef} style={{ '--split-left': `${leftPercent}fr`, '--split-right': `${100 - leftPercent}fr` } as React.CSSProperties}>
       <div className={`split-pane__panel split-pane__left ${activePane === 'left' ? 'is-active' : ''}`} role="region" aria-label={leftLabel}>{left}</div>
       <div
         className="split-pane__divider"
