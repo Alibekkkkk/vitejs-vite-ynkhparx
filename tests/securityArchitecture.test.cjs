@@ -5,6 +5,7 @@ const test = require('node:test');
 
 const root = join(__dirname, '..');
 const appSource = readFileSync(join(root, 'src', 'App.tsx'), 'utf8');
+const legacyMigration = readFileSync(join(root, 'src', 'legacyMigration.ts'), 'utf8');
 const rules = readFileSync(join(root, 'firestore.rules'), 'utf8');
 const firebaseConfig = JSON.parse(readFileSync(join(root, 'firebase.json'), 'utf8'));
 
@@ -17,6 +18,20 @@ test('student test access is constrained to published secured group assessments'
   assert.match(appSource, /where\('answerKeysSecured', '==', true\)[\s\S]*?where\('published', '==', true\)[\s\S]*?where\('groupCode', 'in'/);
   assert.match(rules, /resource\.data\.get\('answerKeysSecured', false\) == true[\s\S]*?resource\.data\.get\('published', false\) == true/);
   assert.match(rules, /testGroup == 'all' \|\| \(studentGroup != '' && testGroup == studentGroup\)/);
+});
+
+test('legacy imports are teacher-only, deterministic, and keep historical scores out of trusted fields', () => {
+  assert.match(rules, /match \/artifacts\/\{appId\}\/users\/\{userId\}\/results\/\{resultId\}[\s\S]*?allow get, list: if isAuthorizedTeacher\(\) \|\|/);
+  assert.match(rules, /request\.resource\.data\.get\('gradingMode', ''\) == 'legacy-unverified'[\s\S]*?request\.resource\.data\.keys\(\)\.hasOnly/);
+  assert.match(rules, /request\.resource\.data\.get\('importedBy', ''\) == request\.auth\.uid/);
+  assert.match(appSource, /mapLegacyResult\(/);
+  assert.match(legacyMigration, /gradingMode: 'legacy-unverified'/);
+  assert.match(legacyMigration, /legacyHistoricalData/);
+  assert.match(appSource, /dryRun \? 'dry run' : 'import'/);
+});
+
+test('published writing resources are student-readable but writable only by authorized teachers', () => {
+  assert.match(rules, /match \/artifacts\/\{appId\}\/public\/data\/writingResources\/\{resourceId\}[\s\S]*?resource\.data\.get\('status', ''\) == 'published'[\s\S]*?allow create, update, delete: if isAuthorizedTeacher\(\)/);
 });
 
 test('answer keys are stored under a teacher-only document path', () => {

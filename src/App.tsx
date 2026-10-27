@@ -19,7 +19,7 @@ import {
   signInWithPopup
 } from "firebase/auth";
 import { 
-  getFirestore, doc, getDoc, getDocs, setDoc, addDoc, collection, collectionGroup, onSnapshot,
+  getFirestore, doc, getDoc, getDocs, setDoc, addDoc, deleteDoc, collection, collectionGroup, onSnapshot,
   serverTimestamp, updateDoc, query, where, orderBy, limit, writeBatch, startAfter
 } from "firebase/firestore";
 import {
@@ -35,6 +35,13 @@ import {
 import { parseQuestionBank } from './questionBank';
 import { getLocalWritingSuggestions } from './writingSuggestions';
 import { PromptFigure } from './PromptFigure';
+import { ResizableSplitPane } from './ResizableSplitPane';
+import { WritingResourceTable } from './WritingResourceTable';
+import { WritingResourceManager } from './WritingResourceManager';
+import type { WritingResource } from './writingResources';
+import { LEGACY_IMPORT_BATCH_SIZE, mapLegacyResult, parseLegacyResultPath } from './legacyMigration';
+import { ANSWER_KEY_MIGRATION_VERSION, buildAnswerKeyQuestions, hasCompleteAnswerKey, stripPublicAnswerFields } from './answerKeyMigration';
+import { buildReadingSessionViewModel } from './readingSession';
 import {
   fetchFigureForAI,
   getFigureSource,
@@ -673,8 +680,8 @@ const TeacherReviewFields = ({ attempt, review, onSaveReview }) => {
   </>;
 };
 
-const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submissionsError, onSaveReview, onBackfillLegacy, onSecureAnswerKeys, onLogout }) => {
-  const [teacherArea, setTeacherArea] = useState<'assessments' | 'results' | 'samples'>('assessments');
+const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResource, onDeleteResource, submissions, submissionsLoading, submissionsError, onSaveReview, onBackfillLegacy, onSecureAnswerKeys, onLogout }) => {
+  const [teacherArea, setTeacherArea] = useState<'assessments' | 'results' | 'samples' | 'resources'>('assessments');
   const [assessmentView, setAssessmentView] = useState<'active' | 'archived'>('active');
   const [resultSearch, setResultSearch] = useState('');
   const [resultGroup, setResultGroup] = useState('');
@@ -684,7 +691,16 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
   const [resultFrom, setResultFrom] = useState('');
   const [resultTo, setResultTo] = useState('');
   const [selectedSample, setSelectedSample] = useState<any>(null);
-  const [legacyCursor, setLegacyCursor] = useState('');
+  const [legacyCursor, setLegacyCursor] = useState(() => {
+    try { return sessionStorage.getItem(`legacy-result-cursor:${user?.uid}`) || ''; } catch { return ''; }
+  });
+  const [legacyInfoOpen, setLegacyInfoOpen] = useState(false);
+  const [legacyConfirmOpen, setLegacyConfirmOpen] = useState(false);
+  const [legacyDryRun, setLegacyDryRun] = useState<any>(null);
+  const [answerKeyInfoOpen, setAnswerKeyInfoOpen] = useState(false);
+  const [answerKeyConfirmOpen, setAnswerKeyConfirmOpen] = useState(false);
+  const [answerKeyPreview, setAnswerKeyPreview] = useState<any>(null);
+  const [answerKeyReport, setAnswerKeyReport] = useState<any>(null);
   const [legacyMigrationMessage, setLegacyMigrationMessage] = useState('');
   const [migratingLegacy, setMigratingLegacy] = useState(false);
   const [securingAnswerKeys, setSecuringAnswerKeys] = useState(false);
@@ -720,6 +736,73 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
     await new Promise<void>(resolve => {
       setAlertPrompt({ title, message, onClose: () => { setAlertPrompt(null); resolve(); } });
     });
+  };
+
+  const previewLegacyImport = async () => {
+    setMigratingLegacy(true);
+    setLegacyMigrationMessage('');
+    try {
+      const summary = await onBackfillLegacy(legacyCursor, true);
+      setLegacyDryRun(summary);
+      setLegacyMigrationMessage('');
+    } catch (error) {
+      setLegacyMigrationMessage(error instanceof Error ? error.message : 'Could not preview older results.');
+    } finally {
+      setMigratingLegacy(false);
+    }
+  };
+
+  const runLegacyImport = async () => {
+    setLegacyConfirmOpen(false);
+    setMigratingLegacy(true);
+    setLegacyMigrationMessage('');
+    try {
+      const result = await onBackfillLegacy(legacyCursor, false);
+      const nextCursor = result.nextCursorPath || '';
+      setLegacyCursor(nextCursor);
+      try {
+        const key = `legacy-result-cursor:${user?.uid}`;
+        if (nextCursor) sessionStorage.setItem(key, nextCursor);
+        else sessionStorage.removeItem(key);
+      } catch (error) {
+        console.warn('Could not persist the legacy import cursor for this session:', error);
+      }
+      setLegacyMigrationMessage(`${result.migrated} legacy result${result.migrated === 1 ? '' : 's'} copied into the teacher list. ${result.alreadyImported} already existed. ${nextCursor ? 'Select preview to continue with the next batch.' : 'This batch reached the end of the legacy history.'}`);
+      setLegacyDryRun(null);
+    } catch (error) {
+      setLegacyMigrationMessage(error instanceof Error ? error.message : 'Could not import older results.');
+    } finally {
+      setMigratingLegacy(false);
+    }
+  };
+
+  const previewAnswerKeyMigration = async () => {
+    setSecuringAnswerKeys(true);
+    setLegacyMigrationMessage('');
+    setAnswerKeyReport(null);
+    try {
+      setAnswerKeyPreview(await onSecureAnswerKeys(true));
+    } catch (error) {
+      setLegacyMigrationMessage(error instanceof Error ? error.message : 'Could not preview answer-key security migration.');
+    } finally {
+      setSecuringAnswerKeys(false);
+    }
+  };
+
+  const runAnswerKeyMigration = async () => {
+    setAnswerKeyConfirmOpen(false);
+    setSecuringAnswerKeys(true);
+    setLegacyMigrationMessage('');
+    try {
+      const report = await onSecureAnswerKeys(false);
+      setAnswerKeyReport(report);
+      setLegacyMigrationMessage(`Answer-key migration finished: ${report.secured} secured, ${report.alreadySecured} already secure, ${report.skipped} skipped, ${report.incomplete} incomplete, ${report.failed} failed.`);
+      setAnswerKeyPreview(null);
+    } catch (error) {
+      setLegacyMigrationMessage(error instanceof Error ? error.message : 'Could not secure existing answer keys.');
+    } finally {
+      setSecuringAnswerKeys(false);
+    }
   };
 
   const importSampleAsDraft = async (bank: any, file: string) => {
@@ -1157,6 +1240,10 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
     }
     const errors = Object.fromEntries(newTest.questions.map((question, index) => {
       const messages = validateQuestion(question);
+      if (newTest.type === 'IELTS' && question.section === 'reading') {
+        const passageNumber = Number(question.passageNumber || 1);
+        if (!getReadingPassage(newTest, passageNumber).trim()) messages.push(`Question refers to Passage ${passageNumber}, but that passage has no text.`);
+      }
       if (newTest.type === 'SAT' && (!question.satDomain || !question.satSkill)) messages.push('Choose a SAT domain and skill.');
       if (newTest.type === 'IELTS' && question.section === 'writing' && ![1, 2].includes(Number(question.writingTaskType || 0))) messages.push('Choose IELTS Writing Task 1 or Task 2.');
       const figureInput = question.imageUrl || question.imageAsset?.downloadUrl || '';
@@ -1368,11 +1455,58 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
 
       <main className="w-full px-4 sm:px-8 lg:px-12 py-8 mx-auto">
         {!isBuildingTest && <nav className="flex flex-wrap gap-2 mb-6" aria-label="Teacher dashboard">
-          {([['assessments', 'Assessments'], ['results', 'Results & submissions'], ['samples', 'Sample banks']] as const).map(([id, label]) => <button key={id} onClick={() => setTeacherArea(id)} className={`px-4 py-2 rounded-lg border text-sm font-semibold ${teacherArea === id ? 'bg-purple-600 text-white border-purple-600' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-600'}`}>{label}</button>)}
+          {([['assessments', 'Assessments'], ['results', 'Results & submissions'], ['resources', 'Writing resources'], ['samples', 'Sample banks']] as const).map(([id, label]) => <button key={id} onClick={() => setTeacherArea(id)} className={`px-4 py-2 rounded-lg border text-sm font-semibold ${teacherArea === id ? 'bg-purple-600 text-white border-purple-600' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-600'}`}>{label}</button>)}
         </nav>}
         {!isBuildingTest && teacherArea === 'results' ? (
           <section className="text-left space-y-5">
-            <div className="flex flex-wrap items-center justify-between gap-3"><div><h1 className="text-2xl font-bold text-slate-800 dark:text-white">Results &amp; submissions</h1><p className="text-slate-500 dark:text-slate-400 mt-1">Latest 500 attempts, newest first. Import prior attempts and secure old assessment keys below.</p></div><div className="flex flex-wrap gap-2"><button onClick={async () => { setSecuringAnswerKeys(true); setLegacyMigrationMessage(''); try { const result: any = await onSecureAnswerKeys(); setLegacyMigrationMessage(`Secured answer keys for ${result.secured} assessment(s); ${result.alreadySecured} already secure. Students can access only secured assessments.`); } catch (error) { setLegacyMigrationMessage(error instanceof Error ? error.message : 'Could not secure existing answer keys.'); } finally { setSecuringAnswerKeys(false); } }} disabled={securingAnswerKeys} className="px-4 py-2 rounded-lg border border-amber-400 text-amber-800 dark:text-amber-200 disabled:opacity-50">{securingAnswerKeys ? 'Securing…' : 'Secure existing assessment keys'}</button><button onClick={async () => { setMigratingLegacy(true); setLegacyMigrationMessage(''); try { const result: any = await onBackfillLegacy(legacyCursor); setLegacyCursor(result.nextCursorPath || ''); setLegacyMigrationMessage(`${result.migrated} legacy result${result.migrated === 1 ? '' : 's'} copied into the teacher list.${result.nextCursorPath ? ' Select again to continue with older records.' : ' Migration reached the end of the legacy history.'}`); } catch (error) { setLegacyMigrationMessage(error instanceof Error ? error.message : 'Could not migrate older results.'); } finally { setMigratingLegacy(false); } }} disabled={migratingLegacy} className="px-4 py-2 rounded-lg border dark:border-slate-600 disabled:opacity-50">{migratingLegacy ? 'Importing…' : 'Import legacy results'}</button><button onClick={exportSubmissionsCsv} disabled={!visibleSubmissions.length} className="px-4 py-2 rounded-lg bg-purple-600 text-white disabled:opacity-50">Export filtered CSV</button></div></div>
+            <Modal isOpen={legacyInfoOpen} title="About legacy results import" onClose={() => setLegacyInfoOpen(false)}>
+              <p>This copies older student result records from each student’s private historical results path into the teacher’s central Results &amp; submissions list. It does not recalculate scores, change student answers, or verify historical grading. Imported records are marked “Legacy — unverified”; existing records are not duplicated.</p>
+              <dl className="mt-3 space-y-2 text-sm">
+                <div><dt className="font-semibold">Source</dt><dd>artifacts/{appId}/users/&#123;studentUid&#125;/results/&#123;attemptId&#125;</dd></div>
+                <div><dt className="font-semibold">Destination</dt><dd>artifacts/{appId}/public/data/submissions/legacy_&#123;studentUid&#125;_&#123;attemptId&#125;</dd></div>
+                <div><dt className="font-semibold">Effect</dt><dd>Dry run is read-only. Import creates central historical copies in batches of up to {LEGACY_IMPORT_BATCH_SIZE} records and stores a continuation cursor only in this browser session.</dd></div>
+                <div><dt className="font-semibold">Access and recovery</dt><dd>Run only while signed in as an authorized teacher. This operation is not automatically reversible; copied records require a controlled teacher-only maintenance action to remove.</dd></div>
+              </dl>
+            </Modal>
+            <Modal isOpen={answerKeyInfoOpen} title="About answer-key security migration" onClose={() => setAnswerKeyInfoOpen(false)}>
+              <p>This copies answer data from public assessment documents into teacher-only answer-key documents, then removes private answer fields from public questions. It prevents students from downloading correct answers before submitting.</p>
+              <p className="mt-3">Student-facing prompt text, figures, captions, sources, reading passages, vocabulary resources, and audio URLs are preserved. The migration does not delete assessments or alter student submissions and scores. It is idempotent and only reports an assessment as secured after verifying the private key contains every expected question ID.</p>
+            </Modal>
+            <Modal isOpen={answerKeyConfirmOpen} title="Confirm answer-key security migration" onClose={() => setAnswerKeyConfirmOpen(false)} actions={[
+              { label: 'Cancel', onClick: () => setAnswerKeyConfirmOpen(false) },
+              { label: securingAnswerKeys ? 'Securing…' : 'Secure assessment keys', onClick: runAnswerKeyMigration, disabled: securingAnswerKeys || !answerKeyPreview?.needingMigration },
+            ]}>
+              <p>This changes where answer keys are stored. It does not delete assessments or student submissions. Public answers are removed only in the same atomic batch that writes the teacher-only key.</p>
+            </Modal>
+            <Modal isOpen={legacyConfirmOpen} title="Confirm legacy result import" onClose={() => setLegacyConfirmOpen(false)} actions={[
+              { label: 'Cancel', onClick: () => setLegacyConfirmOpen(false) },
+              { label: migratingLegacy ? 'Importing…' : 'Import this batch', onClick: runLegacyImport, disabled: migratingLegacy || !legacyDryRun?.candidates },
+            ]}>
+              <p>This will create {Math.max(0, (legacyDryRun?.candidates || 0) - (legacyDryRun?.alreadyImported || 0))} historical copy/copies in the teacher list. Existing results will not be overwritten. No scores are recalculated.</p>
+            </Modal>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div><h1 className="text-2xl font-bold text-slate-800 dark:text-white">Results &amp; submissions</h1><p className="mt-1 text-slate-500 dark:text-slate-400">Latest 500 attempts, newest first. Import prior attempts and secure old assessment keys below.</p></div>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => setLegacyInfoOpen(true)} className="rounded-lg border px-4 py-2 dark:border-slate-600">Legacy import — Learn more</button>
+                <button onClick={() => void previewLegacyImport()} disabled={migratingLegacy} className="rounded-lg border px-4 py-2 dark:border-slate-600 disabled:opacity-50">{migratingLegacy ? 'Checking…' : 'Preview legacy import'}</button>
+                {legacyCursor && <button onClick={() => { setLegacyCursor(''); setLegacyDryRun(null); try { sessionStorage.removeItem(`legacy-result-cursor:${user?.uid}`); } catch (error) { console.warn('Could not clear the legacy import cursor:', error); } }} className="rounded-lg border px-4 py-2 dark:border-slate-600">Restart import cursor</button>}
+                <button onClick={() => setAnswerKeyInfoOpen(true)} className="rounded-lg border px-4 py-2 dark:border-slate-600">Answer keys — Learn more</button>
+                <button onClick={() => void previewAnswerKeyMigration()} disabled={securingAnswerKeys} className="rounded-lg border border-amber-400 px-4 py-2 text-amber-800 dark:text-amber-200 disabled:opacity-50">{securingAnswerKeys ? 'Checking…' : 'Preview answer-key migration'}</button>
+                <button onClick={exportSubmissionsCsv} disabled={!visibleSubmissions.length} className="rounded-lg bg-purple-600 px-4 py-2 text-white disabled:opacity-50">Export filtered CSV</button>
+              </div>
+            </div>
+            {legacyDryRun && <div className="rounded-lg border border-blue-300 bg-blue-50 p-4 text-blue-900 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-100">
+              <p className="font-semibold">Read-only batch preview</p>
+              <p>Read {legacyDryRun.recordsRead} record(s); {legacyDryRun.candidates} matched the expected historical path; {legacyDryRun.alreadyImported} already exist; {Math.max(0, legacyDryRun.candidates - legacyDryRun.alreadyImported)} would be imported.</p>
+              {legacyDryRun.nextCursorPath && <p>This batch has a continuation cursor. Import this batch first, then preview again to continue.</p>}
+              <button type="button" onClick={() => setLegacyConfirmOpen(true)} disabled={!legacyDryRun.candidates || migratingLegacy} className="mt-2 rounded bg-blue-700 px-3 py-2 text-white disabled:opacity-50">Confirm import of this batch</button>
+            </div>}
+            {answerKeyPreview && <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-amber-950 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-100">
+              <p className="font-semibold">Read-only answer-key migration preview</p>
+              <p>{answerKeyPreview.total} scanned; {answerKeyPreview.alreadySecured} already secured; {answerKeyPreview.needingMigration} need migration; {answerKeyPreview.publicAnswerFields} contain public answer fields; {answerKeyPreview.incomplete} have missing/incomplete keys; {answerKeyPreview.skipped} will be skipped.</p>
+              <button type="button" onClick={() => setAnswerKeyConfirmOpen(true)} disabled={!answerKeyPreview.needingMigration || securingAnswerKeys} className="mt-2 rounded bg-amber-700 px-3 py-2 text-white disabled:opacity-50">Confirm migration</button>
+            </div>}
+            {answerKeyReport?.details?.some((item: any) => ['failed', 'incomplete', 'skipped'].includes(item.status)) && <details className="rounded-lg border p-3 dark:border-slate-600"><summary>Assessment migration details</summary><ul className="mt-2 list-disc pl-5">{answerKeyReport.details.filter((item: any) => ['failed', 'incomplete', 'skipped'].includes(item.status)).map((item: any) => <li key={`${item.assessmentId}-${item.status}`}>{item.assessmentId}: {item.status}{item.reason ? ` — ${item.reason}` : ''}</li>)}</ul></details>}
             {legacyMigrationMessage && <p role="status" className="p-3 rounded bg-blue-50 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200">{legacyMigrationMessage}</p>}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-4">
               <input aria-label="Search submissions" value={resultSearch} onChange={e => setResultSearch(e.target.value)} placeholder="Search student / test" className="lg:col-span-2 p-2 rounded border dark:bg-slate-700 dark:border-slate-600" />
@@ -1385,14 +1519,23 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
             {submissionsLoading && <p role="status" className="p-4">Loading submissions…</p>}{submissionsError && <p role="alert" className="p-4 rounded bg-red-50 text-red-700">Could not load submissions: {submissionsError}</p>}
             {!submissionsLoading && !submissionsError && visibleSubmissions.length === 0 && <p className="p-8 text-center rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300">No submissions match these filters yet.</p>}
             <div className="space-y-3">{visibleSubmissions.map((attempt: any) => <details key={attempt.id} className="rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-4">
-              <summary className="cursor-pointer list-none"><div className="grid grid-cols-1 md:grid-cols-4 gap-2 items-center"><div><strong>{attempt.studentName || 'Student'}</strong><div className="text-xs text-slate-500">{attempt.studentEmail || 'Email unavailable'} · UID {attempt.studentUid}</div></div><div><strong>{attempt.assessmentTitle}</strong><div className="text-xs text-slate-500">{attempt.examType} · {attempt.assessmentId}{attempt.sectionOrSkill ? ` · ${attempt.sectionOrSkill}` : ''}</div></div><div className="text-sm">{new Date(attempt.submittedAtMs || attempt.submittedAt || 0).toLocaleString()} · Group: {attempt.groupCode || '—'}</div><div className="text-sm">{attempt.score == null ? 'Pending' : `${attempt.score} / ${attempt.maxPossibleScore ?? attempt.maxAutoScore ?? '—'}`} · {attempt.reviewStatus}</div></div><div className="mt-2 text-xs text-slate-500">Answered {attempt.answeredCount ?? 0} · unanswered {attempt.unansweredCount ?? 0} · correct {attempt.correctCount ?? 0} · incorrect {attempt.incorrectCount ?? 0} · pending review {attempt.pendingReviewCount ?? 0} · {attempt.isAutoSubmitted ? 'auto-submitted' : 'submitted'}{attempt.durationSeconds ? ` · ${Math.round(attempt.durationSeconds / 60)} min` : ''}</div></summary>
+              <summary className="cursor-pointer list-none"><div className="grid grid-cols-1 md:grid-cols-4 gap-2 items-center"><div><strong>{attempt.studentName || 'Student'}</strong><div className="text-xs text-slate-500">{attempt.studentEmail || 'Email unavailable'} · UID {attempt.studentUid}</div></div><div><strong>{attempt.assessmentTitle}</strong><div className="text-xs text-slate-500">{attempt.examType} · {attempt.assessmentId}{attempt.sectionOrSkill ? ` · ${attempt.sectionOrSkill}` : ''}</div></div><div className="text-sm">{new Date(attempt.submittedAtMs || attempt.legacyHistoricalData?.submittedAtMs || attempt.legacyHistoricalData?.submittedAt || attempt.submittedAt || 0).toLocaleString()} · Group: {attempt.groupCode || '—'}</div><div className="text-sm">{attempt.gradingMode === 'legacy-unverified' ? `Legacy — unverified${attempt.legacyHistoricalData?.score == null ? '' : ` · historical score ${attempt.legacyHistoricalData.score}`}` : `${attempt.score == null ? 'Pending' : `${attempt.score} / ${attempt.maxPossibleScore ?? attempt.maxAutoScore ?? '—'}`} · ${attempt.reviewStatus || 'submitted'}`}</div></div><div className="mt-2 text-xs text-slate-500">{attempt.gradingMode === 'legacy-unverified' ? 'Historical grading has not been recalculated or verified.' : `Answered ${attempt.answeredCount ?? 0} · unanswered ${attempt.unansweredCount ?? 0} · correct ${attempt.correctCount ?? 0} · incorrect ${attempt.incorrectCount ?? 0} · pending review ${attempt.pendingReviewCount ?? 0} · ${attempt.isAutoSubmitted ? 'auto-submitted' : 'submitted'}${attempt.durationSeconds ? ` · ${Math.round(attempt.durationSeconds / 60)} min` : ''}`}</div></summary>
               <div className="mt-4 border-t dark:border-slate-700 pt-3 space-y-4">
-                <button onClick={async () => { try { await onSaveReview(attempt.id, '__finalize__', { feedback: '', points: null }); } catch (error) { await showAlertDialog('Could not save grading', error instanceof Error ? error.message : 'Could not save grading. Try again.'); } }} className="px-3 py-2 rounded bg-blue-600 text-white text-sm font-semibold">Save objective grading and results</button>
-                <p className="text-xs text-slate-500">Uses the saved teacher-only answer key. Written responses remain pending until you review them.</p>
+                {attempt.gradingMode === 'legacy-unverified' ? <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-100">
+                  <p className="font-semibold">Legacy — unverified</p>
+                  <p>These are preserved historical values, not trusted or recalculated scores. This portal will not grade or edit the legacy record.</p>
+                  <p className="mt-2">Original source: {attempt.legacySourcePath}</p>
+                  <details className="mt-2"><summary>Historical display data</summary><pre className="mt-2 whitespace-pre-wrap break-words text-xs">{JSON.stringify(attempt.legacyHistoricalData || {}, null, 2)}</pre></details>
+                </div> : <>
+                  <button onClick={async () => { try { await onSaveReview(attempt.id, '__finalize__', { feedback: '', points: null }); } catch (error) { await showAlertDialog('Could not save grading', error instanceof Error ? error.message : 'Could not save grading. Try again.'); } }} className="px-3 py-2 rounded bg-blue-600 text-white text-sm font-semibold">Save objective grading and results</button>
+                  <p className="text-xs text-slate-500">Uses the saved teacher-only answer key. Written responses remain pending until you review them.</p>
+                </>}
                 {(attempt.questionReviews || []).map((review: any, index: number) => <div key={review.questionId || index} className="rounded-lg bg-slate-50 dark:bg-slate-900/60 p-3"><p className="font-semibold">Q{index + 1}. {review.questionText}</p><p className="text-sm mt-1">Student response: <span className="whitespace-pre-wrap">{typeof review.studentAnswer === 'object' ? JSON.stringify(review.studentAnswer) : String(review.studentAnswer || '—')}</span></p><p className="text-sm">Status: {review.status}{review.earnedPoints != null ? ` · ${review.earnedPoints}/${review.points} pts` : ''}{review.teacherReview?.points != null ? ` · teacher awarded ${review.teacherReview.points}/${review.points} pts` : ''}</p><p className="text-sm">Key: {JSON.stringify(review.answerKey ?? review.correctAnswer ?? '')}{review.acceptedAnswers?.length ? ` · Accepted: ${review.acceptedAnswers.join(', ')}` : ''}</p>{review.explanation && <p className="text-sm">Explanation: {review.explanation}</p>}{review.teacherReview?.feedback && <p className="text-sm text-blue-700 dark:text-blue-300">Teacher feedback: {review.teacherReview.feedback}</p>}{review.status === 'manual-review' && <TeacherReviewFields attempt={attempt} review={review} onSaveReview={onSaveReview} />}</div>)}
               </div>
             </details>)}</div>
           </section>
+        ) : !isBuildingTest && teacherArea === 'resources' ? (
+          <WritingResourceManager resources={resources} resourceError={resourceError} tests={tests} teacherUid={user.uid} onSave={onSaveResource} onDelete={onDeleteResource} />
         ) : !isBuildingTest && teacherArea === 'samples' ? (
           <section className="text-left space-y-5">
             <div><h1 className="text-2xl font-bold text-slate-800 dark:text-white">Sample banks</h1><p className="text-slate-500 dark:text-slate-400 mt-1">Original, unofficial practice. Preview first, then import as a draft. A bank is never published until you choose a student group and save it.</p></div>
@@ -1454,6 +1597,18 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 text-left">
               {shownTests.map(test => (
                 <div key={test.id} className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 flex flex-col transition-colors">
+                  {(() => {
+                    const failed = answerKeyReport?.details?.some((item: any) => item.assessmentId === test.id && item.status === 'failed');
+                    const securityStatus = test.status === 'draft' || test.published !== true
+                      ? 'Draft/not applicable'
+                      : failed ? 'Migration failed'
+                        : test.answerKeysSecured && test.teacherKeyComplete ? 'Secure'
+                          : test.answerKeysSecured ? 'Missing teacher key' : 'Needs security migration';
+                    const style = securityStatus === 'Secure' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200'
+                      : securityStatus === 'Draft/not applicable' ? 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200'
+                        : 'bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200';
+                    return <p className={`mb-3 w-fit rounded-full px-3 py-1 text-xs font-semibold ${style}`} aria-label={`Answer-key status: ${securityStatus}`}>{securityStatus}</p>;
+                  })()}
                   <div className="flex justify-between items-start mb-4">
                     <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${getStatusColor(test.category)}`}>
                       {test.category} • {test.type} • {test.status || (test.groupCode ? 'Published' : 'Draft')}
@@ -1855,7 +2010,7 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
   )
 }
 
-const WritingPractice = ({ tests, userId, onBack }) => {
+const WritingPractice = ({ tests, resources, resourceError, userId, onBack }) => {
   const taskOptions: Array<1 | 2> = [1, 2];
   const [taskType, setTaskType] = useState<1 | 2>(1);
   const [selectedPromptId, setSelectedPromptId] = useState('');
@@ -2131,8 +2286,11 @@ const WritingPractice = ({ tests, userId, onBack }) => {
           No Task {taskType} prompt is available yet. Ask your teacher to publish an IELTS Writing question and label it Task {taskType}.
         </div>
       ) : (
-        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,2fr)_minmax(260px,1fr)] gap-5">
-          <div className="space-y-4">
+        <ResizableSplitPane
+          workspaceKey={`ielts-writing:${userId}`}
+          leftLabel="Writing task and draft"
+          rightLabel="Resource panel"
+          left={<div className="space-y-4">
             <div className="p-5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Prompt
                 <select value={selectedPromptId || selectedPrompt.id} onChange={event => { setSelectedPromptId(event.target.value); setDraft(loadDraft(event.target.value)); setDraftRevision(previous => previous + 1); setAiMessage(''); setAiPhraseOptions([]); setAiInlineSuggestion(''); setAiFigureIncluded(false); setAiError(''); }} className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white">
@@ -2211,8 +2369,13 @@ const WritingPractice = ({ tests, userId, onBack }) => {
                 </p>
               )}
             </div>
-          </div>
-          <aside className="space-y-4">
+          </div>}
+          right={<aside className="space-y-4">
+            <section className="p-5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700" aria-labelledby="writing-resource-heading">
+              <h3 id="writing-resource-heading" className="font-semibold text-slate-800 dark:text-white mb-3">Resource panel</h3>
+              {resourceError && <p role="alert" className="mb-3 text-red-700 dark:text-red-300">Could not load writing resources: {resourceError}</p>}
+              <WritingResourceTable resources={resources} taskType={taskType} assessmentId={selectedPrompt.test.id} questionId={selectedPrompt.question.id} />
+            </section>
             <div className="p-5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
               <h3 className="font-semibold text-slate-800 dark:text-white mb-3">Structure checklist</h3>
               {checklistItems.map(item => <label key={item} className="flex gap-2 items-start text-sm text-slate-700 dark:text-slate-300 mb-3"><input type="checkbox" checked={Boolean(checklist[item])} onChange={event => setChecklist(previous => ({ ...previous, [item]: event.target.checked }))} /><span>{item}</span></label>)}
@@ -2231,15 +2394,125 @@ const WritingPractice = ({ tests, userId, onBack }) => {
               {aiError && <p role="status" className="text-sm text-amber-700 dark:text-amber-300 mt-3">{aiError}</p>}
               {aiMessage && <div role="status" className="mt-3 p-3 rounded-lg bg-blue-50 dark:bg-blue-900/30 text-sm text-slate-800 dark:text-slate-200 whitespace-pre-wrap"><p className="font-semibold mb-1">Formative coaching (not an official IELTS band score)</p>{aiMessage}</div>}
             </div>
-          </aside>
-        </div>
+          </aside>}
+        />
       )}
     </div>
     </>
   );
 };
 
-const ExamInterface = ({ test, onComplete }) => {
+const ReadingPracticeWorkspace = ({ test, userId, questions, answers, currentIndex, setCurrentIndex, currentQuestion, renderAnswerInput, disabled }) => {
+  const [activePassageNumber, setActivePassageNumber] = useState(Number(currentQuestion?.passageNumber || 1));
+  const [visitedQuestionIds, setVisitedQuestionIds] = useState<string[]>(currentQuestion?.id ? [currentQuestion.id] : []);
+  const passageScroll = React.useRef<Record<string, number>>({});
+  const questionScroll = React.useRef<Record<string, number>>({});
+  const passagePaneRef = React.useRef<HTMLDivElement>(null);
+  const questionPaneRef = React.useRef<HTMLDivElement>(null);
+  const readingSession = buildReadingSessionViewModel({
+    configuredPassages: test?.sections?.reading?.passages || [],
+    questions,
+    activePassageId: String(activePassageNumber),
+    activeQuestionId: String(currentQuestion?.id || ''),
+    answers,
+    visitedQuestionIds,
+    leftScrollTopByPassage: passageScroll.current,
+    rightScrollTopByPassage: questionScroll.current,
+  });
+  const passageNumbers = readingSession.passageIds.map(Number);
+  const questionIdsByPassage = readingSession.questionIdsByPassage;
+  const activeQuestionId = readingSession.activeQuestionId;
+
+  useEffect(() => {
+    const questionPassage = Number(currentQuestion?.passageNumber || 1);
+    if (questionPassage !== activePassageNumber) setActivePassageNumber(questionPassage);
+    if (currentQuestion?.id) setVisitedQuestionIds(previous => previous.includes(currentQuestion.id) ? previous : [...previous, currentQuestion.id]);
+  }, [currentQuestion?.id]);
+
+  useEffect(() => {
+    if (passagePaneRef.current) passagePaneRef.current.scrollTop = passageScroll.current[String(activePassageNumber)] || 0;
+    if (questionPaneRef.current) questionPaneRef.current.scrollTop = questionScroll.current[String(activePassageNumber)] || 0;
+  }, [activePassageNumber]);
+
+  const passageQuestions = questions
+    .map((question: any, index: number) => ({ question, index }))
+    .filter(({ question }: any) => Number(question.passageNumber || 1) === activePassageNumber);
+  const passage = (test?.sections?.reading?.passages || []).find((item: any) => Number(item.passageNumber) === activePassageNumber);
+  const passageText = getReadingPassage(test, activePassageNumber);
+  const moveQuestion = (questionId: string) => {
+    const index = questions.findIndex((question: any) => String(question.id) === questionId);
+    if (index >= 0) {
+      const nextPassage = Number(questions[index].passageNumber || 1);
+      setActivePassageNumber(nextPassage);
+      setCurrentIndex(index);
+    }
+  };
+  const changePassage = (number: number) => {
+    const firstQuestionId = questionIdsByPassage[String(number)]?.[0];
+    setActivePassageNumber(number);
+    if (firstQuestionId) moveQuestion(firstQuestionId);
+  };
+
+  return (
+    <div className="reading-workspace">
+      <ResizableSplitPane
+        workspaceKey={`ielts-reading:${userId}`}
+        leftLabel={`Reading passage ${activePassageNumber}`}
+        rightLabel={`Reading questions for passage ${activePassageNumber}`}
+        defaultLeftPercent={50}
+        minLeftPercent={35}
+        maxLeftPercent={65}
+        left={<div className="space-y-3">
+          <div className="sticky top-0 z-10 rounded-lg border bg-white p-3 dark:border-slate-600 dark:bg-slate-800">
+            <h3 className="font-bold text-slate-800 dark:text-white">{passage?.title || `Passage ${activePassageNumber}`}</h3>
+            <p className="text-sm text-slate-600 dark:text-slate-300">Passage {activePassageNumber} of {passageNumbers.length || 1}</p>
+            <nav className="mt-2 flex flex-wrap gap-2" aria-label="Passage navigation">
+              {passageNumbers.map(number => <button key={number} type="button" onClick={() => changePassage(number)} aria-current={activePassageNumber === number ? 'page' : undefined} className={`rounded border px-3 py-1.5 ${activePassageNumber === number ? 'bg-blue-600 text-white' : 'dark:border-slate-600 dark:text-slate-100'}`}>Passage {number}</button>)}
+            </nav>
+          </div>
+          {passageText.trim()
+            ? <div ref={passagePaneRef} onScroll={event => { passageScroll.current[String(activePassageNumber)] = event.currentTarget.scrollTop; }} className="reading-workspace__scroll rounded-lg bg-white p-5 dark:bg-slate-800">
+                <p className="whitespace-pre-wrap leading-relaxed text-slate-800 dark:text-slate-100">{passageText}</p>
+              </div>
+            : <div className="rounded-lg border border-amber-300 bg-amber-50 p-5 text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-100" role="status">The passage text for Passage {activePassageNumber} is not available. Please ask your teacher to complete this reading content.</div>}
+        </div>}
+        right={<div className="space-y-4">
+          <div className="rounded-lg border bg-white p-3 dark:border-slate-600 dark:bg-slate-800">
+            <h3 className="font-bold text-slate-800 dark:text-white">Questions for Passage {activePassageNumber}</h3>
+            <p className="text-sm text-slate-600 dark:text-slate-300">{passageQuestions.length} question(s) · {questions.length} total</p>
+            <div className="mt-2 grid grid-cols-5 gap-2 sm:grid-cols-8" aria-label="Question navigator">
+              {questionIdsByPassage[String(activePassageNumber)]?.map(questionId => {
+                const index = questions.findIndex((question: any) => String(question.id) === questionId);
+                const question = questions[index];
+                const answered = isAnswerPresent(answers[question.id]);
+                return <button key={questionId} type="button" aria-current={activeQuestionId === questionId ? 'step' : undefined} aria-label={`Question ${index + 1}, ${answered ? 'answered' : 'unanswered'}${visitedQuestionIds.includes(questionId) ? ', visited' : ''}`} onClick={() => moveQuestion(questionId)} className={`rounded border px-2 py-1 text-sm ${activeQuestionId === questionId ? 'bg-blue-600 text-white' : answered ? 'border-emerald-500 text-emerald-800 dark:text-emerald-200' : 'dark:border-slate-600 dark:text-slate-100'}`}>{index + 1}</button>;
+              })}
+            </div>
+          </div>
+          {passageQuestions.length && currentQuestion ? (
+            <div ref={questionPaneRef} onScroll={event => { questionScroll.current[String(activePassageNumber)] = event.currentTarget.scrollTop; }} className="reading-workspace__scroll space-y-4 rounded-lg border bg-white p-5 dark:border-slate-600 dark:bg-slate-800">
+              <div>
+                <p className="text-sm text-blue-700 dark:text-blue-300">{IELTS_QUESTION_FORMATS.find(item => item[0] === currentQuestion.questionType)?.[1] || currentQuestion.questionType || 'Reading question'} · Question {currentIndex + 1} of {questions.length}</p>
+                <p className="mt-2 whitespace-pre-wrap font-medium text-slate-800 dark:text-slate-100">{currentQuestion.text || 'Question prompt'}</p>
+                <PromptFigure question={currentQuestion} assessmentId={test?.practiceSourceTestId || test?.id || 'unknown'} />
+              </div>
+              {renderAnswerInput()}
+              <div className="flex justify-between gap-2 border-t pt-3 dark:border-slate-600">
+                <button type="button" onClick={() => moveQuestion(String(questions[currentIndex - 1]?.id || ''))} disabled={disabled || currentIndex === 0} className="rounded border px-3 py-2 disabled:opacity-50">Previous question</button>
+                <button type="button" onClick={() => moveQuestion(String(questions[currentIndex + 1]?.id || ''))} disabled={disabled || currentIndex >= questions.length - 1} className="rounded bg-blue-600 px-3 py-2 text-white disabled:opacity-50">Next question</button>
+              </div>
+            </div>
+          ) : <p className="rounded-lg border border-dashed p-5 text-slate-600 dark:border-slate-600 dark:text-slate-300">No questions are assigned to Passage {activePassageNumber}.</p>}
+        </div>}
+      />
+      <p className="mt-3 text-sm text-slate-600 dark:text-slate-300" aria-live="polite">
+        {questions.filter((question: any) => isAnswerPresent(answers[question.id])).length} of {questions.length} questions answered · {visitedQuestionIds.length} visited
+      </p>
+    </div>
+  );
+};
+
+const ExamInterface = ({ test, onComplete, userId }) => {
   const questions = Array.isArray(test?.questions) ? test.questions : [];
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, unknown>>({});
@@ -2259,6 +2532,7 @@ const ExamInterface = ({ test, onComplete }) => {
   const currentResponseType = currentQuestion ? resolveResponseType(normalizeQuestion(currentQuestion as any)) : 'short-text';
   const currentValue = currentQuestion ? answers[currentQuestion.id] ?? '' : '';
   const unansweredCount = questions.filter(question => !isAnswerPresent(answers[question.id])).length;
+  const isReadingPractice = test?.practiceMetadata?.kind === 'reading';
 
   const updateAnswer = (value: unknown) => {
     if (!currentQuestion) return;
@@ -2425,34 +2699,29 @@ const ExamInterface = ({ test, onComplete }) => {
         </p>
       )}
 
-      <div className="space-y-5">
+      {isReadingPractice ? (
+        <ReadingPracticeWorkspace
+          test={test}
+          userId={userId}
+          questions={questions}
+          answers={answers}
+          currentIndex={currentIndex}
+          setCurrentIndex={setCurrentIndex}
+          currentQuestion={currentQuestion}
+          renderAnswerInput={renderAnswerInput}
+          disabled={timeExpired || isSubmitting}
+        />
+      ) : <div className="space-y-5">
         <div className="rounded-lg bg-slate-50 p-4 dark:bg-slate-700/50">
           <p className="whitespace-pre-wrap text-base font-medium text-slate-800 dark:text-slate-100">{currentQuestion.text || 'Question prompt'}</p>
           <PromptFigure question={currentQuestion} assessmentId={test?.id || 'unknown'} />
         </div>
 
         {renderAnswerInput()}
-      </div>
+      </div>}
 
       <div className="mt-6 flex items-center justify-between gap-3 border-t border-slate-200 pt-4 dark:border-slate-700">
-        <button
-          type="button"
-          onClick={() => setCurrentIndex(previous => Math.max(0, previous - 1))}
-          disabled={currentIndex === 0 || timeExpired || isSubmitting}
-          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:text-slate-200"
-        >
-          Previous
-        </button>
-        {currentIndex < questions.length - 1 ? (
-          <button
-            type="button"
-            onClick={() => setCurrentIndex(previous => Math.min(questions.length - 1, previous + 1))}
-            disabled={timeExpired || isSubmitting}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white"
-          >
-            Next
-          </button>
-        ) : timeExpired ? (
+        {isReadingPractice ? timeExpired ? (
           <button
             type="button"
             onClick={() => void handleSubmit(true)}
@@ -2469,7 +2738,43 @@ const ExamInterface = ({ test, onComplete }) => {
           >
             Finish exam
           </button>
-        )}
+        ) : <>
+          <button
+            type="button"
+            onClick={() => setCurrentIndex(previous => Math.max(0, previous - 1))}
+            disabled={currentIndex === 0 || timeExpired || isSubmitting}
+            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:text-slate-200"
+          >
+            Previous
+          </button>
+          {currentIndex < questions.length - 1 ? (
+            <button
+              type="button"
+              onClick={() => setCurrentIndex(previous => Math.min(questions.length - 1, previous + 1))}
+              disabled={timeExpired || isSubmitting}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white"
+            >
+              Next
+            </button>
+          ) : timeExpired ? (
+            <button
+              type="button"
+              onClick={() => void handleSubmit(true)}
+              disabled={isSubmitting || !submissionError}
+              className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              {isSubmitting ? 'Submitting…' : 'Retry submission'}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setFinishConfirmationOpen(true)}
+              className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white"
+            >
+              Finish exam
+            </button>
+          )}
+        </>}
       </div>
     </section>
     </>
@@ -2591,7 +2896,7 @@ const IELTS_SPEAKING_BANK = { questions: [
   { id: 'sp_p3_lifelong', speakingPart: 3, text: 'Why might people continue learning after they finish formal education?', responseSeconds: 90 },
 ] };
 
-const PracticeHub = ({ tests, user, onStartTest }) => {
+const PracticeHub = ({ tests, resources, resourceError, user, onStartTest }) => {
   const [subject, setSubject] = useState('');
   const [sourceId, setSourceId] = useState('');
   const [readingMode, setReadingMode] = useState('question-type');
@@ -2637,14 +2942,20 @@ const PracticeHub = ({ tests, user, onStartTest }) => {
   });
   const distinct = (values: any[]): any[] => [...new Set(values.filter(Boolean))];
   const readingTypes = distinct(readingQuestions(selectedTest).map(question => question.questionType));
+  const readingQuestionsAll = readingQuestions(selectedTest);
+  const readingPassageOptions = distinct([
+    ...(selectedTest?.sections?.reading?.passages || []).map((passage: any) => Number(passage.passageNumber)),
+    ...readingQuestionsAll.map(question => Number(question.passageNumber || 1)),
+  ]).sort((a, b) => a - b);
+  const readingPassageIssues = readingQuestionsAll.filter(question => !getReadingPassage(selectedTest, Number(question.passageNumber || 1)).trim());
   const readingQuestionsForMode = readingQuestions(selectedTest).filter(question => {
     if (readingMode === 'question-type') return Boolean(readingType) && question.questionType === readingType;
     if (readingMode === 'passage') return (question.passageNumber || 1) === passageNumber;
-    return [1, 2, 3].includes(question.passageNumber || 1);
+    return true;
   });
-  const readingQuestionsAll = readingQuestions(selectedTest);
-  const readingFullReady = readingQuestionsAll.length === 40
-    && [1, 2, 3].every(number => getReadingPassage(selectedTest, number).trim() && readingQuestionsAll.filter(question => (question.passageNumber || 1) === number).length > 0);
+  const readingFullReady = readingQuestionsAll.length > 0
+    && readingPassageOptions.some(number => getReadingPassage(selectedTest, number).trim() && readingQuestionsAll.some(question => Number(question.passageNumber || 1) === number))
+    && readingPassageIssues.length === 0;
   const listeningQuestionsForMode = listeningQuestions(selectedTest).filter(question => listeningSection === 'all' || (question.listeningSectionNumber || 1) === Number(listeningSection));
   const allListeningQuestions = listeningQuestions(selectedTest);
   const listeningFullReady = allListeningQuestions.length === 40
@@ -2670,7 +2981,7 @@ const PracticeHub = ({ tests, user, onStartTest }) => {
     });
   };
 
-  if (subject === 'writing') return <WritingPractice tests={ieltsTests} userId={user?.uid} onBack={() => setSubject('')} />;
+  if (subject === 'writing') return <WritingPractice tests={ieltsTests} resources={resources} resourceError={resourceError} userId={user?.uid} onBack={() => setSubject('')} />;
   if (subject === 'speaking') return <SpeakingPractice bank={IELTS_SPEAKING_BANK} userId={user?.uid} onBack={() => setSubject('')} />;
 
   if (!subject) {
@@ -2778,10 +3089,11 @@ const PracticeHub = ({ tests, user, onStartTest }) => {
             {readingMode === 'question-type' && <label className="block max-w-2xl text-sm font-medium text-slate-700 dark:text-slate-300">Question type
               <select value={readingType} onChange={event => setReadingType(event.target.value)} className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white"><option value="">Select a type</option>{readingTypes.map(type => <option key={type} value={type}>{IELTS_QUESTION_FORMATS.find(item => item[0] === type)?.[1] || type}</option>)}</select>
             </label>}
-            {readingMode === 'passage' && <label className="block max-w-2xl text-sm font-medium text-slate-700 dark:text-slate-300">Passage<select value={passageNumber} onChange={event => setPassageNumber(Number(event.target.value))} className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white">{[1, 2, 3].map(number => <option key={number} value={number}>Passage {number}</option>)}</select></label>}
+            {readingMode === 'passage' && <label className="block max-w-2xl text-sm font-medium text-slate-700 dark:text-slate-300">Passage<select value={passageNumber} onChange={event => setPassageNumber(Number(event.target.value))} className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white">{readingPassageOptions.map(number => <option key={number} value={number}>Passage {number}</option>)}</select></label>}
             {emptyBank && <p className="text-amber-700 dark:text-amber-300">This assessment has no tagged Reading questions yet. A teacher can add them in IELTS Reading and assign a question type and passage number.</p>}
             {readingMode === 'question-type' && !readingTypes.length && !emptyBank && <p className="text-amber-700 dark:text-amber-300">Question-type practice needs published Reading questions with a question-format tag.</p>}
-            {readingMode === 'full' && !readingFullReady && <p className="text-amber-700 dark:text-amber-300">A full Reading session is available only when this bank contains exactly 40 questions linked to all three complete passages. Current sample banks are pilots and do not meet that count.</p>}
+            {readingMode === 'full' && readingPassageIssues.length > 0 && <p className="text-amber-700 dark:text-amber-300" role="alert">{readingPassageIssues.length} Reading question(s) reference missing passage text. Ask your teacher to complete the referenced passage before starting.</p>}
+            {readingMode === 'full' && !readingFullReady && <p className="text-amber-700 dark:text-amber-300">A full Reading session needs questions linked to at least one passage with available text.</p>}
             {readingMode !== 'full' && selectedTest && readingMode !== 'question-type' && readingQuestionsForMode.length === 0 && <p className="text-amber-700 dark:text-amber-300">No questions are tagged for Passage {passageNumber} in this assessment yet.</p>}
             <button onClick={startReading} disabled={!selectedTest || emptyBank || readingQuestionsForMode.length === 0 || (readingMode === 'question-type' && !readingType) || (readingMode === 'full' && !readingFullReady)} className="px-5 py-3 rounded-lg bg-blue-600 text-white font-semibold disabled:opacity-50">Start Reading Practice</button>
           </div>}
@@ -2820,7 +3132,7 @@ const PracticeHub = ({ tests, user, onStartTest }) => {
   );
 };
 
-const StudentDashboard = ({ user, tests, results, onStartTest, onSaveGroupCode, onLogout }) => {
+const StudentDashboard = ({ user, tests, results, writingResources, writingResourcesError, onStartTest, onSaveGroupCode, onLogout }) => {
   const [activeTab, setActiveTab] = useState('tests');
   const [pinModal, setPinModal] = useState({ isOpen: false, test: null, enteredPin: '', error: '' });
   const [groupCodeInput, setGroupCodeInput] = useState(user?.groupCode || '');
@@ -2929,7 +3241,7 @@ const StudentDashboard = ({ user, tests, results, onStartTest, onSaveGroupCode, 
             <p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-900 dark:bg-blue-900/20 dark:text-blue-100">
               Practice is self-directed skill work. IELTS Writing practice includes always-available local suggestions and optional AI coaching. AI coaching is not available during assigned tasks.
             </p>
-            <PracticeHub tests={visibleTests} user={user} onStartTest={onStartTest} />
+            <PracticeHub tests={visibleTests} resources={writingResources} resourceError={writingResourcesError} user={user} onStartTest={onStartTest} />
           </div>
         )}
 
@@ -3065,6 +3377,8 @@ export default function App() {
   const [user, setUser] = useState<any>(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
   const [tests, setTests] = useState<any[]>([]);
+  const [writingResources, setWritingResources] = useState<WritingResource[]>([]);
+  const [writingResourcesError, setWritingResourcesError] = useState('');
   const [results, setResults] = useState<any[]>([]);
   const [submissions, setSubmissions] = useState<any[]>([]);
   const [submissionsLoading, setSubmissionsLoading] = useState(false);
@@ -3128,7 +3442,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!user || !db) return;
+    if (!user || !db) {
+      setWritingResources([]);
+      setWritingResourcesError('');
+      return;
+    }
     const testsRef = collection(db, 'artifacts', appId, 'public', 'data', 'tests');
     const testsQuery = user.role === 'teacher'
       ? testsRef
@@ -3147,14 +3465,26 @@ export default function App() {
           const keySnapshot = await getDoc(doc(db, 'artifacts', appId, 'teacher', 'data', 'answerKeys', test.id));
           return keySnapshot.exists() ? {
             ...test,
+            teacherKeyComplete: hasCompleteAnswerKey(test.questions || [], keySnapshot.data().questions || []),
             sections: mergeTeacherSections(test.sections, keySnapshot.data().teacherSections),
             questions: mergeQuestionKeys(test.questions || [], keySnapshot.data().questions || []),
-          } : test;
+          } : { ...test, teacherKeyComplete: false };
         }));
       }
       testsData.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       setTests(testsData);
     }, err => console.error(err));
+
+    const resourcesRef = collection(db, 'artifacts', appId, 'public', 'data', 'writingResources');
+    const resourcesQuery = user.role === 'teacher' ? resourcesRef : query(resourcesRef, where('status', '==', 'published'));
+    setWritingResourcesError('');
+    const unsubWritingResources = onSnapshot(resourcesQuery, snapshot => {
+      setWritingResources(snapshot.docs.map(item => ({ ...item.data(), id: item.id })) as WritingResource[]);
+    }, error => {
+      console.error('Could not load writing resources:', error);
+      setWritingResourcesError(error.message || 'Permission or network error.');
+      setWritingResources([]);
+    });
 
     let unsubResults = () => {};
     let unsubSubmissions = () => {};
@@ -3179,7 +3509,7 @@ export default function App() {
       setSubmissions([]);
     }
 
-    return () => { unsubTests(); unsubResults(); unsubSubmissions(); };
+    return () => { unsubTests(); unsubResults(); unsubSubmissions(); unsubWritingResources(); };
   }, [user]);
 
   const handleAuthAction = async (action, data) => {
@@ -3333,6 +3663,9 @@ export default function App() {
     const snapshot = await getDoc(submissionRef);
     if (!snapshot.exists()) throw new Error('Submission not found.');
     const submission = snapshot.data();
+    if (submission.gradingMode === 'legacy-unverified') {
+      throw new Error('Legacy historical results are not recalculated or edited through the current grading workflow.');
+    }
     const sourceAssessmentIds = submission.assessmentIds?.length ? submission.assessmentIds : [submission.assessmentId];
     const sourceAssessments = sourceAssessmentIds.map((id: string) => tests.find((item: any) => item.id === id)).filter(Boolean);
     const trustedQuestions = sourceAssessments.flatMap((assessment: any) => assessment.questions || []);
@@ -3371,68 +3704,203 @@ export default function App() {
     if (studentResult.exists()) await updateDoc(studentResultRef, reviewSummary);
   };
 
-  const backfillLegacySubmissions = async (cursorPath: string) => {
-    let legacyQuery = query(collectionGroup(db, 'results'), orderBy('submittedAt', 'desc'), limit(200));
-    if (cursorPath) {
-      const cursorSnapshot = await getDoc(doc(db, cursorPath));
-      if (cursorSnapshot.exists()) legacyQuery = query(legacyQuery, startAfter(cursorSnapshot));
+  const backfillLegacySubmissions = async (cursorPath: string, dryRun = false) => {
+    const firebaseUser = auth.currentUser;
+    if (user?.role !== 'teacher' || !isClientAuthorizedTeacher(firebaseUser)) {
+      throw new Error('Legacy results import is restricted to an authorized, verified Google teacher. Sign in with an approved teacher account.');
     }
-    const snapshot = await getDocs(legacyQuery);
-    const batch = writeBatch(db);
-    let migrated = 0;
-    for (const legacy of snapshot.docs) {
-      const parts = legacy.ref.path.split('/');
-      if (parts[0] !== 'artifacts' || parts[1] !== appId || parts[2] !== 'users' || parts[4] !== 'results') continue;
-      const uid = parts[3];
-      const legacyData = legacy.data();
-      const id = `legacy_${uid}_${legacy.id}`;
-      const target = doc(db, 'artifacts', appId, 'public', 'data', 'submissions', id);
-      const existing = await getDoc(target);
-      if (!existing.exists()) {
-        batch.set(target, { ...legacyData, id, attemptId: legacy.id, legacyResultId: legacy.id, legacySourcePath: legacy.ref.path, studentUid: uid, studentName: legacyData.studentName || 'Student', studentEmail: '', groupCode: legacyData.groupCode || '', assessmentId: legacyData.testId || '', assessmentTitle: legacyData.displayTitle || 'Legacy result', examType: legacyData.examType || 'General', gradingMode: 'legacy-unverified' });
-        migrated++;
-      }
-    }
-    if (migrated) await batch.commit();
-    return { migrated, nextCursorPath: snapshot.size === 200 ? snapshot.docs[snapshot.docs.length - 1].ref.path : null };
-  };
 
-  const secureExistingAnswerKeys = async () => {
-    const testsSnapshot = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'tests'));
-    let secured = 0;
-    let alreadySecured = 0;
-    for (let offset = 0; offset < testsSnapshot.docs.length; offset += 200) {
+    const queryPath = `collectionGroup(results) under artifacts/${appId}/users/{studentUid}/results`;
+    let recordsRead = 0;
+    const authorized = isClientAuthorizedTeacher(firebaseUser);
+    try {
+      let legacyQuery = query(collectionGroup(db, 'results'), orderBy('submittedAt', 'desc'), limit(LEGACY_IMPORT_BATCH_SIZE));
+      if (cursorPath) {
+        const parsedCursor = parseLegacyResultPath(cursorPath, appId);
+        if (!parsedCursor) throw new Error('Saved continuation cursor is malformed. Clear the current browser session cursor and run a new dry run.');
+        const cursorSnapshot = await getDoc(doc(db, cursorPath));
+        if (!cursorSnapshot.exists()) throw new Error('Saved continuation cursor no longer exists. Run a new dry run from the start.');
+        legacyQuery = query(legacyQuery, startAfter(cursorSnapshot));
+      }
+
+      const snapshot = await getDocs(legacyQuery);
+      recordsRead = snapshot.size;
       const batch = writeBatch(db);
-      let batchSecured = 0;
-      // Each unsecured assessment produces two writes. Keep each write batch
-      // under Firestore's 500-write limit, including the final partial batch.
-      for (const testDoc of testsSnapshot.docs.slice(offset, offset + 200)) {
-        const test = testDoc.data();
-        const keyRef = doc(db, 'artifacts', appId, 'teacher', 'data', 'answerKeys', testDoc.id);
-        const keySnapshot = await getDoc(keyRef);
-        const questions = Array.isArray(test.questions) ? test.questions : [];
-        const existingKeys = keySnapshot.exists() ? keySnapshot.data() : {};
-        if (test.answerKeysSecured === true && keySnapshot.exists() && !hasPublicAnswerKeys(questions) && !hasPublicTeacherScripts(test.sections)) {
-          alreadySecured++;
+      let migrated = 0;
+      let alreadyImported = 0;
+      let candidates = 0;
+      for (const legacy of snapshot.docs) {
+        const path = legacy.ref.path;
+        const parsed = parseLegacyResultPath(path, appId);
+        if (!parsed) continue;
+        candidates++;
+        const target = doc(db, 'artifacts', appId, 'public', 'data', 'submissions', `legacy_${parsed.studentUid}_${parsed.resultId}`);
+        const existing = await getDoc(target);
+        if (existing.exists()) {
+          alreadyImported++;
           continue;
         }
-        const privateSections = mergeTeacherSections(existingKeys.teacherSections, extractTeacherOnlySections(test.sections));
-        const answerKeyQuestions = Array.isArray(existingKeys.questions) && keySnapshot.exists()
-          ? existingKeys.questions
-          : questions.map((question: any) => ({ id: question.id, correctAnswer: question.correctAnswer ?? null, acceptedAnswers: question.acceptedAnswers || [], answerSlots: (question.answerSlots || []).map((slot: any) => ({ id: slot.id, correctAnswers: slot.correctAnswers || [] })), correctOrder: question.correctOrder || [], explanation: question.explanation || '', ...Object.fromEntries(PRIVATE_QUESTION_FIELDS.filter(field => !['correctAnswer', 'acceptedAnswers', 'correctOrder', 'explanation'].includes(field) && question[field] != null).map(field => [field, question[field]])) }));
-        batch.set(keyRef, { assessmentId: testDoc.id, questions: answerKeyQuestions, teacherSections: privateSections, updatedAt: serverTimestamp() });
-        batch.update(testDoc.ref, { sections: sanitizePublicSections(test.sections), questions: questions.map((question: any) => {
-          const publicQuestion = { ...question };
-          for (const field of PRIVATE_QUESTION_FIELDS) delete publicQuestion[field];
-          if (Array.isArray(publicQuestion.answerSlots)) publicQuestion.answerSlots = publicQuestion.answerSlots.map((slot: any) => { const visible = { ...slot }; delete visible.correctAnswers; return visible; });
-          return publicQuestion;
-        }), answerKeysSecured: true, answerKeyVersion: 1 });
-        secured++;
-        batchSecured++;
+        if (!dryRun) {
+          batch.set(target, mapLegacyResult(
+            legacy.data(),
+            path,
+            appId,
+            firebaseUser.uid,
+            serverTimestamp(),
+          ));
+          migrated++;
+        }
       }
-      if (batchSecured) await batch.commit();
+      if (!dryRun && migrated) await batch.commit();
+      return {
+        migrated,
+        candidates,
+        alreadyImported,
+        recordsRead,
+        dryRun,
+        nextCursorPath: snapshot.size === LEGACY_IMPORT_BATCH_SIZE ? snapshot.docs[snapshot.docs.length - 1].ref.path : null,
+      };
+    } catch (error) {
+      const code = String(error?.code || 'unknown');
+      const detail = error instanceof Error ? error.message : String(error);
+      console.error('Legacy result import failed', {
+        code,
+        detail,
+        signedInEmail: firebaseUser?.email || 'unavailable',
+        emailVerified: Boolean(firebaseUser?.emailVerified),
+        googleProvider: Boolean(firebaseUser?.providerData?.some(provider => provider.providerId === 'google.com')),
+        authorizedTeacher: authorized,
+        appId,
+        queryPath,
+        recordsRead,
+        continuationCursorPresent: Boolean(cursorPath),
+      });
+      throw new Error(
+        `Legacy import failed (${code}). Account: ${firebaseUser?.email || 'unknown'}; authorized teacher: ${authorized ? 'yes' : 'no'}; Google: ${firebaseUser?.providerData?.some(provider => provider.providerId === 'google.com') ? 'yes' : 'no'}; email verified: ${firebaseUser?.emailVerified ? 'yes' : 'no'}; app/project: ${appId}; operation: ${dryRun ? 'dry run' : 'import'}; query: ${queryPath}; records read: ${recordsRead}; continuation cursor: ${cursorPath ? 'present' : 'none'}. The client cannot inspect the deployed rules version; publish and verify this repository's rules_version 2 policy, including authorized teacher collection-group reads and legacy imports. Details: ${detail}`,
+      );
     }
-    return { secured, alreadySecured, total: testsSnapshot.size };
+  };
+
+  const secureExistingAnswerKeys = async (dryRun = false) => {
+    if (user?.role !== 'teacher' || !isClientAuthorizedTeacher(auth.currentUser)) {
+      throw new Error('Answer-key security migration is restricted to an authorized, verified Google teacher.');
+    }
+    const testsSnapshot = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'tests'));
+    const report = { total: testsSnapshot.size, secured: 0, alreadySecured: 0, skipped: 0, failed: 0, incomplete: 0, publicAnswerFields: 0, needingMigration: 0, details: [] as Array<{ assessmentId: string; status: string; reason?: string }> };
+    for (const testDoc of testsSnapshot.docs) {
+      const test = testDoc.data();
+      const keyRef = doc(db, 'artifacts', appId, 'teacher', 'data', 'answerKeys', testDoc.id);
+      const keySnapshot = await getDoc(keyRef);
+      const questions = Array.isArray(test.questions) ? test.questions : [];
+      const existingKeys = keySnapshot.exists() ? keySnapshot.data() : {};
+      const hasPublicFields = hasPublicAnswerKeys(questions) || hasPublicTeacherScripts(test.sections);
+      const complete = keySnapshot.exists() && hasCompleteAnswerKey(questions, existingKeys.questions || []);
+      const preparedKeys = buildAnswerKeyQuestions(questions, existingKeys.questions || [], PRIVATE_QUESTION_FIELDS);
+      const preparedKeyErrors = !hasCompleteAnswerKey(questions, preparedKeys)
+        ? ['The private key does not cover every question and answer slot.']
+        : questions.flatMap((question: any) => validateQuestion(normalizeQuestion(mergeQuestionKeys([question], preparedKeys)[0])));
+      if (hasPublicFields) report.publicAnswerFields++;
+      if (test.answerKeysSecured === true && complete && !hasPublicFields) {
+        report.alreadySecured++;
+        report.details.push({ assessmentId: testDoc.id, status: 'already-secured' });
+        continue;
+      }
+      if (!questions.length) {
+        report.skipped++;
+        report.details.push({ assessmentId: testDoc.id, status: 'skipped', reason: 'Assessment contains no questions.' });
+        continue;
+      }
+      report.needingMigration++;
+      if (!dryRun) {
+        try {
+          const privateSections = mergeTeacherSections(existingKeys.teacherSections, extractTeacherOnlySections(test.sections));
+          if (preparedKeyErrors.length) {
+            report.incomplete++;
+            report.details.push({ assessmentId: testDoc.id, status: 'incomplete', reason: preparedKeyErrors.join(' ') });
+            continue;
+          }
+          const answerKeyQuestions = preparedKeys;
+          const oldVersion = Number(test.answerKeyVersion || 0);
+          const batch = writeBatch(db);
+          const auditRef = doc(collection(db, 'artifacts', appId, 'teacher', 'data', 'answerKeyMigrationAudit'));
+          batch.set(keyRef, {
+            assessmentId: testDoc.id,
+            questions: answerKeyQuestions,
+            teacherSections: privateSections,
+            migrationVersion: ANSWER_KEY_MIGRATION_VERSION,
+            updatedAt: serverTimestamp(),
+          });
+          batch.set(auditRef, {
+            actorUid: auth.currentUser.uid,
+            actorEmail: auth.currentUser.email || '',
+            migratedAt: serverTimestamp(),
+            assessmentId: testDoc.id,
+            oldKeyVersion: oldVersion,
+            newKeyVersion: ANSWER_KEY_MIGRATION_VERSION,
+            result: 'secured',
+          });
+          batch.update(testDoc.ref, {
+            sections: sanitizePublicSections(test.sections),
+            questions: stripPublicAnswerFields(questions, PRIVATE_QUESTION_FIELDS),
+            answerKeysSecured: true,
+            answerKeyVersion: ANSWER_KEY_MIGRATION_VERSION,
+          });
+          await batch.commit();
+
+          const [verifiedKey, verifiedTest] = await Promise.all([getDoc(keyRef), getDoc(testDoc.ref)]);
+          const verifiedPublic = verifiedTest.data();
+          if (!verifiedKey.exists()
+            || !hasCompleteAnswerKey(questions, verifiedKey.data().questions || [])
+            || verifiedPublic.answerKeysSecured !== true
+            || hasPublicAnswerKeys(verifiedPublic.questions || [])
+            || hasPublicTeacherScripts(verifiedPublic.sections)) {
+            throw new Error('Post-write verification failed; the assessment is not reported as secured.');
+          }
+          report.secured++;
+          report.details.push({ assessmentId: testDoc.id, status: 'secured' });
+        } catch (error) {
+          report.failed++;
+          report.details.push({ assessmentId: testDoc.id, status: 'failed', reason: error instanceof Error ? error.message : String(error) });
+          console.error(`Answer-key migration failed for assessment ${testDoc.id}:`, error);
+          try {
+            await addDoc(collection(db, 'artifacts', appId, 'teacher', 'data', 'answerKeyMigrationAudit'), {
+                actorUid: auth.currentUser.uid,
+                actorEmail: auth.currentUser.email || '',
+                migratedAt: serverTimestamp(),
+                assessmentId: testDoc.id,
+                oldKeyVersion: Number(test.answerKeyVersion || 0),
+                newKeyVersion: ANSWER_KEY_MIGRATION_VERSION,
+                result: 'failed',
+                reason: error instanceof Error ? error.message : String(error),
+            });
+          } catch (auditError) {
+            console.error(`Could not record answer-key migration failure for ${testDoc.id}:`, auditError);
+          }
+        }
+      } else {
+        if (!complete || preparedKeyErrors.length) report.incomplete++;
+        report.details.push({
+          assessmentId: testDoc.id,
+          status: complete && !preparedKeyErrors.length ? 'needs-public-field-removal' : 'needs-migration',
+          ...(!complete || preparedKeyErrors.length ? { reason: preparedKeyErrors.join(' ') || 'Private key is missing or does not cover all question IDs and slots.' } : {}),
+        });
+      }
+    }
+    return { ...report, dryRun };
+  };
+
+  const saveWritingResource = async (resource: WritingResource) => {
+    if (user?.role !== 'teacher' || !isClientAuthorizedTeacher(auth.currentUser)) {
+      throw new Error('Only an authorized, verified Google teacher can save writing resources.');
+    }
+    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'writingResources', resource.id), resource);
+  };
+
+  const deleteWritingResource = async (resourceId: string) => {
+    if (user?.role !== 'teacher' || !isClientAuthorizedTeacher(auth.currentUser)) {
+      throw new Error('Only an authorized, verified Google teacher can delete writing resources.');
+    }
+    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'writingResources', resourceId));
   };
 
   if (loadingAuth || currentView === 'loading') {
@@ -3457,9 +3925,9 @@ export default function App() {
       </button>
 
       {currentView === 'login' && <LoginScreen onAuthAction={handleAuthAction} />}
-      {currentView === 'teacher_dashboard' && <TeacherDashboard user={user} tests={tests} submissions={submissions} submissionsLoading={submissionsLoading} submissionsError={submissionsError} onSaveReview={saveTeacherReview} onBackfillLegacy={backfillLegacySubmissions} onSecureAnswerKeys={secureExistingAnswerKeys} onLogout={handleLogout} />}
-      {currentView === 'student_dashboard' && <StudentDashboard user={user} tests={tests} results={results} onStartTest={startTest} onSaveGroupCode={saveStudentGroupCode} onLogout={handleLogout} />}
-      {currentView === 'exam' && activeTest && user && <ExamInterface key={`${user.uid}:${activeTest.id}`} test={activeTest} onComplete={completeTest} />}
+      {currentView === 'teacher_dashboard' && <TeacherDashboard user={user} tests={tests} resources={writingResources} resourceError={writingResourcesError} onSaveResource={saveWritingResource} onDeleteResource={deleteWritingResource} submissions={submissions} submissionsLoading={submissionsLoading} submissionsError={submissionsError} onSaveReview={saveTeacherReview} onBackfillLegacy={backfillLegacySubmissions} onSecureAnswerKeys={secureExistingAnswerKeys} onLogout={handleLogout} />}
+      {currentView === 'student_dashboard' && <StudentDashboard user={user} tests={tests} results={results} writingResources={writingResources} writingResourcesError={writingResourcesError} onStartTest={startTest} onSaveGroupCode={saveStudentGroupCode} onLogout={handleLogout} />}
+      {currentView === 'exam' && activeTest && user && <ExamInterface key={`${user.uid}:${activeTest.id}`} test={activeTest} userId={user.uid} onComplete={completeTest} />}
 
       <Modal isOpen={modalInfo.isOpen} title={modalInfo.title} onClose={() => setModalInfo(prev => ({ ...prev, isOpen: false }))}>
         <p className="whitespace-pre-wrap text-left">{modalInfo.message}</p>

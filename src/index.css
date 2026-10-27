@@ -32,3 +32,207 @@ overflow-x: hidden;
 #root .text-xl { font-size: 1.667rem !important; line-height: 1.25 !important; }
 #root .text-2xl { font-size: 2rem !important; line-height: 1.2 !important; }
 #root .text-3xl { font-size: 2.5rem !important; line-height: 1.15 !important; }
+
+/* Explicit control colors prevent utility-class omissions from making forms unreadable. */
+#root :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]), textarea, select) {
+  color: #172033 !important;
+  background-color: #fff !important;
+  border-color: #94a3b8;
+  caret-color: #1d4ed8;
+  line-height: 1.5 !important;
+  accent-color: #2563eb;
+  color-scheme: light;
+}
+
+#root :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]), textarea, select)::placeholder {
+  color: #64748b !important;
+  opacity: 1;
+}
+
+#root :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]), textarea, select):focus-visible {
+  outline: 3px solid #2563eb;
+  outline-offset: 2px;
+}
+
+#root :is(input, textarea, select):disabled {
+  color: #475569 !important;
+  background-color: #e2e8f0 !important;
+  border-color: #94a3b8 !important;
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+#root :is(input, textarea, select)[aria-invalid="true"] {
+  border-color: #b91c1c !important;
+  box-shadow: 0 0 0 2px rgb(185 28 28 / 20%);
+}
+
+#root :is(input, textarea, select)::selection {
+  color: #fff;
+  background-color: #1d4ed8;
+}
+
+#root :is(input, textarea, select):-webkit-autofill,
+#root :is(input, textarea, select):-webkit-autofill:hover,
+#root :is(input, textarea, select):-webkit-autofill:focus {
+  -webkit-text-fill-color: #172033 !important;
+  caret-color: #1d4ed8;
+  box-shadow: 0 0 0 1000px #fff inset;
+}
+
+.dark #root :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]), textarea, select) {
+  color: #f8fafc !important;
+  background-color: #334155 !important;
+  border-color: #64748b;
+  caret-color: #93c5fd;
+  color-scheme: dark;
+}
+
+.dark #root :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]), textarea, select)::placeholder {
+  color: #cbd5e1 !important;
+}
+
+.dark #root :is(input, textarea, select):disabled {
+  color: #cbd5e1 !important;
+  background-color: #1e293b !important;
+  border-color: #475569 !important;
+}
+
+.dark #root :is(input, textarea, select):-webkit-autofill,
+.dark #root :is(input, textarea, select):-webkit-autofill:hover,
+.dark #root :is(input, textarea, select):-webkit-autofill:focus {
+  -webkit-text-fill-color: #f8fafc !important;
+  caret-color: #93c5fd;
+  box-shadow: 0 0 0 1000px #334155 inset;
+}
+
+#root select option {
+  color: #172033;
+  background-color: #fff;
+}
+
+.dark #root select option {
+  color: #f8fafc;
+  background-color: #334155;
+}
+
+.split-pane {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, var(--split-left)) 14px minmax(0, var(--split-right));
+  align-items: stretch;
+  min-width: 0;
+  min-height: 0;
+  gap: 12px;
+}
+
+.split-pane__panel {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  overflow-wrap: anywhere;
+}
+
+.split-pane__divider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 3rem;
+  cursor: col-resize;
+  touch-action: none;
+  border-radius: 999px;
+}
+
+.split-pane__divider span {
+  width: 4px;
+  height: 3rem;
+  border-radius: 999px;
+  background: #94a3b8;
+}
+
+.split-pane__divider:hover span,
+.split-pane__divider:focus-visible span {
+  background: #2563eb;
+}
+
+.split-pane__divider:focus-visible {
+  outline: 3px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.split-pane.is-dragging,
+.split-pane.is-dragging * {
+  user-select: none;
+}
+
+.split-pane__mobile-tabs { display: none; }
+.split-pane__reset {
+  position: absolute;
+  top: -2.35rem;
+  right: 0;
+  padding: .25rem .55rem;
+  border: 1px solid #94a3b8;
+  border-radius: .5rem;
+  background: #fff;
+  color: #172033;
+  font-size: .75rem;
+}
+
+.dark .split-pane__reset { background: #1e293b; border-color: #64748b; color: #f8fafc; }
+
+.writing-resource-list { display: grid; gap: 1rem; }
+.writing-resource { min-width: 0; }
+.writing-resource h3, .writing-resource h4 { font-weight: 700; }
+.writing-resource h3 { margin: 0 0 .75rem; }
+.writing-resource h4 { margin: 1rem 0 .5rem; }
+.writing-resource__table-scroll { max-width: 100%; overflow: auto; }
+.writing-resource table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.writing-resource th, .writing-resource td { border: 1px solid #475569; padding: .55rem; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.writing-resource th { position: sticky; top: 0; z-index: 1; background: #e2e8f0; font-weight: 700; }
+.writing-resource__original { background: #86efac; color: #14532d; }
+.writing-resource td:nth-child(2) { background: #f8fafc; color: #172033; }
+.writing-resource__alternatives { background: #fed7aa; color: #7c2d12; }
+.writing-resource-empty { padding: 1rem; border: 1px dashed #94a3b8; border-radius: .75rem; }
+
+.reading-workspace .split-pane {
+  height: min(76vh, 900px);
+  min-height: 480px;
+}
+
+.reading-workspace .split-pane__panel {
+  height: 100%;
+  overflow: hidden;
+}
+
+.reading-workspace .split-pane__panel > div {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.reading-workspace__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.dark .writing-resource th { background: #334155; color: #f8fafc; }
+.dark .writing-resource__original { background: #166534; color: #f0fdf4; }
+.dark .writing-resource td:nth-child(2) { background: #1e293b; color: #f1f5f9; }
+.dark .writing-resource__alternatives { background: #7c2d12; color: #fff7ed; }
+
+@media (max-width: 767px) {
+  .split-pane { display: flex; flex-direction: column; }
+  .split-pane__panel { display: none; width: 100%; max-height: 70vh; }
+  .split-pane__panel.is-active { display: block; }
+  .split-pane__divider { display: none; }
+  .split-pane__mobile-tabs { display: flex; flex-wrap: wrap; gap: .5rem; }
+  .split-pane__mobile-tabs button { padding: .5rem .75rem; border: 1px solid #94a3b8; border-radius: .5rem; }
+  .split-pane__mobile-tabs button[aria-selected="true"] { background: #2563eb; border-color: #2563eb; color: #fff; }
+  .reading-workspace .split-pane { height: auto; min-height: 0; }
+  .reading-workspace .split-pane__panel.is-active { height: 70vh; }
+  .reading-workspace__scroll { max-height: none; }
+}

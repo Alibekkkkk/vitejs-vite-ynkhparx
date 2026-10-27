@@ -13,7 +13,7 @@ To make the app functional after a fresh Firebase setup:
 1. In Firebase Console, open **Firestore Database → Rules**, paste the contents of [`firestore.rules`](firestore.rules), and publish. Or from the repository root run `firebase login` and `firebase deploy --project exam-portal-71a9b --only firestore:rules,firestore:indexes`. The student test query uses a composite index included in [`firestore.indexes.json`](firestore.indexes.json).
 2. Deploy the Vite app to your existing static host and keep its existing Firebase web config. No server environment variables are required for submissions or grading.
 3. Sign in with one of the four approved Google teacher accounts shown in `firestore.rules`. The frontend has the same public email allowlist by default; `VITE_TEACHER_EMAILS` can override it, but Firestore rules remain the authority. In **Results & submissions**, run **Secure existing assessment keys** once. Old assessments remain unavailable to students until the answer keys are moved to the teacher-only collection.
-4. Use **Import legacy results** if you need to copy older student result records into the teacher results list. Legacy scores are imported as historical data, not recalculated or verified.
+4. In **Results & submissions**, preview and confirm **Import legacy results into teacher list** if you need older student records in the teacher list. The read-only preview is limited to the next batch; imported values remain historical and unverified. Preview and confirm the answer-key migration before changing existing assessment documents.
 
 Vercel's free Hobby plan currently permits only personal, non-commercial use. A portal used by students can fall outside that scope, so this project does not add Vercel Functions as a supposedly free server backend. Ask Vercel whether your exact educational use qualifies before relying on Hobby for a student-facing service. A trusted automatic grader would need a server provider whose terms fit your use; without one, teacher review is the safe option.
 
@@ -48,6 +48,19 @@ Question-bank JSON uses `schemaVersion: 1`, assessment metadata, optional `secti
 
 The local original banks include Academic and General Training Reading (40 questions, three passages, 60 minutes each), Academic and General Writing (two complete manually reviewed tasks each), Speaking Parts 1–3, SAT Reading and Writing (54 questions, 27 per locked 32-minute module), SAT Math (44 questions, 22 per locked 35-minute module), and an IELTS Listening script bank with 40 questions across four sections. The optional combined SAT practice joins the two published sections into 98 questions and 134 testing minutes, with four locked modules and an optional 10-minute break after Reading and Writing. It is fixed-sequence practice and does not implement adaptive routing or an official SAT scaled score.
 
+## Writing resources and workspace accessibility
+
+Teachers can create and manage reusable vocabulary resources in **Teacher Portal → Writing resources**. Resources use `schemaVersion: 1`, preserve section and row order, and store alternatives as string arrays. Teachers can import/export canonical JSON, edit rows and sections, link a resource to a writing task/figure, preview the student table, and publish/unpublish it. Draft resources are not returned to student clients. PDF extraction is not used as canonical storage; review extracted material and enter or import structured JSON instead.
+
+The vocabulary table uses semantic classes for the green original-word cells, neutral definitions, and peach alternative-phrase cells. It does not depend on screenshot coordinates. Reading practice shows one passage alongside its associated questions; passage and question navigation retain answer state, and the panes keep independent scroll positions. Writing and reading split-pane widths are keyboard/pointer adjustable and stored per user and workspace in the current browser.
+
+Manual theme QA checklist for teacher and student forms:
+
+- Toggle between light and dark mode; verify text, placeholder, select-option, caret, and autofill contrast.
+- Type into teacher question, passage, figure-alt/caption, and answer fields; test keyboard focus, disabled controls, and a field with `aria-invalid="true"`.
+- Check the writing resource table in both themes and verify the green, neutral, and peach columns remain readable.
+- At approximately 320px and 768px, verify the workspace stacks into accessible left/right panel tabs without horizontal page overflow; at desktop width, drag and keyboard-operate the divider and reset its width.
+
 IELTS Listening has 40 original questions across four sections, plus teacher recording scripts and recording instructions. **It is not ready for student use without actual audio.** In the assessment editor, select each section, add a direct browser-playable recording URL, play the recording through, and tick **I played this recording through and verified it matches this section**. Save as a draft while any section lacks verified audio; the app blocks publication and student launch until all four recordings are present and verified. Recordings are not bundled with the JSON bank.
 
 The `sample-data/` folder and local bank-generation scripts are deliberately ignored by Git because the banks contain answer keys and teacher recording scripts. Keep these files on the teacher's computer and choose them through the Sample Banks file picker. Do not force-add them to a public GitHub repository or put them in the public app bundle; doing so would expose their keys. Published assessments are copied into Firestore with keys in the teacher-only collection. On a different teacher's computer, transfer these bank files through a private channel or create local copies; they are intentionally not downloadable from the public app. The `validate:banks` check validates these local files when present and reports a skip on a fresh clone without private banks. `test:question-engine` includes static Firestore-policy checks, but the Firestore emulator was not run.
@@ -58,6 +71,7 @@ Run the bank-content validator locally with `npm run validate:banks` before impo
 
 ```sh
 npm run test:question-engine
+npm run test:features
 npm run build
 npm run lint
 npm run validate:banks

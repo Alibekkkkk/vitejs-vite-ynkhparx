@@ -126,8 +126,20 @@ service cloud.firestore {
       allow create, update, delete: if isAuthorizedTeacher();
     }
 
+    match /artifacts/{appId}/public/data/writingResources/{resourceId} {
+      allow get, list: if isAuthorizedTeacher()
+        || (signedIn() && resource.data.get('status', '') == 'published');
+      allow create, update, delete: if isAuthorizedTeacher();
+    }
+
     match /artifacts/{appId}/teacher/data/answerKeys/{testId} {
       allow get, list, create, update, delete: if isAuthorizedTeacher();
+    }
+
+    match /artifacts/{appId}/teacher/data/answerKeyMigrationAudit/{auditId} {
+      allow get, list: if isAuthorizedTeacher();
+      allow create: if isAuthorizedTeacher();
+      allow update, delete: if false;
     }
 
     match /artifacts/{appId}/users/{userId}/results/{resultId} {
@@ -162,8 +174,28 @@ service cloud.firestore {
       // explicitly marked unverified and cannot be created by student clients.
       allow create: if isAuthorizedTeacher()
         && request.resource.data.get('gradingMode', '') == 'legacy-unverified'
+        && request.resource.data.keys().hasOnly([
+          'id', 'attemptId', 'legacyResultId', 'legacySourcePath', 'studentUid', 'studentName', 'studentEmail',
+          'groupCode', 'assessmentId', 'assessmentTitle', 'examType', 'gradingMode', 'legacyImportedAt',
+          'importedBy', 'migrationVersion', 'legacyHistoricalData'
+        ])
         && request.resource.data.get('studentUid', '') is string
-        && request.resource.data.get('assessmentId', '') is string;
+        && request.resource.data.get('assessmentId', '') is string
+        && request.resource.data.get('id', '') == submissionId
+        && request.resource.data.get('legacyResultId', '') is string
+        && request.resource.data.get('attemptId', '') == request.resource.data.get('legacyResultId', '')
+        && submissionId == 'legacy_' + request.resource.data.get('studentUid', '') + '_' + request.resource.data.get('legacyResultId', '')
+        && request.resource.data.get('legacySourcePath', '') == 'artifacts/' + appId + '/users/' + request.resource.data.get('studentUid', '') + '/results/' + request.resource.data.get('legacyResultId', '')
+        && request.resource.data.get('legacyImportedAt', null) is timestamp
+        && request.resource.data.get('importedBy', '') == request.auth.uid
+        && request.resource.data.get('migrationVersion', 0) == 1
+        && request.resource.data.get('legacyHistoricalData', {}) is map
+        && request.resource.data.get('legacyHistoricalData', {}).keys().hasOnly([
+          'answers', 'submittedAt', 'submittedAtMs', 'durationSeconds', 'isAutoSubmitted', 'score',
+          'maxPossibleScore', 'maxAutoScore', 'correctCount', 'incorrectCount', 'answeredCount',
+          'unansweredCount', 'pendingReviewCount', 'reviewStatus', 'gradingMode', 'questionReviews',
+          'practiceMetadata', 'sectionOrSkill', 'testId', 'displayTitle', 'examType', 'groupCode', 'attemptId'
+        ]);
       allow update: if isAuthorizedTeacher()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'questionReviews', 'pendingReviewCount', 'manualReviewCount', 'ungradedCount', 'reviewStatus', 'reviewedBy', 'reviewedAt', 'score', 'maxPossibleScore', 'maxAutoScore', 'correctCount', 'incorrectCount', 'answeredCount', 'unansweredCount'
