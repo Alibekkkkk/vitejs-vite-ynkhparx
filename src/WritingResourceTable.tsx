@@ -9,7 +9,11 @@ type Props = {
 
 export function WritingResourceTable({ resources, taskType, assessmentId, questionId }: Props) {
   const available = getMatchingWritingResources(resources, taskType, assessmentId, questionId);
-  if (!available.length) return <p className="writing-resource-empty">No published vocabulary resources are linked to this task yet.</p>;
+  if (!available.length) return <p className="writing-resource-empty">
+    {assessmentId && questionId
+      ? 'No published resource matches this exact assessment and prompt. Publish the resource and link it to this assessment/prompt, or clear its assessment link to make it available to matching Task 1 or Task 2 prompts.'
+      : 'No published vocabulary resources are linked to this task yet.'}
+  </p>;
 
   return (
     <div className="writing-resource-list">

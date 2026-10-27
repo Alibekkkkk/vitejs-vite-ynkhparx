@@ -43,4 +43,6 @@ test('assigned writing exams show the matching published resource beside the wri
   assert.match(app, /leftLabel="Writing task and response"[\s\S]*?rightLabel="Vocabulary resource"/);
   assert.match(app, /<WritingResourceTable[\s\S]*?assessmentId=\{test\?\.practiceSourceTestId \|\| test\?\.id\}[\s\S]*?questionId=\{currentQuestion\.id\}/);
   assert.match(app, /Writing task and response[\s\S]*?renderAnswerInput\(\)/);
+  assert.match(app, /currentQuestion\.section === 'writing'[\s\S]*?currentQuestion\.questionType === 'writing-task'[\s\S]*?currentQuestion\.writingTaskType/);
+  assert.match(globalStyles, /html\.dark,[\s\S]*?html\.dark body,[\s\S]*?html\.dark #root[\s\S]*?background-color: #0f172a/);
 });

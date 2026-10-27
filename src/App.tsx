@@ -2533,7 +2533,11 @@ const ExamInterface = ({ test, onComplete, userId, writingResources, writingReso
   const currentValue = currentQuestion ? answers[currentQuestion.id] ?? '' : '';
   const unansweredCount = questions.filter(question => !isAnswerPresent(answers[question.id])).length;
   const isReadingPractice = test?.practiceMetadata?.kind === 'reading';
-  const isWritingQuestion = currentQuestion?.section === 'writing';
+  const isWritingQuestion = Boolean(currentQuestion && (
+    currentQuestion.section === 'writing'
+    || currentQuestion.questionType === 'writing-task'
+    || (test?.type === 'IELTS' && [1, 2].includes(Number(currentQuestion.writingTaskType)))
+  ));
   const writingTaskType: 1 | 2 = Number(currentQuestion?.writingTaskType || 2) === 1 ? 1 : 2;
 
   const updateAnswer = (value: unknown) => {
