@@ -123,3 +123,15 @@ export function validateWritingResource(resource: WritingResource): string[] {
   });
   return errors;
 }
+
+export function getMatchingWritingResources(
+  resources: WritingResource[],
+  taskType: 1 | 2,
+  assessmentId?: string,
+  questionId?: string,
+): WritingResource[] {
+  return resources.filter(resource => resource.status === 'published'
+    && (!resource.taskType || resource.taskType === taskType)
+    && (!resource.linkedAssessmentId || resource.linkedAssessmentId === assessmentId)
+    && (!resource.linkedQuestionId || resource.linkedQuestionId === questionId));
+}

@@ -1,4 +1,4 @@
-import type { WritingResource } from './writingResources';
+import { getMatchingWritingResources, type WritingResource } from './writingResources';
 
 type Props = {
   resources: WritingResource[];
@@ -8,10 +8,7 @@ type Props = {
 };
 
 export function WritingResourceTable({ resources, taskType, assessmentId, questionId }: Props) {
-  const available = resources.filter(resource => resource.status === 'published'
-    && (!resource.taskType || resource.taskType === taskType)
-    && (!resource.linkedAssessmentId || resource.linkedAssessmentId === assessmentId)
-    && (!resource.linkedQuestionId || resource.linkedQuestionId === questionId));
+  const available = getMatchingWritingResources(resources, taskType, assessmentId, questionId);
   if (!available.length) return <p className="writing-resource-empty">No published vocabulary resources are linked to this task yet.</p>;
 
   return (

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseWritingResource, validateWritingResource, type WritingResource } from '../src/writingResources.ts';
+import { getMatchingWritingResources, parseWritingResource, validateWritingResource, type WritingResource } from '../src/writingResources.ts';
 
 const resource: WritingResource = {
   schemaVersion: 1,
@@ -40,4 +40,16 @@ test('writing resource parser rejects unsafe oversized content but stores markup
   const oversized = structuredClone(resource);
   oversized.sections[0].rows[0].definition = 'x'.repeat(1001);
   assert.throws(() => parseWritingResource(oversized), /allowed text length/);
+});
+
+test('published resources match the selected task and linked assessment during preview and practice', () => {
+  const linked = {
+    ...resource,
+    status: 'published' as const,
+    linkedAssessmentId: 'task-1',
+    linkedQuestionId: 'prompt-1',
+  };
+  assert.deepEqual(getMatchingWritingResources([linked], 1, 'task-1', 'prompt-1'), [linked]);
+  assert.deepEqual(getMatchingWritingResources([linked], 1), []);
+  assert.deepEqual(getMatchingWritingResources([resource], 1), []);
 });

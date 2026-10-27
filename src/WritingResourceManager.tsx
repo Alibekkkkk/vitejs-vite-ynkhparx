@@ -57,7 +57,9 @@ export function WritingResourceManager({ resources, resourceError, tests, teache
       await onSave(updated);
       setResource(updated);
       setSavedSnapshot(JSON.stringify(updated));
-      setStatus(nextStatus === 'published' ? 'Resource published.' : 'Draft saved.');
+      setStatus(nextStatus === 'published'
+        ? 'Resource published and available to matching Writing Practice tasks.'
+        : 'Draft saved. Students cannot see it until you publish it.');
     } catch (error) {
       console.error('Could not save writing resource:', error);
       setStatus(error instanceof Error ? error.message : 'Could not save this resource.');
@@ -70,7 +72,7 @@ export function WritingResourceManager({ resources, resourceError, tests, teache
     try {
       setResource(parseWritingResource(JSON.parse(jsonText)));
       setSavedSnapshot('');
-      setStatus('Resource JSON imported for review. Save it before it becomes available.');
+      setStatus('Resource JSON applied for review. Preview it, save it, then publish it for students.');
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Invalid resource JSON.');
     }
@@ -125,7 +127,7 @@ export function WritingResourceManager({ resources, resourceError, tests, teache
 
   if (!resource) {
     return (
-      <section className="space-y-4 text-left">
+      <section className="writing-resource-manager space-y-4 text-left text-slate-900 dark:text-slate-100">
         {pendingAction && <div role="dialog" aria-modal="true" aria-labelledby="resource-confirm-title" className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
           <div className="max-w-lg rounded-xl bg-white p-6 text-slate-900 dark:bg-slate-800 dark:text-white">
             <h2 id="resource-confirm-title" className="text-xl font-bold">Confirm resource action</h2>
@@ -145,7 +147,7 @@ export function WritingResourceManager({ resources, resourceError, tests, teache
         {status && <p role="status">{status}</p>}
         {!resources.length && <p className="rounded-xl border border-dashed p-6">No writing resources have been created yet.</p>}
         {resources.map(item => <article key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-white p-4 dark:bg-slate-800">
-          <div><h2 className="font-bold">{item.title || 'Untitled resource'}</h2><p>{item.status} · {item.sections.length} section(s)</p></div>
+          <div><h2 className="font-bold">{item.title || 'Untitled resource'}</h2><p>{item.status === 'published' ? 'Published · visible to matching Writing Practice tasks' : 'Draft · not visible to students until published'} · {item.sections.length} section(s)</p></div>
           <div className="flex gap-2">
             <button type="button" onClick={() => { setResource(clone(item)); setSavedSnapshot(JSON.stringify(item)); }} className="rounded border px-3 py-2">Edit</button>
             <button type="button" onClick={() => { setResource({ ...clone(item), id: crypto.randomUUID(), title: `${item.title} (Copy)`, createdBy: teacherUid, status: 'draft', sections: item.sections.map(section => ({ ...section, id: crypto.randomUUID() })) }); setSavedSnapshot(''); }} className="rounded border px-3 py-2">Duplicate</button>
@@ -156,13 +158,18 @@ export function WritingResourceManager({ resources, resourceError, tests, teache
     );
   }
 
-  if (preview) return <section className="space-y-4">
+  if (preview) return <section className="writing-resource-manager space-y-4 text-left text-slate-900 dark:text-slate-100">
     <button type="button" className="rounded border px-3 py-2" onClick={() => setPreview(false)}>Back to editor</button>
-    <WritingResourceTable resources={[{ ...resource, status: 'published' }]} taskType={resource.taskType || 1} />
+    <WritingResourceTable
+      resources={[{ ...resource, status: 'published' }]}
+      taskType={resource.taskType || 1}
+      assessmentId={resource.linkedAssessmentId}
+      questionId={resource.linkedQuestionId}
+    />
   </section>;
 
   return (
-    <section className="space-y-4 text-left">
+    <section className="writing-resource-manager space-y-4 text-left text-slate-900 dark:text-slate-100">
       {discardDialog && <div role="dialog" aria-modal="true" aria-labelledby="resource-discard-title" className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
         <div className="max-w-lg rounded-xl bg-white p-6 text-slate-900 dark:bg-slate-800 dark:text-white">
           <h2 id="resource-discard-title" className="text-xl font-bold">Discard unsaved resource changes?</h2>
