@@ -3,6 +3,7 @@ import { useRef } from 'react';
 type Props = {
   value: string;
   onChange: (value: string) => void;
+  insertions?: Array<{ label: string; token: string }>;
 };
 
 const formats = [
@@ -11,8 +12,22 @@ const formats = [
   { label: 'Underline', marker: '++', icon: <u>U</u> },
 ];
 
-export function QuestionTextEditor({ value, onChange }: Props) {
+export function QuestionTextEditor({ value, onChange, insertions = [] }: Props) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const replaceSelection = (replacement: string, selectionOffset = replacement.length) => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const nextValue = `${value.slice(0, start)}${replacement}${value.slice(end)}`;
+    onChange(nextValue);
+    requestAnimationFrame(() => {
+      textarea.focus();
+      const caret = start + selectionOffset;
+      textarea.setSelectionRange(caret, caret);
+    });
+  };
 
   const applyFormat = (marker: string) => {
     const textarea = textareaRef.current;
@@ -20,8 +35,8 @@ export function QuestionTextEditor({ value, onChange }: Props) {
     const start = textarea.selectionStart;
     const end = textarea.selectionEnd;
     const selected = value.slice(start, end);
-    const nextValue = `${value.slice(0, start)}${marker}${selected}${marker}${value.slice(end)}`;
-    onChange(nextValue);
+    const replacement = `${marker}${selected}${marker}`;
+    onChange(`${value.slice(0, start)}${replacement}${value.slice(end)}`);
     requestAnimationFrame(() => {
       textarea.focus();
       const selectionStart = start + marker.length;
@@ -45,7 +60,16 @@ export function QuestionTextEditor({ value, onChange }: Props) {
             {format.icon}
           </button>
         ))}
-        <span className="ml-2 text-xs text-slate-600 dark:text-slate-300">Select text, then choose bold, italic, or underline.</span>
+        {insertions.map(insertion => <button
+          key={insertion.token}
+          type="button"
+          title={`Insert ${insertion.label.toLowerCase()} at the cursor`}
+          aria-label={`Insert ${insertion.label.toLowerCase()} at the cursor`}
+          onMouseDown={event => event.preventDefault()}
+          onClick={() => replaceSelection(insertion.token)}
+          className="rounded border border-indigo-300 bg-indigo-50 px-2.5 py-1 text-sm font-semibold text-indigo-800 hover:bg-indigo-100 dark:border-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-200"
+        >{insertion.label}</button>)}
+        <span className="ml-2 text-xs text-slate-600 dark:text-slate-300">{insertions.length ? 'Add blanks at the cursor or format selected text.' : 'Select text, then choose bold, italic, or underline.'}</span>
       </div>
       <textarea
         ref={textareaRef}

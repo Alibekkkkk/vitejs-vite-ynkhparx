@@ -8,6 +8,8 @@ const globalStyles = readFileSync(join(root, 'src', 'index.css'), 'utf8');
 const splitPane = readFileSync(join(root, 'src', 'ResizableSplitPane.tsx'), 'utf8');
 const app = readFileSync(join(root, 'src', 'App.tsx'), 'utf8');
 const questionTextEditor = readFileSync(join(root, 'src', 'QuestionTextEditor.tsx'), 'utf8');
+const readingAnnotations = readFileSync(join(root, 'src', 'ReadingAnnotations.tsx'), 'utf8');
+const questionPrompt = readFileSync(join(root, 'src', 'QuestionPrompt.tsx'), 'utf8');
 
 test('form-control theme rules explicitly style light/dark text, focus, disabled, errors, autofill, and selects', () => {
   for (const token of ['background-color', 'color:', 'border-color', 'caret-color', '::placeholder', ':focus-visible', ':disabled', '[aria-invalid="true"]', ':-webkit-autofill', 'select option', '::selection']) {
@@ -52,7 +54,7 @@ test('assigned writing exams show the matching published resource beside the wri
 });
 
 test('teacher question editor offers safe bold, italic, and underline formatting', () => {
-  assert.match(app, /<QuestionTextEditor value=\{q\.text \|\| ''\}/);
+  assert.match(app, /<QuestionTextEditor[\s\S]*?value=\{q\.text \|\| ''\}/);
   assert.match(questionTextEditor, /label: 'Bold', marker: '\*\*'/);
   assert.match(questionTextEditor, /label: 'Italic', marker: '\*'/);
   assert.match(questionTextEditor, /label: 'Underline', marker: '\+\+'/);
@@ -76,6 +78,46 @@ test('teacher review supports phrase comments and publishes them with student re
   assert.match(app, /question\.teacherReview = \{[\s\S]*?annotations: safeAnnotations/);
   assert.match(app, /await updateDoc\(submissionRef, reviewSummary\);[\s\S]*?await updateDoc\(studentResultRef, reviewSummary\)/);
   assert.match(app, /renderTeacherAnnotatedAnswer\(review\.studentAnswer, review\.teacherReview\?\.annotations\)/);
-  assert.match(app, /Comments on your writing/);
+  assert.match(app, /student-feedback-layout/);
+  assert.match(app, /Teacher feedback notes/);
+  assert.match(app, /onReplyTeacherComment/);
+  assert.match(app, /arrayUnion\(reply\)/);
   assert.match(app, /Marking guide/);
+});
+
+test('reading exams use full-screen independent panes with selectable annotations', () => {
+  assert.match(app, /const isReadingWorkspace = isReadingPractice \|\| Boolean\(currentQuestion && \([\s\S]*?currentQuestion\.section === 'reading'[\s\S]*?currentQuestion\.passageNumber/);
+  assert.match(app, /exam-interface--reading/);
+  assert.match(app, /<ReadingAnnotations[\s\S]*?storageKey=\{`reading-annotations:/);
+  assert.match(globalStyles, /\.exam-interface--reading[\s\S]*?height: 100dvh/);
+  assert.match(globalStyles, /\.exam-interface--reading \.reading-workspace > \.split-pane[\s\S]*?flex: 1 1 auto/);
+  assert.match(readingAnnotations, /Select passage text to highlight, underline, or add a note/);
+  assert.match(readingAnnotations, /const HIGHLIGHT_COLORS = \[/);
+  assert.equal((readingAnnotations.match(/\{ name: '(?:Yellow|Orange|Coral|Pink|Purple|Blue|Cyan|Green|Lime|Gray)'/g) || []).length, 10);
+  assert.match(readingAnnotations, /role="group" aria-label="Choose highlight color"/);
+  assert.match(readingAnnotations, /Drag sticky note/);
+  assert.match(readingAnnotations, /onClick=\{\(\) => setVisibleNotes/);
+  assert.match(readingAnnotations, /setNotes\(current => current\.filter\(item => item\.id !== note\.id\)\)/);
+  assert.match(readingAnnotations, /localStorage\.setItem\(storageKey, JSON\.stringify\(\{ marks, notes \}\)\)/);
+});
+
+test('teacher question formats configure matching answer controls and candidate instructions', () => {
+  assert.match(app, /handleQuestionFormatChange\(qIndex, event\.target\.value\)/);
+  assert.match(app, /question\.responseType = responseType/);
+  assert.match(app, /question\.answerSlots = \[1, 2, 3\]/);
+  assert.match(app, /Candidate instructions \(optional\)/);
+  assert.match(app, /Suggested maximum word count/);
+  assert.match(app, /return <QuestionResponse[\s\S]*?disabled=\{timeExpired \|\| isSubmitting\}/);
+  assert.match(app, /question\.responseType === 'matching' \? <select/);
+  assert.match(app, /question\.responseType === 'ordering'/);
+  assert.match(app, /words\{wordCount > answerWordLimit \? ' · over the suggested limit' : ''\}/);
+  assert.match(app, /insertions=\{resolveResponseType\(q\) === 'multi-blank'/);
+  assert.match(app, /token: `\{\{\$\{index \+ 1\}\}\}`/);
+  assert.match(app, /<QuestionPrompt question=\{currentQuestion\} value=\{answers\[currentQuestion\.id\]\}/);
+  assert.match(app, /if \(hasInlineAnswerSlots\(currentQuestion\)\) return null/);
+  assert.match(app, /!hasInlineAnswerSlots\(q\) && <QuestionResponse/);
+  assert.ok(questionPrompt.includes(String.raw`const INLINE_ANSWER_PATTERN = /\{\{(\d+)\}\}/g;`));
+  assert.match(questionPrompt, /question\.answerSlots\?\.\[slotNumber - 1\]/);
+  assert.match(questionPrompt, /question-prompt__number/);
+  assert.match(questionTextEditor, /insertions\.map/);
 });

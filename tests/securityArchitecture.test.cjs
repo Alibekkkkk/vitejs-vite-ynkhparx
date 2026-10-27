@@ -103,6 +103,21 @@ test('teacher assessments separate archived items and allow restoring them as dr
   assert.match(appSource, /status: 'draft', updatedAt/);
 });
 
+test('student feedback replies are append-only and cannot modify grading data', () => {
+  assert.match(rules, /function validStudentFeedbackReplyUpdate\(userId\)[\s\S]*?affectedKeys\(\)\.hasOnly\(\['teacherFeedbackReplies'\]\)[\s\S]*?updatedReplies\.size\(\) == existingReplies\.size\(\) \+ 1[\s\S]*?reply\.get\('studentUid', ''\) == userId[\s\S]*?reply\.get\('body', ''\)\.size\(\) <= 1000/);
+  assert.match(rules, /allow update: if \([\s\S]*?validStudentFeedbackReplyUpdate\(userId\)/);
+  assert.match(rules, /resource\.data\.get\('studentUid', ''\) == request\.auth\.uid && validStudentFeedbackReplyUpdate/);
+  assert.match(appSource, /teacherFeedbackReplies: arrayUnion\(reply\)/);
+  assert.match(appSource, /Student reply/);
+});
+
+test('only archived assessments can be deleted and the UI preserves their historical results', () => {
+  assert.match(rules, /allow delete: if isAuthorizedTeacher\(\) && resource\.data\.get\('status', ''\) == 'archived'/);
+  assert.match(appSource, /batch\.delete\(doc\(db, 'artifacts', appId, 'public', 'data', 'tests', test\.id\)\)/);
+  assert.match(appSource, /batch\.delete\(doc\(db, 'artifacts', appId, 'teacher', 'data', 'answerKeys', test\.id\)\)/);
+  assert.match(appSource, /Student submissions and historical results will be preserved/);
+});
+
 test('combined SAT records both source assessments and checks student access to the second section', () => {
   assert.match(appSource, /practiceSourceTestIds: practiceMetadata\.sourceTestIds \|\| \[test\.id\]/);
   assert.match(appSource, /sourceTestIds: \[readingWriting\.id, math\.id\]/);

@@ -53,6 +53,34 @@ export const RESPONSE_TYPE_LABELS: Array<[ResponseType, string]> = [
   ['long-text', 'Long written response (manual review)'],
 ];
 
+export function responseTypeForQuestionType(questionType: string): ResponseType {
+  switch (questionType) {
+    case 'multiple-choice':
+    case 'true-false-not-given':
+    case 'yes-no-not-given':
+      return 'single-choice';
+    case 'multiple-select':
+      return 'multiple-select';
+    case 'matching-headings':
+    case 'matching-information':
+    case 'matching-features':
+    case 'sentence-endings':
+      return 'matching';
+    case 'ordering':
+      return 'ordering';
+    case 'completion':
+    case 'map-labeling':
+      return 'multi-blank';
+    case 'sat-student-produced-response':
+      return 'numeric';
+    case 'writing-task':
+      return 'long-text';
+    case 'short-answer':
+    default:
+      return 'short-text';
+  }
+}
+
 export function normalizeText(value: unknown): string {
   return String(value ?? '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
 }
@@ -60,6 +88,8 @@ export function normalizeText(value: unknown): string {
 export function resolveResponseType(question: EngineQuestion): ResponseType {
   const explicit = question.responseType;
   if (explicit && RESPONSE_TYPE_LABELS.some(([type]) => type === explicit)) return explicit;
+  if (question.questionType === 'multiple-select') return 'multiple-select';
+  if (question.questionType === 'ordering') return 'ordering';
   if (question.questionType === 'writing-task' || question.manualReview || question.ungraded) return 'long-text';
   if (question.questionType === 'sat-student-produced-response' || question.type === 'number') return 'numeric';
   if (['matching-headings', 'matching-information', 'matching-features', 'sentence-endings'].includes(question.questionType || '')) return 'matching';

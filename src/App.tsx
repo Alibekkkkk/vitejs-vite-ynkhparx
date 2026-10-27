@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Clock, BookOpen, FileText, CheckCircle, LogOut, User, Play,
   ArrowRight, LayoutDashboard, History, Check, Plus, Edit3, Users,
-  Lock, Image as ImageIcon, Sun, Moon, X, Copy, Archive, RotateCcw
+  Lock, Image as ImageIcon, Sun, Moon, X, Copy, Archive, RotateCcw, Trash2
 } from 'lucide-react';
 
 import { initializeApp } from "firebase/app";
@@ -20,13 +20,13 @@ import {
 } from "firebase/auth";
 import { 
   getFirestore, doc, getDoc, getDocs, setDoc, addDoc, deleteDoc, collection, collectionGroup, onSnapshot,
-  serverTimestamp, updateDoc, query, where, orderBy, limit, writeBatch, startAfter
+  serverTimestamp, updateDoc, query, where, orderBy, limit, writeBatch, startAfter, arrayUnion
 } from "firebase/firestore";
 import {
   gradeQuestion,
   normalizeQuestion,
   resolveResponseType,
-  RESPONSE_TYPE_LABELS,
+  responseTypeForQuestionType,
   validateQuestion,
   isAnswerPresent,
   type EngineQuestion,
@@ -36,6 +36,7 @@ import { parseQuestionBank } from './questionBank';
 import { getLocalWritingSuggestions } from './writingSuggestions';
 import { FormattedQuestionText } from './FormattedQuestionText';
 import { QuestionTextEditor } from './QuestionTextEditor';
+import { hasInlineAnswerSlots, QuestionPrompt } from './QuestionPrompt';
 import { stripQuestionTextFormatting } from './questionTextFormatting';
 import { PromptFigure } from './PromptFigure';
 import { ResizableSplitPane } from './ResizableSplitPane';
@@ -45,6 +46,7 @@ import type { WritingResource } from './writingResources';
 import { LEGACY_IMPORT_BATCH_SIZE, mapLegacyResult, parseLegacyResultPath } from './legacyMigration';
 import { ANSWER_KEY_MIGRATION_VERSION, buildAnswerKeyQuestions, hasCompleteAnswerKey, stripPublicAnswerFields } from './answerKeyMigration';
 import { buildReadingSessionViewModel } from './readingSession';
+import { ReadingAnnotations } from './ReadingAnnotations';
 import {
   fetchFigureForAI,
   getFigureSource,
@@ -188,63 +190,70 @@ const Modal = ({ isOpen, title, children, onClose, actions = [] }) => {
   );
 };
 
-const QuestionResponse = ({ question: rawQuestion, value, onChange, preview = false }) => {
+const QuestionResponse = ({ question: rawQuestion, value, onChange, preview = false, disabled = false }) => {
   const question = normalizeQuestion(rawQuestion);
   const inputClass = 'w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 p-3 text-slate-800 dark:text-white';
   const choices = question.options || [];
+  const answerWordLimit = Number(question.answerWordLimit) || 0;
+  const wordCount = typeof value === 'string' ? value.trim().split(/\s+/).filter(Boolean).length : 0;
+  const responseControl = (control: React.ReactNode) => <div className="space-y-2">
+    {question.answerInstruction && <p className="rounded-lg bg-blue-50 px-3 py-2 text-sm font-medium text-blue-900 dark:bg-blue-950/40 dark:text-blue-200">{question.answerInstruction}</p>}
+    {control}
+    {question.responseType === 'long-text' && answerWordLimit > 0 && <p className={`text-right text-xs ${wordCount > answerWordLimit ? 'font-semibold text-red-700 dark:text-red-300' : 'text-slate-500 dark:text-slate-400'}`} aria-live="polite">{wordCount} / {answerWordLimit} words{wordCount > answerWordLimit ? ' · over the suggested limit' : ''}</p>}
+  </div>;
 
   if (question.responseType === 'single-choice') return (
-    <div className="space-y-2" role="radiogroup" aria-label="Answer choices">
+    responseControl(<div className="space-y-2" role="radiogroup" aria-label="Answer choices">
       {choices.map((choice, index) => <label key={`${question.id}-choice-${index}`} className="flex items-center gap-3 rounded-lg border border-slate-200 dark:border-slate-600 p-3 cursor-pointer">
-        <input type="radio" name={`answer-${question.id}-${preview ? 'preview' : 'exam'}`} checked={value === choice} onChange={() => onChange(choice)} />
+        <input type="radio" name={`answer-${question.id}-${preview ? 'preview' : 'exam'}`} checked={value === choice} onChange={() => onChange(choice)} disabled={disabled} />
         <span>{choice}</span>
       </label>)}
-    </div>
+    </div>)
   );
 
   if (question.responseType === 'multiple-select') {
     const selected = Array.isArray(value) ? value : [];
-    return <div className="space-y-2">{choices.map((choice, index) => <label key={`${question.id}-multi-${index}`} className="flex items-center gap-3 rounded-lg border border-slate-200 dark:border-slate-600 p-3 cursor-pointer">
-      <input type="checkbox" checked={selected.includes(choice)} onChange={event => onChange(event.target.checked ? [...selected, choice] : selected.filter(item => item !== choice))} />
+    return responseControl(<div className="space-y-2">{choices.map((choice, index) => <label key={`${question.id}-multi-${index}`} className="flex items-center gap-3 rounded-lg border border-slate-200 dark:border-slate-600 p-3 cursor-pointer">
+      <input type="checkbox" checked={selected.includes(choice)} onChange={event => onChange(event.target.checked ? [...selected, choice] : selected.filter(item => item !== choice))} disabled={disabled} />
       <span>{choice}</span>
-    </label>)}</div>;
+    </label>)}</div>);
   }
 
   if (question.responseType === 'multi-blank' || question.responseType === 'matching') {
     const answers = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
     const slots = question.answerSlots || [];
     const choicesForMatching = question.sharedChoices || [];
-    return <div className="space-y-3">{slots.map((slot, index) => {
+    return responseControl(<div className="space-y-3">{slots.map((slot, index) => {
       const selected = answers[slot.id] || '';
       const usedByOtherSlot = new Set(slots.filter(other => other.id !== slot.id).map(other => answers[other.id]).filter(Boolean));
       return <label key={`${question.id}-${slot.id}`} className="block text-sm font-medium text-slate-700 dark:text-slate-200">
         <span className="block mb-1">{slot.label || `Answer ${index + 1}`}{slot.prompt ? ` — ${slot.prompt}` : ''}</span>
-        {question.responseType === 'matching' ? <select className={inputClass} value={selected} onChange={event => onChange({ ...answers, [slot.id]: event.target.value })}>
+        {question.responseType === 'matching' ? <select className={inputClass} value={selected} onChange={event => onChange({ ...answers, [slot.id]: event.target.value })} disabled={disabled}>
           <option value="">Choose…</option>{choicesForMatching.map((choice, choiceIndex) => <option key={`${slot.id}-shared-${choiceIndex}`} value={choice} disabled={!question.allowChoiceReuse && usedByOtherSlot.has(choice)}>{choice}</option>)}
-        </select> : <input className={inputClass} value={selected} onChange={event => onChange({ ...answers, [slot.id]: event.target.value })} placeholder="Type your answer" />}
+        </select> : <input className={inputClass} value={selected} onChange={event => onChange({ ...answers, [slot.id]: event.target.value })} placeholder={question.answerPlaceholder || 'Type your answer'} disabled={disabled} />}
       </label>;
-    })}</div>;
+    })}</div>);
   }
 
   if (question.responseType === 'ordering') {
     const ordered = Array.isArray(value) ? value : [];
     const available = choices.filter(choice => !ordered.includes(choice));
-    return <div className="space-y-3">{choices.map((_, index) => <label key={`${question.id}-order-${index}`} className="block text-sm font-medium text-slate-700 dark:text-slate-200">Position {index + 1}
+    return responseControl(<div className="space-y-3">{choices.map((_, index) => <label key={`${question.id}-order-${index}`} className="block text-sm font-medium text-slate-700 dark:text-slate-200">Position {index + 1}
       <select className={inputClass} value={ordered[index] || ''} onChange={event => {
         const next = [...ordered];
         const previousIndex = next.indexOf(event.target.value);
         if (previousIndex >= 0 && previousIndex !== index) next[previousIndex] = next[index] || '';
         next[index] = event.target.value;
         onChange(next);
-      }}><option value="">Choose an item…</option>{[...new Set([...available, ordered[index]].filter(Boolean))].map(item => <option key={item} value={item}>{item}</option>)}</select>
-    </label>)}</div>;
+      }} disabled={disabled}><option value="">Choose an item…</option>{[...new Set([...available, ordered[index]].filter(Boolean))].map(item => <option key={item} value={item}>{item}</option>)}</select>
+    </label>)}</div>);
   }
 
-  if (question.responseType === 'numeric') return <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">Enter a number
-    <input className={inputClass} type="number" step="any" value={value ?? ''} onChange={event => onChange(event.target.value)} />
-  </label>;
-  if (question.responseType === 'long-text') return <textarea rows={8} maxLength={12000} className={inputClass} placeholder="Write your response" value={value ?? ''} onChange={event => onChange(event.target.value)} />;
-  return <input className={inputClass} value={value ?? ''} onChange={event => onChange(event.target.value)} placeholder="Type your answer" />;
+  if (question.responseType === 'numeric') return responseControl(<label className="block text-sm font-medium text-slate-700 dark:text-slate-200">Enter a number
+    <input className={inputClass} type="number" step="any" value={value ?? ''} onChange={event => onChange(event.target.value)} disabled={disabled} />
+  </label>);
+  if (question.responseType === 'long-text') return responseControl(<textarea rows={12} maxLength={12000} className={inputClass} placeholder={question.answerPlaceholder || 'Write your response here…'} value={value ?? ''} onChange={event => onChange(event.target.value)} disabled={disabled} />);
+  return responseControl(<input className={inputClass} value={value ?? ''} onChange={event => onChange(event.target.value)} placeholder={question.answerPlaceholder || 'Type your answer'} disabled={disabled} />);
 };
 
 const formatTime = (totalSeconds) => {
@@ -329,6 +338,8 @@ const createEmptyTest = () => ({
 
 type IELTSQuestionFormat =
   | 'multiple-choice'
+  | 'multiple-select'
+  | 'ordering'
   | 'true-false-not-given'
   | 'yes-no-not-given'
   | 'matching-headings'
@@ -366,6 +377,9 @@ type AssessmentQuestion = EngineQuestion & {
   allowChoiceReuse?: boolean;
   manualReview?: boolean;
   ungraded?: boolean;
+  answerInstruction?: string;
+  answerPlaceholder?: string;
+  answerWordLimit?: number;
   text?: string;
   imageUrl?: string;
   imageAlt?: string;
@@ -401,6 +415,8 @@ const SAT_SKILLS: Record<string, string[]> = {
 
 const IELTS_QUESTION_FORMATS = [
   ['multiple-choice', 'Multiple choice'],
+  ['multiple-select', 'Select all that apply'],
+  ['ordering', 'Ordering / sequencing'],
   ['true-false-not-given', 'True / False / Not Given'],
   ['yes-no-not-given', 'Yes / No / Not Given'],
   ['matching-headings', 'Matching headings'],
@@ -787,6 +803,10 @@ const TeacherReviewFields = ({ attempt, review, onSaveReview }) => {
           <div className="min-w-0 flex-1">
             <blockquote className="border-l-2 border-blue-500 pl-3 text-sm font-medium text-slate-800 dark:text-slate-100">“{annotation.quote}”</blockquote>
             <p className="mt-1 whitespace-pre-wrap text-sm text-slate-600 dark:text-slate-300">{annotation.comment}</p>
+            {(attempt.teacherFeedbackReplies || []).filter(reply => reply.questionId === review.questionId && reply.annotationId === annotation.id).map(reply => <div key={reply.id} className="mt-2 rounded-lg border border-blue-200 bg-blue-50 p-2.5 dark:border-blue-900 dark:bg-blue-950/30">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-blue-800 dark:text-blue-300">Student reply</p>
+              <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700 dark:text-slate-200">{reply.body}</p>
+            </div>)}
           </div>
           <button type="button" onClick={() => setAnnotations(current => current.filter(item => item.id !== annotation.id))} aria-label={`Remove comment ${index + 1}`} className="shrink-0 rounded px-2 py-1 text-sm text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/40">Remove</button>
         </div>)}
@@ -796,6 +816,10 @@ const TeacherReviewFields = ({ attempt, review, onSaveReview }) => {
         Overall feedback
         <textarea value={feedback} onChange={event => setFeedback(event.target.value)} maxLength={2000} aria-label="Overall teacher feedback" placeholder="Add a summary or next step for the student…" rows={3} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white p-3 dark:border-slate-600 dark:bg-slate-700" />
       </label>
+      {(attempt.teacherFeedbackReplies || []).filter(reply => reply.questionId === review.questionId && reply.annotationId === '__overall_feedback__').map(reply => <div key={reply.id} className="mt-2 rounded-lg border border-blue-200 bg-blue-50 p-2.5 dark:border-blue-900 dark:bg-blue-950/30">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-blue-800 dark:text-blue-300">Student reply to overall feedback</p>
+        <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700 dark:text-slate-200">{reply.body}</p>
+      </div>)}
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs text-slate-500 dark:text-slate-400">Your phrase comments and overall feedback will appear in the student’s results.</p>
         <button type="button" disabled={saving} onClick={save} className="rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700 disabled:opacity-50">{saving ? 'Saving…' : 'Save review'}</button>
@@ -1030,6 +1054,46 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
         correctAnswer: ''
       }]
     }));
+  };
+
+  const handleQuestionFormatChange = (index: number, questionType: string) => {
+    const responseType = responseTypeForQuestionType(questionType);
+    setNewTest(previous => {
+      const questions = [...previous.questions];
+      const question = { ...questions[index] };
+      const choiceType = ['single-choice', 'multiple-select', 'ordering'].includes(responseType);
+      const slotType = ['multi-blank', 'matching'].includes(responseType);
+      question.questionType = questionType;
+      question.responseType = responseType;
+      question.type = responseType === 'single-choice' ? 'mcq' : responseType === 'numeric' ? 'number' : 'text';
+      if (questionType === 'true-false-not-given') {
+        question.options = ['True', 'False', 'Not Given'];
+      } else if (questionType === 'yes-no-not-given') {
+        question.options = ['Yes', 'No', 'Not Given'];
+      } else if (choiceType && (!question.options?.length || question.options.every(option => !option))) {
+        question.options = ['', '', '', ''];
+      }
+      if (slotType && !question.answerSlots?.length) {
+        question.answerSlots = [1, 2, 3].map(slot => ({
+          id: `${question.id}_slot_${slot}`,
+          label: `Answer ${slot}`,
+          correctAnswers: [],
+        }));
+      }
+      if (responseType === 'matching' && !question.sharedChoices?.length) {
+        question.sharedChoices = ['', '', '', ''];
+      }
+      if (responseType === 'ordering' && !question.correctOrder?.length) {
+        question.correctOrder = (question.options || []).filter(Boolean);
+      }
+      if (responseType === 'long-text') question.manualReview = true;
+      else {
+        question.manualReview = false;
+        question.ungraded = false;
+      }
+      questions[index] = question;
+      return { ...previous, questions };
+    });
   };
 
   const updateSection = (sectionId, field, value) => {
@@ -1502,6 +1566,27 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
     }
   };
 
+  const permanentlyDeleteArchivedTest = async (test: any) => {
+    if (test.status !== 'archived') return;
+    const confirmed = await showConfirmDialog(
+      'Permanently delete archived assessment?',
+      `Permanently delete “${test.title}” and its teacher-only answer key? This cannot be undone. Student submissions and historical results will be preserved.`,
+      'Delete assessment',
+      true
+    );
+    if (!confirmed) return;
+    try {
+      const batch = writeBatch(db);
+      batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'tests', test.id));
+      batch.delete(doc(db, 'artifacts', appId, 'teacher', 'data', 'answerKeys', test.id));
+      await batch.commit();
+      await showAlertDialog('Assessment deleted', `“${test.title}” and its answer key were deleted. Student submissions and historical results were preserved.`);
+    } catch (error) {
+      console.error('Failed to permanently delete archived assessment:', error);
+      await showAlertDialog('Could not delete assessment', error instanceof Error ? error.message : 'The archived assessment could not be deleted. Please try again.');
+    }
+  };
+
   const handleEditTest = (test) => {
     const defaults = createEmptyTest();
     const oldListening = test.sections?.listening || {};
@@ -1775,9 +1860,14 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                       {test.pin && <Lock className="w-4 h-4 text-amber-500" aria-label="PIN protected" />}
                       {test.groupCode && <button onClick={() => unpublishTest(test)} className="text-xs px-2 py-1 rounded border border-amber-300 text-amber-700 dark:text-amber-300" title="Hide from students and preserve all results">Unpublish</button>}
                       {assessmentView === 'archived' ? (
-                        <button onClick={() => restoreArchivedTest(test)} className="ml-2 text-slate-400 hover:text-emerald-600 dark:text-slate-500" title="Return assessment to active drafts" aria-label={`Restore ${test.title} to drafts`}>
-                          <RotateCcw className="w-4 h-4" />
-                        </button>
+                        <>
+                          <button onClick={() => restoreArchivedTest(test)} className="ml-2 text-slate-400 hover:text-emerald-600 dark:text-slate-500" title="Return assessment to active drafts" aria-label={`Restore ${test.title} to drafts`}>
+                            <RotateCcw className="w-4 h-4" />
+                          </button>
+                          <button onClick={() => permanentlyDeleteArchivedTest(test)} className="ml-2 text-slate-400 hover:text-red-600 dark:text-slate-500 dark:hover:text-red-400" title="Permanently delete assessment; preserve student results" aria-label={`Permanently delete archived assessment ${test.title}`}>
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </>
                       ) : (
                         <>
                           <button onClick={() => duplicateTest(test)} className="ml-2 text-slate-400 hover:text-purple-500 dark:text-slate-500" title="Duplicate assessment" aria-label={`Duplicate ${test.title}`}>
@@ -1945,17 +2035,18 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                           </div>
                        </div>
                        
-                       <QuestionTextEditor value={q.text || ''} onChange={value => handleUpdateQuestion(qIndex, 'text', value)} />
+                       <QuestionTextEditor
+                         value={q.text || ''}
+                         onChange={value => handleUpdateQuestion(qIndex, 'text', value)}
+                         insertions={resolveResponseType(q) === 'multi-blank'
+                           ? (q.answerSlots || []).map((_, index) => ({ label: `Blank ${index + 1}`, token: `{{${index + 1}}}` }))
+                           : []}
+                       />
 
                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
                          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Question format
-                           <select value={q.questionType || (q.type === 'mcq' ? 'multiple-choice' : 'short-answer')} onChange={event => handleUpdateQuestion(qIndex, 'questionType', event.target.value)} className="mt-1 w-full p-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white">
-                             {(newTest.type === 'IELTS' ? IELTS_QUESTION_FORMATS.filter(([value]) => activeQuestionSection === 'writing' ? value === 'writing-task' : value !== 'writing-task' && value !== 'sat-student-produced-response') : [['multiple-choice', 'Multiple choice'], ['short-answer', 'Short answer'], ['sat-student-produced-response', 'Numerical response']]).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                           </select>
-                         </label>
-                         <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Student response format
-                           <select value={q.responseType || resolveResponseType(q)} onChange={event => handleUpdateQuestion(qIndex, 'responseType', event.target.value)} className="mt-1 w-full p-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white">
-                             {RESPONSE_TYPE_LABELS.map(([type, label]) => <option key={type} value={type}>{label}</option>)}
+                           <select value={q.questionType || (q.type === 'mcq' ? 'multiple-choice' : 'short-answer')} onChange={event => handleQuestionFormatChange(qIndex, event.target.value)} className="mt-1 w-full p-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white">
+                             {(newTest.type === 'IELTS' ? IELTS_QUESTION_FORMATS.filter(([value]) => activeQuestionSection === 'writing' ? value === 'writing-task' : value !== 'writing-task' && value !== 'sat-student-produced-response') : [['multiple-choice', 'Multiple choice'], ['multiple-select', 'Select all that apply'], ['ordering', 'Ordering / sequencing'], ['short-answer', 'Short answer'], ['sat-student-produced-response', 'Numerical response']]).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                            </select>
                          </label>
                          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Difficulty
@@ -2001,6 +2092,19 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Points
                            <input type="number" min="0" value={q.points ?? 1} onChange={event => handleUpdateQuestion(qIndex, 'points', Number(event.target.value))} className="mt-1 w-full p-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white" />
                          </label>
+                       </div>
+                       <div className="mb-4 grid gap-3 rounded-lg border border-indigo-200 bg-indigo-50/60 p-3 dark:border-indigo-900 dark:bg-indigo-950/20 md:grid-cols-2">
+                         <label className="text-sm font-medium text-slate-700 dark:text-slate-200">Candidate instructions (optional)
+                           <textarea value={q.answerInstruction || ''} onChange={event => handleUpdateQuestion(qIndex, 'answerInstruction', event.target.value)} rows={2} placeholder="For example: Choose ONE WORD ONLY from the passage." className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2 dark:border-slate-600 dark:bg-slate-700" />
+                         </label>
+                         <div className="space-y-3">
+                           <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">Answer placeholder (optional)
+                             <input value={q.answerPlaceholder || ''} onChange={event => handleUpdateQuestion(qIndex, 'answerPlaceholder', event.target.value)} placeholder="For example: Enter your answer" className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2 dark:border-slate-600 dark:bg-slate-700" />
+                           </label>
+                           {resolveResponseType(q) === 'long-text' && <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">Suggested maximum word count
+                             <input type="number" min="0" max="12000" value={q.answerWordLimit || ''} onChange={event => handleUpdateQuestion(qIndex, 'answerWordLimit', Number(event.target.value) || 0)} placeholder="Leave blank for no limit" className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2 dark:border-slate-600 dark:bg-slate-700" />
+                           </label>}
+                         </div>
                        </div>
                         {(resolveResponseType(q) === 'short-text' || resolveResponseType(q) === 'numeric') && (
                          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">Correct answer
@@ -2112,7 +2216,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                          )}
                        </div>
 
-                        {previewQuestionId === q.id && <div className="mb-4 rounded-lg border border-blue-300 bg-white p-4 dark:bg-slate-800"><p className="font-medium mb-3">Student preview: <FormattedQuestionText text={q.text || 'Question prompt'} /></p><PromptFigure question={q} assessmentId={editingId || newTest.id || 'draft'} teacherFacing /><QuestionResponse question={q} value={undefined} onChange={() => {}} preview /></div>}
+                        {previewQuestionId === q.id && <div className="mb-4 rounded-lg border border-blue-300 bg-white p-4 dark:bg-slate-800"><p className="font-medium mb-3">Student preview: <QuestionPrompt question={q} value={{}} /></p><PromptFigure question={q} assessmentId={editingId || newTest.id || 'draft'} teacherFacing />{!hasInlineAnswerSlots(q) && <QuestionResponse question={q} value={undefined} onChange={() => {}} preview />}</div>}
                         {(validationErrors[q.id] || []).map(message => <p key={message} className="mb-2 text-sm text-red-600" role="alert">{message}</p>)}
                         {resolveResponseType(q) === 'single-choice' && q.type === 'mcq' && (
                          <div className="space-y-2 ml-4 border-l-2 border-slate-200 dark:border-slate-600 pl-4 text-left">
@@ -2560,16 +2664,19 @@ const WritingPractice = ({ tests, resources, resourceError, userId, onBack }) =>
   );
 };
 
-const ReadingPracticeWorkspace = ({ test, userId, questions, answers, currentIndex, setCurrentIndex, currentQuestion, renderAnswerInput, disabled }) => {
+const ReadingPracticeWorkspace = ({ test, userId, questions, answers, currentIndex, setCurrentIndex, currentQuestion, updateAnswer, renderAnswerInput, disabled }) => {
   const [activePassageNumber, setActivePassageNumber] = useState(Number(currentQuestion?.passageNumber || 1));
   const [visitedQuestionIds, setVisitedQuestionIds] = useState<string[]>(currentQuestion?.id ? [currentQuestion.id] : []);
+  const readingQuestions = questions.filter((question: any) => question.section === 'reading'
+    || (test?.practiceMetadata?.kind === 'reading' && Number(question.passageNumber || 1) > 0)
+    || (test?.type === 'IELTS' && Number(question.passageNumber) > 0));
   const passageScroll = React.useRef<Record<string, number>>({});
   const questionScroll = React.useRef<Record<string, number>>({});
   const passagePaneRef = React.useRef<HTMLDivElement>(null);
   const questionPaneRef = React.useRef<HTMLDivElement>(null);
   const readingSession = buildReadingSessionViewModel({
     configuredPassages: test?.sections?.reading?.passages || [],
-    questions,
+    questions: readingQuestions,
     activePassageId: String(activePassageNumber),
     activeQuestionId: String(currentQuestion?.id || ''),
     answers,
@@ -2592,7 +2699,7 @@ const ReadingPracticeWorkspace = ({ test, userId, questions, answers, currentInd
     if (questionPaneRef.current) questionPaneRef.current.scrollTop = questionScroll.current[String(activePassageNumber)] || 0;
   }, [activePassageNumber]);
 
-  const passageQuestions = questions
+  const passageQuestions = readingQuestions
     .map((question: any, index: number) => ({ question, index }))
     .filter(({ question }: any) => Number(question.passageNumber || 1) === activePassageNumber);
   const passage = (test?.sections?.reading?.passages || []).find((item: any) => Number(item.passageNumber) === activePassageNumber);
@@ -2625,12 +2732,16 @@ const ReadingPracticeWorkspace = ({ test, userId, questions, answers, currentInd
             <h3 className="font-bold text-slate-800 dark:text-white">{passage?.title || `Passage ${activePassageNumber}`}</h3>
             <p className="text-sm text-slate-600 dark:text-slate-300">Passage {activePassageNumber} of {passageNumbers.length || 1}</p>
             <nav className="mt-2 flex flex-wrap gap-2" aria-label="Passage navigation">
-              {passageNumbers.map(number => <button key={number} type="button" onClick={() => changePassage(number)} aria-current={activePassageNumber === number ? 'page' : undefined} className={`rounded border px-3 py-1.5 ${activePassageNumber === number ? 'bg-blue-600 text-white' : 'dark:border-slate-600 dark:text-slate-100'}`}>Passage {number}</button>)}
+                  {passageNumbers.map(number => <button key={number} type="button" onClick={() => changePassage(number)} aria-current={activePassageNumber === number ? 'page' : undefined} className={`rounded border px-3 py-1.5 ${activePassageNumber === number ? 'bg-blue-600 text-white' : 'dark:border-slate-600 dark:text-slate-100'}`}>Passage {number}</button>)}
             </nav>
           </div>
           {passageText.trim()
             ? <div ref={passagePaneRef} onScroll={event => { passageScroll.current[String(activePassageNumber)] = event.currentTarget.scrollTop; }} className="reading-workspace__scroll rounded-lg bg-white p-5 dark:bg-slate-800">
-                <p className="whitespace-pre-wrap leading-relaxed text-slate-800 dark:text-slate-100">{passageText}</p>
+                <ReadingAnnotations
+                  key={`${userId}:${test?.id || 'reading'}:${activePassageNumber}`}
+                  text={passageText}
+                  storageKey={`reading-annotations:${userId}:${test?.id || 'reading'}:${activePassageNumber}`}
+                />
               </div>
             : <div className="rounded-lg border border-amber-300 bg-amber-50 p-5 text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-100" role="status">The passage text for Passage {activePassageNumber} is not available. Please ask your teacher to complete this reading content.</div>}
         </div>}
@@ -2649,9 +2760,9 @@ const ReadingPracticeWorkspace = ({ test, userId, questions, answers, currentInd
           </div>
           {passageQuestions.length && currentQuestion ? (
             <div ref={questionPaneRef} onScroll={event => { questionScroll.current[String(activePassageNumber)] = event.currentTarget.scrollTop; }} className="reading-workspace__scroll space-y-4 rounded-lg border bg-white p-5 dark:border-slate-600 dark:bg-slate-800">
-              <div>
-                <p className="text-sm text-blue-700 dark:text-blue-300">{IELTS_QUESTION_FORMATS.find(item => item[0] === currentQuestion.questionType)?.[1] || currentQuestion.questionType || 'Reading question'} · Question {currentIndex + 1} of {questions.length}</p>
-                <p className="mt-2 whitespace-pre-wrap font-medium text-slate-800 dark:text-slate-100"><FormattedQuestionText text={currentQuestion.text || 'Question prompt'} /></p>
+              <div className="rounded-xl border border-blue-100 bg-blue-50/70 p-4 dark:border-blue-900/70 dark:bg-blue-950/30">
+                <p className="text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">{IELTS_QUESTION_FORMATS.find(item => item[0] === currentQuestion.questionType)?.[1] || currentQuestion.questionType || 'Reading question'}</p>
+                <p className="mt-2 whitespace-pre-wrap font-semibold leading-7 text-slate-900 dark:text-slate-100"><QuestionPrompt question={currentQuestion} value={answers[currentQuestion.id]} onChange={updateAnswer} disabled={disabled} /></p>
                 <PromptFigure question={currentQuestion} assessmentId={test?.practiceSourceTestId || test?.id || 'unknown'} />
               </div>
               {renderAnswerInput()}
@@ -2664,7 +2775,7 @@ const ReadingPracticeWorkspace = ({ test, userId, questions, answers, currentInd
         </div>}
       />
       <p className="mt-3 text-sm text-slate-600 dark:text-slate-300" aria-live="polite">
-        {questions.filter((question: any) => isAnswerPresent(answers[question.id])).length} of {questions.length} questions answered · {visitedQuestionIds.length} visited
+        {readingQuestions.filter((question: any) => isAnswerPresent(answers[question.id])).length} of {readingQuestions.length} reading questions answered · {visitedQuestionIds.length} visited
       </p>
     </div>
   );
@@ -2687,10 +2798,13 @@ const ExamInterface = ({ test, onComplete, userId, writingResources, writingReso
   const deadlineMs = React.useRef(startedAtMs + (hasTimeLimit ? durationSeconds * 1000 : 0));
   const submitAttemptRef = React.useRef<(autoSubmitted?: boolean) => Promise<void>>(async () => {});
   const currentQuestion = questions[currentIndex] || null;
-  const currentResponseType = currentQuestion ? resolveResponseType(normalizeQuestion(currentQuestion as any)) : 'short-text';
   const currentValue = currentQuestion ? answers[currentQuestion.id] ?? '' : '';
   const unansweredCount = questions.filter(question => !isAnswerPresent(answers[question.id])).length;
   const isReadingPractice = test?.practiceMetadata?.kind === 'reading';
+  const isReadingWorkspace = isReadingPractice || Boolean(currentQuestion && (
+    currentQuestion.section === 'reading'
+    || (test?.type === 'IELTS' && Number(currentQuestion.passageNumber) > 0)
+  ));
   const isWritingQuestion = Boolean(currentQuestion && (
     currentQuestion.section === 'writing'
     || currentQuestion.questionType === 'writing-task'
@@ -2707,62 +2821,13 @@ const ExamInterface = ({ test, onComplete, userId, writingResources, writingReso
 
   const renderAnswerInput = () => {
     if (!currentQuestion) return null;
-
-    const question = currentQuestion as any;
-    const baseClass = 'mt-2 w-full rounded-lg border border-slate-300 bg-white p-3 text-slate-800 dark:border-slate-600 dark:bg-slate-700 dark:text-white';
-
-    if (currentResponseType === 'single-choice') {
-      return (
-        <div className="mt-3 space-y-2">
-          {(question.options || []).map((option: string, optionIndex: number) => (
-            <label key={`${question.id}-option-${optionIndex}`} className="flex items-center gap-3 rounded-lg border border-slate-200 p-3 dark:border-slate-600">
-              <input
-                type="radio"
-                name={question.id}
-                checked={String(currentValue) === String(option)}
-                onChange={() => updateAnswer(option)}
-                disabled={timeExpired || isSubmitting}
-              />
-              <span>{option}</span>
-            </label>
-          ))}
-        </div>
-      );
-    }
-
-    if (currentResponseType === 'multiple-select') {
-      const selected = Array.isArray(currentValue) ? currentValue : [];
-      return (
-        <div className="mt-3 space-y-2">
-          {(question.options || []).map((option: string, optionIndex: number) => (
-            <label key={`${question.id}-option-${optionIndex}`} className="flex items-center gap-3 rounded-lg border border-slate-200 p-3 dark:border-slate-600">
-              <input
-                type="checkbox"
-                checked={selected.includes(option)}
-                disabled={timeExpired || isSubmitting}
-                onChange={() => {
-                  const next = selected.includes(option)
-                    ? selected.filter(item => item !== option)
-                    : [...selected, option];
-                  updateAnswer(next);
-                }}
-              />
-              <span>{option}</span>
-            </label>
-          ))}
-        </div>
-      );
-    }
-
-    if (currentResponseType === 'numeric') {
-      return <input type="number" value={currentValue as string | number} onChange={event => updateAnswer(event.target.value)} disabled={timeExpired || isSubmitting} className={baseClass} />;
-    }
-
-    if (currentResponseType === 'long-text' || currentResponseType === 'short-text') {
-      return <textarea value={String(currentValue || '')} onChange={event => updateAnswer(event.target.value)} rows={6} disabled={timeExpired || isSubmitting} className={baseClass} placeholder="Type your response here" />;
-    }
-
-    return <input type="text" value={String(currentValue || '')} onChange={event => updateAnswer(event.target.value)} disabled={timeExpired || isSubmitting} className={baseClass} placeholder="Answer" />;
+    if (hasInlineAnswerSlots(currentQuestion)) return null;
+    return <QuestionResponse
+      question={currentQuestion}
+      value={currentValue}
+      onChange={updateAnswer}
+      disabled={timeExpired || isSubmitting}
+    />;
   };
 
   const handleSubmit = async (autoSubmitted = false) => {
@@ -2837,7 +2902,7 @@ const ExamInterface = ({ test, onComplete, userId, writingResources, writingReso
       )}
       {submissionError && <p className="mt-3 text-sm text-red-600 dark:text-red-400" role="alert">{submissionError}</p>}
     </Modal>
-    <section className={`${isWritingQuestion ? 'exam-interface--writing' : 'mx-auto max-w-4xl'} rounded-xl border border-slate-200 bg-white p-6 text-left shadow-sm dark:border-slate-700 dark:bg-slate-800`}>
+    <section className={`${isWritingQuestion ? 'exam-interface--writing' : isReadingWorkspace ? 'exam-interface--reading' : 'mx-auto max-w-4xl'} rounded-xl border border-slate-200 bg-white p-6 text-left shadow-sm dark:border-slate-700 dark:bg-slate-800`}>
       <div className="exam-interface__header mb-5 flex items-center justify-between gap-3 border-b border-slate-200 pb-4 dark:border-slate-700">
         <div>
           <p className="text-sm font-medium uppercase tracking-wide text-blue-600 dark:text-blue-400">Exam</p>
@@ -2872,7 +2937,7 @@ const ExamInterface = ({ test, onComplete, userId, writingResources, writingReso
         </p>
       )}
 
-      {isReadingPractice ? (
+      {isReadingWorkspace ? (
         <ReadingPracticeWorkspace
           test={test}
           userId={userId}
@@ -2881,6 +2946,7 @@ const ExamInterface = ({ test, onComplete, userId, writingResources, writingReso
           currentIndex={currentIndex}
           setCurrentIndex={setCurrentIndex}
           currentQuestion={currentQuestion}
+          updateAnswer={updateAnswer}
           renderAnswerInput={renderAnswerInput}
           disabled={timeExpired || isSubmitting}
         />
@@ -2894,7 +2960,7 @@ const ExamInterface = ({ test, onComplete, userId, writingResources, writingReso
         maxLeftPercent={65}
         left={<div className="space-y-5">
           <div className="rounded-lg bg-slate-50 p-4 dark:bg-slate-700/50">
-            <p className="whitespace-pre-wrap text-base font-medium text-slate-800 dark:text-slate-100"><FormattedQuestionText text={currentQuestion.text || 'Question prompt'} /></p>
+            <p className="whitespace-pre-wrap text-base font-medium text-slate-800 dark:text-slate-100"><QuestionPrompt question={currentQuestion} value={currentValue} onChange={updateAnswer} disabled={timeExpired || isSubmitting} /></p>
             <PromptFigure question={currentQuestion} assessmentId={test?.id || 'unknown'} />
           </div>
           {renderAnswerInput()}
@@ -2919,7 +2985,7 @@ const ExamInterface = ({ test, onComplete, userId, writingResources, writingReso
       </div>}
 
       <div className="exam-interface__footer mt-6 flex items-center justify-between gap-3 border-t border-slate-200 pt-4 dark:border-slate-700">
-        {isReadingPractice ? timeExpired ? (
+        {isReadingWorkspace ? timeExpired ? (
           <button
             type="button"
             onClick={() => void handleSubmit(true)}
@@ -3330,7 +3396,68 @@ const PracticeHub = ({ tests, resources, resourceError, user, onStartTest }) => 
   );
 };
 
-const StudentDashboard = ({ user, tests, results, writingResources, writingResourcesError, onStartTest, onSaveGroupCode, onLogout }) => {
+const StudentTeacherFeedbackNotes = ({ result, review, onReply }) => {
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [savingId, setSavingId] = useState('');
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const annotations = review.teacherReview?.annotations || [];
+  const notes = [
+    ...annotations,
+    ...(review.teacherReview?.feedback?.trim() ? [{ id: '__overall_feedback__', quote: '', comment: review.teacherReview.feedback, isOverall: true }] : [])
+  ];
+  const replies = result.teacherFeedbackReplies || [];
+
+  if (!notes.length) return null;
+
+  const submitReply = async (annotation) => {
+    const body = (drafts[annotation.id] || '').trim();
+    if (!body || savingId) return;
+    setSavingId(annotation.id);
+    setErrors(current => ({ ...current, [annotation.id]: '' }));
+    try {
+      await onReply(result, review, annotation, body);
+      setDrafts(current => ({ ...current, [annotation.id]: '' }));
+    } catch (error) {
+      console.error('Could not send teacher feedback reply:', error);
+      setErrors(current => ({ ...current, [annotation.id]: 'Your reply could not be saved. Please try again.' }));
+    } finally {
+      setSavingId('');
+    }
+  };
+
+  return <aside className="student-feedback-notes" aria-label="Teacher feedback notes">
+    <h5 className="mb-3 text-sm font-bold uppercase tracking-wide text-amber-900 dark:text-amber-200">Teacher notes</h5>
+    {replies.length >= 100 && <p role="alert" className="mb-3 rounded-lg bg-amber-100 p-2 text-xs text-amber-900 dark:bg-amber-900/50 dark:text-amber-100">This submission has reached its reply limit.</p>}
+    <div className="space-y-3">
+      {notes.map((annotation, index) => {
+        const annotationReplies = replies.filter(reply => reply.questionId === review.questionId && reply.annotationId === annotation.id);
+        return <article key={annotation.id || index} className="rounded-xl border border-amber-300 bg-amber-50 p-4 shadow-sm dark:border-amber-800 dark:bg-amber-950/40">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <span className="text-xs font-bold uppercase tracking-wide text-amber-800 dark:text-amber-300">{annotation.isOverall ? 'Overall feedback' : `Note ${index + 1}`}</span>
+          </div>
+          {annotation.quote && <blockquote className="border-l-2 border-amber-500 pl-3 text-sm font-medium text-slate-800 dark:text-slate-100">“{annotation.quote}”</blockquote>}
+          <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700 dark:text-slate-200">{annotation.comment}</p>
+          {annotationReplies.length > 0 && <div className="mt-3 space-y-2 border-t border-amber-200 pt-3 dark:border-amber-800">
+            {annotationReplies.map(reply => <div key={reply.id} className="rounded-lg bg-white/80 p-2.5 text-sm text-slate-700 dark:bg-slate-900/70 dark:text-slate-200">
+              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">Your reply</p>
+              <p className="whitespace-pre-wrap">{reply.body}</p>
+            </div>)}
+          </div>}
+          <label className="mt-3 block text-xs font-semibold text-slate-700 dark:text-slate-300">
+            Reply to this {annotation.isOverall ? 'feedback' : 'note'}
+            <textarea value={drafts[annotation.id] || ''} onChange={event => setDrafts(current => ({ ...current, [annotation.id]: event.target.value }))} maxLength={1000} rows={2} placeholder="Write a reply…" className="mt-1 block w-full rounded-lg border border-amber-300 bg-white p-2.5 text-sm font-normal text-slate-800 dark:border-amber-800 dark:bg-slate-900 dark:text-slate-100" />
+          </label>
+          {errors[annotation.id] && <p role="alert" className="mt-1 text-xs text-red-700 dark:text-red-300">{errors[annotation.id]}</p>}
+          <button type="button" onClick={() => submitReply(annotation)} disabled={replies.length >= 100 || !drafts[annotation.id]?.trim() || Boolean(savingId)} className="mt-2 rounded-lg bg-amber-700 px-3 py-1.5 text-sm font-semibold text-white hover:bg-amber-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-amber-600 dark:hover:bg-amber-500">
+            {savingId === annotation.id ? 'Sending…' : 'Send reply'}
+          </button>
+        </article>;
+      })}
+    </div>
+  </aside>;
+};
+
+const StudentDashboard = ({ user, tests, results, writingResources, writingResourcesError, onStartTest, onSaveGroupCode, onReplyTeacherComment, onLogout }) => {
   const [activeTab, setActiveTab] = useState('tests');
   const [pinModal, setPinModal] = useState({ isOpen: false, test: null, enteredPin: '', error: '' });
   const [groupCodeInput, setGroupCodeInput] = useState(user?.groupCode || '');
@@ -3516,21 +3643,19 @@ const StudentDashboard = ({ user, tests, results, writingResources, writingResou
                          {result.practiceMetadata && <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">Practice: {[result.practiceMetadata.domain, result.practiceMetadata.skill, result.practiceMetadata.mode, result.practiceMetadata.questionType].filter(Boolean).join(' • ') || result.practiceMetadata.kind}</p>}
                          {result.questionReviews?.length > 0 && <details className="mt-3 text-sm text-slate-700 dark:text-slate-300">
                            <summary className="cursor-pointer font-medium">Review answers and explanations</summary>
-                           <div className="space-y-3 mt-3">{result.questionReviews.map((review, reviewIndex) => <div key={review.questionId || reviewIndex} className="p-3 rounded-lg bg-slate-50 dark:bg-slate-900">
+                           <div className="mt-3 space-y-3">{result.questionReviews.map((review, reviewIndex) => <div key={review.questionId || reviewIndex} className="rounded-lg bg-slate-50 p-3 dark:bg-slate-900">
                              <p className="font-medium">{reviewIndex + 1}. {review.questionText}</p>
-                             <p className="mt-1 whitespace-pre-wrap">Your answer: {renderTeacherAnnotatedAnswer(review.studentAnswer, review.teacherReview?.annotations)}</p>
-                             {review.status === 'graded' ? <p className={review.isCorrect ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'}>{review.isCorrect ? 'Correct' : `Incorrect. Answer key: ${formatAnswerForReview(review.answerKey)}`}{review.earnedPoints > 0 && !review.isCorrect ? ` — ${review.earnedPoints} / ${review.points} points` : ''}{review.acceptedAnswers?.length ? ` (also accepted: ${review.acceptedAnswers.join(', ')})` : ''}</p>
-                               : review.status === 'manual-review' ? <div className="text-amber-700 dark:text-amber-300">{review.teacherReview?.reviewedAt ? <p>Teacher reviewed this response{review.teacherReview.points != null ? ` · awarded ${review.teacherReview.points}/${review.points} points` : ''}.</p> : <p>Awaiting teacher review; excluded from the automatic score.</p>}{review.teacherReview?.feedback && <p className="mt-1 text-slate-700 dark:text-slate-200">Teacher feedback: {review.teacherReview.feedback}</p>}</div>
-                                 : review.status === 'ungraded' ? <p>This response is ungraded practice.</p>
-                                   : <p>Unanswered.</p>}
-                             {review.teacherReview?.annotations?.length > 0 && <section className="mt-3 space-y-2" aria-label="Teacher comments on your response">
-                               <h5 className="font-semibold text-slate-800 dark:text-slate-100">Comments on your writing</h5>
-                               {review.teacherReview.annotations.map((annotation, annotationIndex) => <article key={annotation.id || annotationIndex} className="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
-                                 <blockquote className="border-l-2 border-amber-500 pl-3 font-medium text-slate-800 dark:text-slate-100">“{annotation.quote}”</blockquote>
-                                 <p className="mt-1 whitespace-pre-wrap text-slate-700 dark:text-slate-200">{annotation.comment}</p>
-                               </article>)}
-                             </section>}
-                             {review.explanation && <p className="mt-1">{review.explanation}</p>}
+                             <div className={review.teacherReview?.annotations?.length || review.teacherReview?.feedback?.trim() ? 'student-feedback-layout mt-2' : 'mt-2'}>
+                               <div className="min-w-0">
+                                 <p className="whitespace-pre-wrap">Your answer: {renderTeacherAnnotatedAnswer(review.studentAnswer, review.teacherReview?.annotations)}</p>
+                                 {review.status === 'graded' ? <p className={review.isCorrect ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'}>{review.isCorrect ? 'Correct' : `Incorrect. Answer key: ${formatAnswerForReview(review.answerKey)}`}{review.earnedPoints > 0 && !review.isCorrect ? ` — ${review.earnedPoints} / ${review.points} points` : ''}{review.acceptedAnswers?.length ? ` (also accepted: ${review.acceptedAnswers.join(', ')})` : ''}</p>
+                                   : review.status === 'manual-review' ? <div className="text-amber-700 dark:text-amber-300">{review.teacherReview?.reviewedAt ? <p>Teacher reviewed this response{review.teacherReview.points != null ? ` · awarded ${review.teacherReview.points}/${review.points} points` : ''}.</p> : <p>Awaiting teacher review; excluded from the automatic score.</p>}</div>
+                                     : review.status === 'ungraded' ? <p>This response is ungraded practice.</p>
+                                       : <p>Unanswered.</p>}
+                                 {review.explanation && <p className="mt-1">{review.explanation}</p>}
+                               </div>
+                               <StudentTeacherFeedbackNotes result={result} review={review} onReply={onReplyTeacherComment} />
+                             </div>
                            </div>)}</div>
                          </details>}
                        </div>
@@ -3863,6 +3988,30 @@ export default function App() {
     }
   };
 
+  const saveTeacherFeedbackReply = async (result: any, review: any, annotation: any, body: string) => {
+    if (!user || user.role !== 'student' || !result.attemptId || !review.questionId || !annotation.id) {
+      throw new Error('This feedback thread is unavailable.');
+    }
+    const reply = {
+      id: crypto.randomUUID(),
+      questionId: review.questionId,
+      annotationId: annotation.id,
+      studentUid: user.uid,
+      body: body.trim().slice(0, 1000),
+      createdAt: new Date().toISOString(),
+      createdAtMs: Date.now()
+    };
+    if (!reply.body) throw new Error('A reply cannot be empty.');
+
+    const centralId = `${user.uid}_${result.attemptId}`;
+    const centralSubmissionRef = doc(db, 'artifacts', appId, 'public', 'data', 'submissions', centralId);
+    const studentResultRef = doc(db, 'artifacts', appId, 'users', user.uid, 'results', result.attemptId);
+    const batch = writeBatch(db);
+    batch.update(centralSubmissionRef, { teacherFeedbackReplies: arrayUnion(reply) });
+    batch.update(studentResultRef, { teacherFeedbackReplies: arrayUnion(reply) });
+    await batch.commit();
+  };
+
   const saveTeacherReview = async (submissionId: string, questionId: string, reviewData: { feedback: string; points: number | null; annotations?: Array<{ id: string; quote: string; comment: string; start: number; end: number }> }) => {
     const submissionRef = doc(db, 'artifacts', appId, 'public', 'data', 'submissions', submissionId);
     const snapshot = await getDoc(submissionRef);
@@ -4153,7 +4302,7 @@ export default function App() {
 
       {currentView === 'login' && <LoginScreen onAuthAction={handleAuthAction} />}
       {currentView === 'teacher_dashboard' && <TeacherDashboard user={user} tests={tests} resources={writingResources} resourceError={writingResourcesError} onSaveResource={saveWritingResource} onDeleteResource={deleteWritingResource} submissions={submissions} submissionsLoading={submissionsLoading} submissionsError={submissionsError} onSaveReview={saveTeacherReview} onBackfillLegacy={backfillLegacySubmissions} onSecureAnswerKeys={secureExistingAnswerKeys} onLogout={handleLogout} />}
-      {currentView === 'student_dashboard' && <StudentDashboard user={user} tests={tests} results={results} writingResources={writingResources} writingResourcesError={writingResourcesError} onStartTest={startTest} onSaveGroupCode={saveStudentGroupCode} onLogout={handleLogout} />}
+      {currentView === 'student_dashboard' && <StudentDashboard user={user} tests={tests} results={results} writingResources={writingResources} writingResourcesError={writingResourcesError} onStartTest={startTest} onSaveGroupCode={saveStudentGroupCode} onReplyTeacherComment={saveTeacherFeedbackReply} onLogout={handleLogout} />}
       {currentView === 'exam' && activeTest && user && <ExamInterface key={`${user.uid}:${activeTest.id}`} test={activeTest} userId={user.uid} writingResources={writingResources} writingResourcesError={writingResourcesError} isDark={isDark} onToggleTheme={() => setIsDark(previous => !previous)} onComplete={completeTest} />}
 
       <Modal isOpen={modalInfo.isOpen} title={modalInfo.title} onClose={() => setModalInfo(prev => ({ ...prev, isOpen: false }))}>

@@ -1,6 +1,20 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { gradeQuestion, normalizeQuestion, resolveResponseType, validateQuestion } from '../src/questionEngine.ts';
+import { gradeQuestion, normalizeQuestion, resolveResponseType, responseTypeForQuestionType, validateQuestion } from '../src/questionEngine.ts';
+
+test('maps teacher-selected IELTS formats to the matching student response form', () => {
+  assert.equal(responseTypeForQuestionType('multiple-choice'), 'single-choice');
+  assert.equal(responseTypeForQuestionType('multiple-select'), 'multiple-select');
+  assert.equal(responseTypeForQuestionType('ordering'), 'ordering');
+  assert.equal(responseTypeForQuestionType('true-false-not-given'), 'single-choice');
+  assert.equal(responseTypeForQuestionType('matching-headings'), 'matching');
+  assert.equal(responseTypeForQuestionType('sentence-endings'), 'matching');
+  assert.equal(responseTypeForQuestionType('completion'), 'multi-blank');
+  assert.equal(responseTypeForQuestionType('map-labeling'), 'multi-blank');
+  assert.equal(responseTypeForQuestionType('sat-student-produced-response'), 'numeric');
+  assert.equal(responseTypeForQuestionType('writing-task'), 'long-text');
+  assert.equal(responseTypeForQuestionType('short-answer'), 'short-text');
+});
 
 test('normalizes legacy NUET MCQ and IELTS TFNG records without migrating storage', () => {
   const legacy = { id: 'legacy', type: 'mcq', text: 'Pick one', options: ['A', 'B'], correctAnswer: 'B' };
