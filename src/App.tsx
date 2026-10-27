@@ -2515,7 +2515,7 @@ const ReadingPracticeWorkspace = ({ test, userId, questions, answers, currentInd
   );
 };
 
-const ExamInterface = ({ test, onComplete, userId, writingResources, writingResourcesError }) => {
+const ExamInterface = ({ test, onComplete, userId, writingResources, writingResourcesError, isDark, onToggleTheme }) => {
   const questions = Array.isArray(test?.questions) ? test.questions : [];
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, unknown>>({});
@@ -2689,6 +2689,15 @@ const ExamInterface = ({ test, onComplete, userId, writingResources, writingReso
           <h2 className="text-xl font-bold text-slate-800 dark:text-white">{test?.title || 'Practice exam'}</h2>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={onToggleTheme}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-800 shadow-sm transition-colors hover:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600"
+            aria-label={`Switch to ${isDark ? 'light' : 'dark'} mode`}
+            title={`Switch to ${isDark ? 'light' : 'dark'} mode`}
+          >
+            {isDark ? <Sun className="h-5 w-5" aria-hidden="true" /> : <Moon className="h-5 w-5" aria-hidden="true" />}
+          </button>
           {hasTimeLimit ? (
             <span
               role="timer"
@@ -3950,18 +3959,21 @@ export default function App() {
 
   return (
     <>
-      <button 
-        onClick={() => setIsDark(!isDark)} 
-        className="fixed bottom-24 sm:bottom-6 right-6 p-4 rounded-full bg-slate-800 dark:bg-white text-white dark:text-slate-800 shadow-xl z-50 hover:scale-110 transition-transform flex items-center justify-center"
-        title="Toggle Dark Mode"
-      >
-        {isDark ? <Sun className="w-6 h-6"/> : <Moon className="w-6 h-6" />}
-      </button>
+      {currentView === 'exam' ? null : (
+        <button
+          onClick={() => setIsDark(!isDark)}
+          className="fixed bottom-24 sm:bottom-6 right-6 p-4 rounded-full bg-slate-800 dark:bg-white text-white dark:text-slate-800 shadow-xl z-50 hover:scale-110 transition-transform flex items-center justify-center"
+          title="Toggle Dark Mode"
+          aria-label={`Switch to ${isDark ? 'light' : 'dark'} mode`}
+        >
+          {isDark ? <Sun className="w-6 h-6"/> : <Moon className="w-6 h-6" />}
+        </button>
+      )}
 
       {currentView === 'login' && <LoginScreen onAuthAction={handleAuthAction} />}
       {currentView === 'teacher_dashboard' && <TeacherDashboard user={user} tests={tests} resources={writingResources} resourceError={writingResourcesError} onSaveResource={saveWritingResource} onDeleteResource={deleteWritingResource} submissions={submissions} submissionsLoading={submissionsLoading} submissionsError={submissionsError} onSaveReview={saveTeacherReview} onBackfillLegacy={backfillLegacySubmissions} onSecureAnswerKeys={secureExistingAnswerKeys} onLogout={handleLogout} />}
       {currentView === 'student_dashboard' && <StudentDashboard user={user} tests={tests} results={results} writingResources={writingResources} writingResourcesError={writingResourcesError} onStartTest={startTest} onSaveGroupCode={saveStudentGroupCode} onLogout={handleLogout} />}
-      {currentView === 'exam' && activeTest && user && <ExamInterface key={`${user.uid}:${activeTest.id}`} test={activeTest} userId={user.uid} writingResources={writingResources} writingResourcesError={writingResourcesError} onComplete={completeTest} />}
+      {currentView === 'exam' && activeTest && user && <ExamInterface key={`${user.uid}:${activeTest.id}`} test={activeTest} userId={user.uid} writingResources={writingResources} writingResourcesError={writingResourcesError} isDark={isDark} onToggleTheme={() => setIsDark(previous => !previous)} onComplete={completeTest} />}
 
       <Modal isOpen={modalInfo.isOpen} title={modalInfo.title} onClose={() => setModalInfo(prev => ({ ...prev, isOpen: false }))}>
         <p className="whitespace-pre-wrap text-left">{modalInfo.message}</p>

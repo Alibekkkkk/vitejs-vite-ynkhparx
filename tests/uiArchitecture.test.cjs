@@ -39,7 +39,7 @@ test('reading practice retains a one-passage pane with independent scroll positi
 });
 
 test('assigned writing exams show the matching published resource beside the writing response', () => {
-  assert.match(app, /writingResources=\{writingResources\} writingResourcesError=\{writingResourcesError\} onComplete=\{completeTest\}/);
+  assert.match(app, /writingResources=\{writingResources\} writingResourcesError=\{writingResourcesError\}[\s\S]*?onComplete=\{completeTest\}/);
   assert.match(app, /isWritingQuestion \? <ResizableSplitPane/);
   assert.match(app, /leftLabel="Writing task and response"[\s\S]*?rightLabel="Vocabulary resource"/);
   assert.match(app, /<WritingResourceTable[\s\S]*?assessmentId=\{test\?\.practiceSourceTestId \|\| test\?\.id\}[\s\S]*?questionId=\{currentQuestion\.id\}/);
@@ -58,4 +58,10 @@ test('teacher question editor offers safe bold, italic, and underline formatting
   assert.match(questionTextEditor, /label: 'Underline', marker: '\+\+'/);
   assert.match(app, /<FormattedQuestionText text=\{currentQuestion\.text \|\| 'Question prompt'\}/);
   assert.match(app, /<FormattedQuestionText text=\{selectedPrompt\.question\.text\}/);
+});
+
+test('exam theme control is in the header and the floating toggle is hidden during exams', () => {
+  assert.match(app, /className="exam-interface__header[\s\S]*?aria-label=\{`Switch to \$\{isDark \? 'light' : 'dark'\} mode`\}/);
+  assert.match(app, /\{currentView === 'exam' \? null : \([\s\S]*?className="fixed bottom-24 sm:bottom-6 right-6/);
+  assert.match(app, /onToggleTheme=\{\(\) => setIsDark\(previous => !previous\)\}/);
 });
