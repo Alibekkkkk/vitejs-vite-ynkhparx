@@ -7,6 +7,7 @@ const root = join(__dirname, '..');
 const globalStyles = readFileSync(join(root, 'src', 'index.css'), 'utf8');
 const splitPane = readFileSync(join(root, 'src', 'ResizableSplitPane.tsx'), 'utf8');
 const app = readFileSync(join(root, 'src', 'App.tsx'), 'utf8');
+const questionTextEditor = readFileSync(join(root, 'src', 'QuestionTextEditor.tsx'), 'utf8');
 
 test('form-control theme rules explicitly style light/dark text, focus, disabled, errors, autofill, and selects', () => {
   for (const token of ['background-color', 'color:', 'border-color', 'caret-color', '::placeholder', ':focus-visible', ':disabled', '[aria-invalid="true"]', ':-webkit-autofill', 'select option', '::selection']) {
@@ -48,4 +49,13 @@ test('assigned writing exams show the matching published resource beside the wri
   assert.match(app, /workspaceKey=\{`exam-writing-v2:[\s\S]*?defaultLeftPercent=\{50\}/);
   assert.match(globalStyles, /\.exam-interface--writing[\s\S]*?width: 100%;[\s\S]*?height: 100vh;[\s\S]*?overflow: hidden/);
   assert.match(globalStyles, /\.exam-interface--writing \.exam-writing-workspace > \.split-pane__panel[\s\S]*?height: 100%;[\s\S]*?overflow: auto/);
+});
+
+test('teacher question editor offers safe bold, italic, and underline formatting', () => {
+  assert.match(app, /<QuestionTextEditor value=\{q\.text \|\| ''\}/);
+  assert.match(questionTextEditor, /label: 'Bold', marker: '\*\*'/);
+  assert.match(questionTextEditor, /label: 'Italic', marker: '\*'/);
+  assert.match(questionTextEditor, /label: 'Underline', marker: '\+\+'/);
+  assert.match(app, /<FormattedQuestionText text=\{currentQuestion\.text \|\| 'Question prompt'\}/);
+  assert.match(app, /<FormattedQuestionText text=\{selectedPrompt\.question\.text\}/);
 });

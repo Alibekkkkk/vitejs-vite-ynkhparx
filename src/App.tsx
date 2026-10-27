@@ -34,6 +34,9 @@ import {
 } from './questionEngine';
 import { parseQuestionBank } from './questionBank';
 import { getLocalWritingSuggestions } from './writingSuggestions';
+import { FormattedQuestionText } from './FormattedQuestionText';
+import { QuestionTextEditor } from './QuestionTextEditor';
+import { stripQuestionTextFormatting } from './questionTextFormatting';
 import { PromptFigure } from './PromptFigure';
 import { ResizableSplitPane } from './ResizableSplitPane';
 import { WritingResourceTable } from './WritingResourceTable';
@@ -1558,7 +1561,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                 {imported.length > 0 && <p className="mt-2 text-xs text-blue-700 dark:text-blue-300">Already imported: {imported.map((item: any) => item.title).join(', ')}</p>}
                 <input id={`sample-bank-${file}`} type="file" accept="application/json,.json" className="hidden" onChange={event => loadSampleBankFile(event, file)} />
                 <div className="flex flex-wrap gap-2 mt-3"><button onClick={() => document.getElementById(`sample-bank-${file}`)?.click()} className="px-3 py-2 rounded border dark:border-slate-600">{bank ? 'Choose another file' : 'Choose JSON and preview'}</button><button disabled={!bank} onClick={() => bank && importSampleAsDraft(bank, file)} className="px-3 py-2 rounded bg-purple-600 text-white disabled:opacity-50">Import as draft</button></div>
-                {bank && selectedSample?.file === file && <div className="mt-4 space-y-3 max-h-[36rem] overflow-y-auto"><h3 className="font-semibold">Preview: {bank.title}</h3>{(bank.questions || []).map((question: any, index: number) => <div key={question.id || index} className="p-3 rounded-lg border dark:border-slate-600"><p className="font-medium">{index + 1}. {question.text}</p><QuestionResponse question={question} value={undefined} onChange={() => {}} preview /><p className="text-xs text-slate-500 mt-2">{question.section || question.satDomain || 'Practice'} · {resolveResponseType(question)}</p></div>)}</div>}
+                {bank && selectedSample?.file === file && <div className="mt-4 space-y-3 max-h-[36rem] overflow-y-auto"><h3 className="font-semibold">Preview: {bank.title}</h3>{(bank.questions || []).map((question: any, index: number) => <div key={question.id || index} className="p-3 rounded-lg border dark:border-slate-600"><p className="font-medium">{index + 1}. <FormattedQuestionText text={question.text || ''} /></p><QuestionResponse question={question} value={undefined} onChange={() => {}} preview /><p className="text-xs text-slate-500 mt-2">{question.section || question.satDomain || 'Practice'} · {resolveResponseType(question)}</p></div>)}</div>}
               </article>;
             })}</div>
           </section>
@@ -1787,7 +1790,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                           </div>
                        </div>
                        
-                       <textarea value={q.text} onChange={e => handleUpdateQuestion(qIndex, 'text', e.target.value)} placeholder="Type the question text here..." rows={2} className="w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white mb-3 outline-none"></textarea>
+                       <QuestionTextEditor value={q.text || ''} onChange={value => handleUpdateQuestion(qIndex, 'text', value)} />
 
                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
                          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Question format
@@ -1954,7 +1957,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                          )}
                        </div>
 
-                        {previewQuestionId === q.id && <div className="mb-4 rounded-lg border border-blue-300 bg-white p-4 dark:bg-slate-800"><p className="font-medium mb-3">Student preview: {q.text || 'Question prompt'}</p><PromptFigure question={q} assessmentId={editingId || newTest.id || 'draft'} teacherFacing /><QuestionResponse question={q} value={undefined} onChange={() => {}} preview /></div>}
+                        {previewQuestionId === q.id && <div className="mb-4 rounded-lg border border-blue-300 bg-white p-4 dark:bg-slate-800"><p className="font-medium mb-3">Student preview: <FormattedQuestionText text={q.text || 'Question prompt'} /></p><PromptFigure question={q} assessmentId={editingId || newTest.id || 'draft'} teacherFacing /><QuestionResponse question={q} value={undefined} onChange={() => {}} preview /></div>}
                         {(validationErrors[q.id] || []).map(message => <p key={message} className="mb-2 text-sm text-red-600" role="alert">{message}</p>)}
                         {resolveResponseType(q) === 'single-choice' && q.type === 'mcq' && (
                          <div className="space-y-2 ml-4 border-l-2 border-slate-200 dark:border-slate-600 pl-4 text-left">
@@ -2120,7 +2123,7 @@ const WritingPractice = ({ tests, resources, resourceError, userId, onBack }) =>
       setAiError('For privacy and request limits, shorten your draft to 5,000 characters before requesting feedback.');
       return;
     }
-    const promptText = String(selectedPrompt.question.text || '').slice(0, 1500);
+    const promptText = stripQuestionTextFormatting(String(selectedPrompt.question.text || '')).slice(0, 1500);
     const figureSource = getFigureSource(selectedPrompt.question);
     const figureVersion = selectedPrompt.question.imageAsset?.assetVersion || '';
     const visualText = figureSource
@@ -2294,10 +2297,10 @@ const WritingPractice = ({ tests, resources, resourceError, userId, onBack }) =>
             <div className="p-5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Prompt
                 <select value={selectedPromptId || selectedPrompt.id} onChange={event => { setSelectedPromptId(event.target.value); setDraft(loadDraft(event.target.value)); setDraftRevision(previous => previous + 1); setAiMessage(''); setAiPhraseOptions([]); setAiInlineSuggestion(''); setAiFigureIncluded(false); setAiError(''); }} className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white">
-                  {prompts.map(prompt => <option key={prompt.id} value={prompt.id}>{prompt.test.title}: {prompt.question.text.slice(0, 90)}</option>)}
+                  {prompts.map(prompt => <option key={prompt.id} value={prompt.id}>{prompt.test.title}: {stripQuestionTextFormatting(prompt.question.text || '').slice(0, 90)}</option>)}
                 </select>
               </label>
-              <p className="mt-4 whitespace-pre-wrap text-slate-800 dark:text-slate-100">{selectedPrompt.question.text}</p>
+              <p className="mt-4 whitespace-pre-wrap text-slate-800 dark:text-slate-100"><FormattedQuestionText text={selectedPrompt.question.text} /></p>
               <PromptFigure question={selectedPrompt.question} assessmentId={selectedPrompt.test.id} />
               <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">Suggested practice length: {taskType === 1 ? 'about 150 words' : 'about 250 words'}. This is guidance, not scoring. {taskType === 1 ? 'Describe the visual accurately; do not add an opinion.' : 'Answer the full essay question and support your position.'}</p>
             </div>
@@ -2493,7 +2496,7 @@ const ReadingPracticeWorkspace = ({ test, userId, questions, answers, currentInd
             <div ref={questionPaneRef} onScroll={event => { questionScroll.current[String(activePassageNumber)] = event.currentTarget.scrollTop; }} className="reading-workspace__scroll space-y-4 rounded-lg border bg-white p-5 dark:border-slate-600 dark:bg-slate-800">
               <div>
                 <p className="text-sm text-blue-700 dark:text-blue-300">{IELTS_QUESTION_FORMATS.find(item => item[0] === currentQuestion.questionType)?.[1] || currentQuestion.questionType || 'Reading question'} · Question {currentIndex + 1} of {questions.length}</p>
-                <p className="mt-2 whitespace-pre-wrap font-medium text-slate-800 dark:text-slate-100">{currentQuestion.text || 'Question prompt'}</p>
+                <p className="mt-2 whitespace-pre-wrap font-medium text-slate-800 dark:text-slate-100"><FormattedQuestionText text={currentQuestion.text || 'Question prompt'} /></p>
                 <PromptFigure question={currentQuestion} assessmentId={test?.practiceSourceTestId || test?.id || 'unknown'} />
               </div>
               {renderAnswerInput()}
@@ -2727,7 +2730,7 @@ const ExamInterface = ({ test, onComplete, userId, writingResources, writingReso
         maxLeftPercent={65}
         left={<div className="space-y-5">
           <div className="rounded-lg bg-slate-50 p-4 dark:bg-slate-700/50">
-            <p className="whitespace-pre-wrap text-base font-medium text-slate-800 dark:text-slate-100">{currentQuestion.text || 'Question prompt'}</p>
+            <p className="whitespace-pre-wrap text-base font-medium text-slate-800 dark:text-slate-100"><FormattedQuestionText text={currentQuestion.text || 'Question prompt'} /></p>
             <PromptFigure question={currentQuestion} assessmentId={test?.id || 'unknown'} />
           </div>
           {renderAnswerInput()}
@@ -2744,7 +2747,7 @@ const ExamInterface = ({ test, onComplete, userId, writingResources, writingReso
         </aside>}
       /> : <div className="space-y-5">
         <div className="rounded-lg bg-slate-50 p-4 dark:bg-slate-700/50">
-          <p className="whitespace-pre-wrap text-base font-medium text-slate-800 dark:text-slate-100">{currentQuestion.text || 'Question prompt'}</p>
+          <p className="whitespace-pre-wrap text-base font-medium text-slate-800 dark:text-slate-100"><FormattedQuestionText text={currentQuestion.text || 'Question prompt'} /></p>
           <PromptFigure question={currentQuestion} assessmentId={test?.id || 'unknown'} />
         </div>
 
