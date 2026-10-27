@@ -1,3 +1,5 @@
+import type { GenerativeContentBlob } from 'firebase/ai';
+
 export type FigureAsset = {
   storagePath: string;
   downloadUrl: string;
@@ -91,7 +93,67 @@ export function verifyFigureUrl(url: string): Promise<void> {
 export function getFigureSource(question: Record<string, any> | null | undefined): string {
   const assetUrl = question?.imageAsset?.downloadUrl;
   const legacyUrl = question?.imageUrl;
-  return normalizeFigureUrl(typeof assetUrl === 'string' && assetUrl ? assetUrl : typeof legacyUrl === 'string' ? legacyUrl : '');
+  return normalizeFigureUrl(typeof assetUrl === 'string' ? assetUrl : '')
+    || normalizeFigureUrl(typeof legacyUrl === 'string' ? legacyUrl : '');
+}
+
+export async function fetchFigureForAI(source: string): Promise<GenerativeContentBlob> {
+  const url = normalizeFigureUrl(source);
+  if (!url) throw new Error('This prompt figure does not have a valid HTTPS image URL.');
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      credentials: 'omit',
+      referrerPolicy: 'no-referrer',
+    });
+    if (!response.ok) throw new Error(`The prompt figure could not be loaded (HTTP ${response.status}).`);
+    const declaredSize = Number(response.headers.get('content-length') || 0);
+    if (declaredSize > MAX_FIGURE_BYTES) throw new Error('The prompt figure is larger than the 5 MB AI upload limit.');
+
+    const mimeType = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+    if (!ALLOWED_IMAGE_TYPES.has(mimeType)) throw new Error('AI figure suggestions support PNG, JPEG, or WebP images only.');
+
+    if (!response.body) throw new Error('This browser could not read the prompt figure for AI.');
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let totalSize = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalSize += value.byteLength;
+      if (totalSize > MAX_FIGURE_BYTES) {
+        await reader.cancel();
+        throw new Error('The prompt figure is larger than the 5 MB AI upload limit.');
+      }
+      chunks.push(value);
+    }
+    if (totalSize === 0) throw new Error('The prompt figure downloaded empty.');
+    const bytes = new Uint8Array(totalSize);
+    let byteOffset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, byteOffset);
+      byteOffset += chunk.byteLength;
+    }
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length)));
+    }
+    return { mimeType, data: btoa(binary) };
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error('Loading the prompt figure for AI timed out. Check the image URL and try again.');
+    }
+    if (error instanceof TypeError) {
+      throw new Error('The prompt figure could not be read from this website. Check its image URL and cross-origin access, then try again.');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export function requiresTaskFigure(question: Record<string, any> | null | undefined): boolean {

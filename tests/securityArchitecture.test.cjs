@@ -48,7 +48,14 @@ test('IELTS writing suggestions are visible locally and can be accepted or dismi
   assert.match(appSource, /event\.key === 'Tab' && localSuggestions\[0\] && !localSuggestionDismissed/);
   assert.match(appSource, /insertPhrase\(localSuggestions\[0\]\.phrase\)/);
   assert.match(appSource, /event\.key === 'Escape' && localSuggestions\[0\] && !localSuggestionDismissed/);
-  assert.match(appSource, /Optional local suggestion:[\s\S]*?Press Tab to insert it at your cursor, or Escape to dismiss/);
+  assert.match(appSource, /event\.key === 'Escape' && aiInlineSuggestion/);
+  assert.match(appSource, /Offline suggestion:[\s\S]*?Press Tab to insert it when no AI suggestion is showing/);
+  assert.match(appSource, /requestCoach\('inline'\)/);
+  assert.match(appSource, /AI next-sentence suggestion/);
+  assert.match(appSource, /requestParts\.push\(\{ inlineData: figureData \}\)/);
+  assert.match(appSource, /writingCoachConsent:v2/);
+  assert.match(appSource, /Task 1 coaching must be a factual visual report/);
+  assert.match(appSource, /Task 2 coaching must address every part of the essay question/);
 });
 
 test('exam completion requires an in-app confirmation before submission', () => {
@@ -71,6 +78,14 @@ test('student dashboard distinguishes assigned assessments from coached practice
   assert.match(appSource, /Practice is self-directed skill work/);
   assert.match(appSource, /AI coaching is not available during assigned tasks/);
   assert.match(appSource, /Local suggestions are always available, including offline/);
+});
+
+test('teacher assessments separate archived items and allow restoring them as drafts', () => {
+  assert.match(appSource, /Active assessments/);
+  assert.match(appSource, /'archived', 'Archived'/);
+  assert.match(appSource, /tests\.filter\(test => assessmentView === 'archived' \? test\.status === 'archived' : test\.status !== 'archived'\)/);
+  assert.match(appSource, /Return archived assessment to drafts/);
+  assert.match(appSource, /status: 'draft', updatedAt/);
 });
 
 test('combined SAT records both source assessments and checks student access to the second section', () => {

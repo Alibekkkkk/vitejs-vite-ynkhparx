@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "test:question-engine": "node --experimental-strip-types --test tests/questionEngine.test.ts tests/questionBank.test.ts tests/functionGrading.test.cjs tests/securityArchitecture.test.cjs",
+    "test:question-engine": "node --experimental-strip-types --test tests/questionEngine.test.ts tests/questionBank.test.ts tests/figureAssets.test.ts tests/functionGrading.test.cjs tests/securityArchitecture.test.cjs",
     "validate:banks": "node --experimental-strip-types scripts/validate-sample-banks.mjs",
     "preview": "vite preview"
   },

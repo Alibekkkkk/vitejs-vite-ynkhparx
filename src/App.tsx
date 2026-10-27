@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Clock, BookOpen, FileText, CheckCircle, LogOut, User, Play,
-  ArrowRight, LayoutDashboard, History, Check, Plus, Trash2, Edit3, Users, 
-  Lock, Image as ImageIcon, Sun, Moon, X, Copy
+  ArrowRight, LayoutDashboard, History, Check, Plus, Edit3, Users,
+  Lock, Image as ImageIcon, Sun, Moon, X, Copy, Archive, RotateCcw
 } from 'lucide-react';
 
 import { initializeApp } from "firebase/app";
-import { getAI, getGenerativeModel, GoogleAIBackend } from 'firebase/ai';
-import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check';
+import { getAI, getGenerativeModel, GoogleAIBackend, type Part } from 'firebase/ai';
+import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check';
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { 
   getAuth, 
@@ -36,6 +36,8 @@ import { parseQuestionBank } from './questionBank';
 import { getLocalWritingSuggestions } from './writingSuggestions';
 import { PromptFigure } from './PromptFigure';
 import {
+  fetchFigureForAI,
+  getFigureSource,
   normalizeFigureUrl,
   readFigureDimensions,
   requiresTaskFigure,
@@ -56,13 +58,13 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-const appCheckSiteKey = import.meta.env.VITE_RECAPTCHA_V3_SITE_KEY || '';
+const appCheckSiteKey = import.meta.env.VITE_RECAPTCHA_ENTERPRISE_SITE_KEY || '';
 if (import.meta.env.DEV && import.meta.env.VITE_FIREBASE_APPCHECK_DEBUG_TOKEN === 'true') {
   (self as typeof self & { FIREBASE_APPCHECK_DEBUG_TOKEN: boolean }).FIREBASE_APPCHECK_DEBUG_TOKEN = true;
 }
 if (appCheckSiteKey) {
   initializeAppCheck(app, {
-    provider: new ReCaptchaV3Provider(appCheckSiteKey),
+    provider: new ReCaptchaEnterpriseProvider(appCheckSiteKey),
     isTokenAutoRefreshEnabled: true,
   });
 }
@@ -673,6 +675,7 @@ const TeacherReviewFields = ({ attempt, review, onSaveReview }) => {
 
 const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submissionsError, onSaveReview, onBackfillLegacy, onSecureAnswerKeys, onLogout }) => {
   const [teacherArea, setTeacherArea] = useState<'assessments' | 'results' | 'samples'>('assessments');
+  const [assessmentView, setAssessmentView] = useState<'active' | 'archived'>('active');
   const [resultSearch, setResultSearch] = useState('');
   const [resultGroup, setResultGroup] = useState('');
   const [resultAssessment, setResultAssessment] = useState('');
@@ -1273,6 +1276,16 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
     }
   };
 
+  const restoreArchivedTest = async (test: any) => {
+    const confirmed = await showConfirmDialog('Return archived assessment to drafts?', `Move “${test.title}” back to your active assessments as an unpublished draft? Students will not see it until you publish it again. Historical results will be kept.`, 'Return to drafts', false);
+    if (!confirmed) return;
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tests', test.id), { groupCode: '', published: false, status: 'draft', updatedAt: new Date().toISOString() });
+    } catch (error) {
+      await showAlertDialog('Could not restore assessment', error instanceof Error ? error.message : 'Could not return this assessment to drafts.');
+    }
+  };
+
   const handleEditTest = (test) => {
     const defaults = createEmptyTest();
     const oldListening = test.sections?.listening || {};
@@ -1418,8 +1431,28 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
               </button>
             </div>
 
+            <div className="flex gap-2 mb-6" role="tablist" aria-label="Assessment status">
+              {([
+                ['active', 'Active assessments', tests.filter(test => test.status !== 'archived').length],
+                ['archived', 'Archived', tests.filter(test => test.status === 'archived').length],
+              ] as const).map(([view, label, count]) => (
+                <button
+                  key={view}
+                  role="tab"
+                  aria-selected={assessmentView === view}
+                  onClick={() => setAssessmentView(view)}
+                  className={`rounded-lg border px-4 py-2 text-sm font-semibold ${assessmentView === view ? 'border-purple-600 bg-purple-600 text-white' : 'border-slate-300 bg-white text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200'}`}
+                >
+                  {label} <span className="ml-1 opacity-80">({count})</span>
+                </button>
+              ))}
+            </div>
+
+            {(() => {
+              const shownTests = tests.filter(test => assessmentView === 'archived' ? test.status === 'archived' : test.status !== 'archived');
+              return shownTests.length ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 text-left">
-              {tests.map(test => (
+              {shownTests.map(test => (
                 <div key={test.id} className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 flex flex-col transition-colors">
                   <div className="flex justify-between items-start mb-4">
                     <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${getStatusColor(test.category)}`}>
@@ -1428,15 +1461,23 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
                     <div className="flex items-center gap-2">
                       {test.pin && <Lock className="w-4 h-4 text-amber-500" aria-label="PIN protected" />}
                       {test.groupCode && <button onClick={() => unpublishTest(test)} className="text-xs px-2 py-1 rounded border border-amber-300 text-amber-700 dark:text-amber-300" title="Hide from students and preserve all results">Unpublish</button>}
-                      <button onClick={() => duplicateTest(test)} className="text-slate-400 dark:text-slate-500 hover:text-purple-500 ml-2" title="Duplicate Assessment">
-                        <Copy className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => handleEditTest(test)} className="text-slate-400 dark:text-slate-500 hover:text-blue-500 ml-2" title="Edit Assessment">
-                        <Edit3 className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => archiveTest(test.id)} className="text-slate-400 dark:text-slate-500 hover:text-red-500 ml-2" title="Archive assessment; preserve results">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {assessmentView === 'archived' ? (
+                        <button onClick={() => restoreArchivedTest(test)} className="ml-2 text-slate-400 hover:text-emerald-600 dark:text-slate-500" title="Return assessment to active drafts" aria-label={`Restore ${test.title} to drafts`}>
+                          <RotateCcw className="w-4 h-4" />
+                        </button>
+                      ) : (
+                        <>
+                          <button onClick={() => duplicateTest(test)} className="ml-2 text-slate-400 hover:text-purple-500 dark:text-slate-500" title="Duplicate assessment" aria-label={`Duplicate ${test.title}`}>
+                            <Copy className="w-4 h-4" />
+                          </button>
+                          <button onClick={() => handleEditTest(test)} className="ml-2 text-slate-400 hover:text-blue-500 dark:text-slate-500" title="Edit assessment" aria-label={`Edit ${test.title}`}>
+                            <Edit3 className="w-4 h-4" />
+                          </button>
+                          <button onClick={() => archiveTest(test.id)} className="ml-2 text-slate-400 hover:text-amber-600 dark:text-slate-500" title="Move to archive; preserve results" aria-label={`Archive ${test.title}`}>
+                            <Archive className="w-4 h-4" />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                   <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2">{test.title}</h3>
@@ -1448,14 +1489,15 @@ const TeacherDashboard = ({ user, tests, submissions, submissionsLoading, submis
                   </div>
                 </div>
               ))}
-              {tests.length === 0 && (
-                <div className="col-span-full py-12 text-center border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-800">
-                  <Edit3 className="w-12 h-12 text-slate-400 mx-auto mb-3" />
-                  <p className="text-slate-600 dark:text-slate-300 font-medium">No assessments created yet.</p>
-                  <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">Click the button above to create your first test.</p>
-                </div>
-              )}
             </div>
+              ) : (
+                <div className="py-12 text-center border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-800">
+                  <Archive className="mx-auto mb-3 h-12 w-12 text-slate-400" />
+                  <p className="font-medium text-slate-700 dark:text-slate-200">{assessmentView === 'archived' ? 'No archived assessments.' : 'No active assessments yet.'}</p>
+                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{assessmentView === 'archived' ? 'Archived items will appear here and stay hidden from students.' : 'Create an assessment or restore one from the archive.'}</p>
+                </div>
+              );
+            })()}
           </div>
         ) : (
           <div className="max-w-4xl mx-auto bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 md:p-8 transition-colors text-left">
@@ -1824,12 +1866,17 @@ const WritingPractice = ({ tests, userId, onBack }) => {
   const [aiBusy, setAiBusy] = useState(false);
   const [aiMessage, setAiMessage] = useState('');
   const [aiPhraseOptions, setAiPhraseOptions] = useState<string[]>([]);
+  const [aiInlineSuggestion, setAiInlineSuggestion] = useState('');
+  const [aiFigureIncluded, setAiFigureIncluded] = useState(false);
   const [aiError, setAiError] = useState('');
   const [localSuggestionDismissed, setLocalSuggestionDismissed] = useState(false);
+  const [draftRevision, setDraftRevision] = useState(0);
   const [confirmDialog, setConfirmDialog] = useState<null | { title: string; message: string; onConfirm: () => void; onCancel: () => void; }>(null);
   const textareaRef = React.useRef(null);
   const responseCache = React.useRef(new Map());
   const aiUsage = React.useRef({ date: '', count: 0, lastRequest: 0 });
+  const autoSuggestionTimer = React.useRef<number | null>(null);
+  const lastAutoSuggestionAt = React.useRef(0);
 
   const prompts = tests.flatMap(test => (test.questions || [])
     .filter(question => question.section === 'writing' && Number(question.writingTaskType || 2) === taskType)
@@ -1852,7 +1899,10 @@ const WritingPractice = ({ tests, userId, onBack }) => {
     setTimerRunning(false);
     setAiMessage('');
     setAiPhraseOptions([]);
+    setAiInlineSuggestion('');
+    setAiFigureIncluded(false);
     setAiError('');
+    setDraftRevision(0);
   }, [taskType]);
 
   useEffect(() => {
@@ -1909,38 +1959,48 @@ const WritingPractice = ({ tests, userId, onBack }) => {
     setConfirmDialog({ title, message, onConfirm: () => { setConfirmDialog(null); resolve(true); }, onCancel: () => { setConfirmDialog(null); resolve(false); } });
   });
 
-  const requestCoach = async (kind: 'hint' | 'feedback' | 'final' | 'phrases') => {
+  const requestCoach = async (kind: 'hint' | 'feedback' | 'final' | 'phrases' | 'inline') => {
     if (!selectedPrompt || !draft.trim() || aiBusy) return;
     if (draft.length > 5000) {
       setAiError('For privacy and request limits, shorten your draft to 5,000 characters before requesting feedback.');
       return;
     }
     const promptText = String(selectedPrompt.question.text || '').slice(0, 1500);
-    const cacheKey = `${kind}:${taskType}:${selectedPrompt.id}:${promptText}:${draft.trim()}`;
+    const figureSource = getFigureSource(selectedPrompt.question);
+    const figureVersion = selectedPrompt.question.imageAsset?.assetVersion || '';
+    const visualText = figureSource
+      ? `VISUAL CONTEXT:\nTitle: ${selectedPrompt.question.figureCaption || selectedPrompt.question.imageAlt || 'Prompt image'}\nCaption: ${selectedPrompt.question.figureCaption || ''}\nAlt text: ${selectedPrompt.question.imageAlt || ''}\nDescription: ${selectedPrompt.question.figureDescription || selectedPrompt.question.text || ''}`
+      : 'VISUAL CONTEXT:\nNo uploaded figure is associated with this task.';
+    const cacheKey = `${kind}:${taskType}:${selectedPrompt.id}:${promptText}:${figureSource}:${figureVersion}:${visualText}:${draft.trim()}`;
     if (responseCache.current.has(cacheKey)) {
       const cachedMessage = responseCache.current.get(cacheKey);
       if (kind === 'phrases') {
         setAiPhraseOptions(parsePhraseOptions(cachedMessage));
         setAiMessage('');
+      } else if (kind === 'inline') {
+        setAiInlineSuggestion(parsePhraseOptions(cachedMessage)[0] || '');
+        setAiFigureIncluded(Boolean(figureSource));
       } else {
         setAiPhraseOptions([]);
         setAiMessage(cachedMessage);
       }
       return;
     }
-    const consentKey = `writingCoachConsent:v1:${userId}`;
+    const consentKey = `writingCoachConsent:v2:${userId}`;
     try {
       if (!localStorage.getItem(consentKey)) {
-        const accepted = await showConfirm('AI opt-in required', 'Before the first AI request: the selected IELTS Task prompt and your current draft (up to 5,000 characters) will be sent to Google Gemini through Firebase AI Logic for processing. This is optional formative feedback, not an official IELTS score. The Gemini Developer API free tier may use submitted content to improve Google products. Continue?');
+        const figureNotice = figureSource ? ' The uploaded prompt figure will also be sent for visual analysis.' : '';
+        const accepted = await showConfirm('AI opt-in required', `Before the first AI request: the selected IELTS Task prompt and your current draft (up to 5,000 characters) will be sent to Google Gemini through Firebase AI Logic for processing.${figureNotice} This is optional formative feedback, not an official IELTS score. The Gemini Developer API free tier may use submitted content to improve Google products. Continue?`);
         if (!accepted) return;
         localStorage.setItem(consentKey, 'accepted');
       }
     } catch {
-      const accepted = await showConfirm('AI optional consent', 'Your browser cannot save the AI notice preference. The selected prompt and draft will be sent to Google Gemini for optional formative feedback. Continue this request?');
+      const figureNotice = figureSource ? ' The uploaded prompt figure will also be sent for visual analysis.' : '';
+      const accepted = await showConfirm('AI optional consent', `Your browser cannot save the AI notice preference. The selected prompt and draft will be sent to Google Gemini for optional formative feedback.${figureNotice} Continue this request?`);
       if (!accepted) return;
     }
     if (!appCheckSiteKey) {
-    setAiError('AI setup is incomplete: add the Firebase App Check reCAPTCHA v3 site key to VITE_RECAPTCHA_V3_SITE_KEY. Local phrase suggestions still work.');
+    setAiError('AI setup is incomplete: add the Firebase App Check reCAPTCHA Enterprise site key to VITE_RECAPTCHA_ENTERPRISE_SITE_KEY. Local phrase suggestions still work.');
       return;
     }
     const now = Date.now();
@@ -1972,32 +2032,52 @@ const WritingPractice = ({ tests, userId, onBack }) => {
     setAiError('');
     setAiMessage('');
     setAiPhraseOptions([]);
+    setAiInlineSuggestion('');
+    setAiFigureIncluded(false);
     try {
+      const figureData = figureSource ? await fetchFigureForAI(figureSource) : null;
       const taskFormat = selectedPrompt.question.writingFormat || (taskType === 1 ? 'chart or visual report' : 'essay');
       const mode = kind === 'phrases'
         ? `Suggest exactly three short, natural sentence starters suited to the next step in this draft. Return one starter per line with no numbering, bullets, explanation, or completed answer. Do not invent figures or details${taskType === 1 ? ' for the visual' : ''}.`
+        : kind === 'inline'
+          ? `Suggest exactly ONE concise next sentence or sentence starter to continue the student's own writing, with no quotes, bullets, label, or explanation. For Task 1, identify the visual type and describe only trends or values that can actually be verified in the supplied figure; never guess unreadable numbers. For Task 2, use the exact essay question and the student's stated position; do not invent examples or write a full argument. Make it easy for the student to adapt.`
         : kind === 'hint'
           ? 'Give one concise next-step hint without rewriting the student text.'
           : kind === 'final'
             ? 'Review the complete current response and give a concise final review with strengths and up to three prioritized improvements. Do not assign an IELTS band score.'
             : 'Give concise, specific formative feedback: one strength and up to two actionable improvements. Do not assign an IELTS band score.';
-      const response = await writingAI.generateContent(`You are a supportive IELTS writing practice coach. This is IELTS Writing Task ${taskType} (${taskFormat}). Use the exact task prompt and the student's current draft. ${mode} Refer to concrete details in this prompt and draft. Do not write a replacement essay or claim to calculate an official score. Keep the response under 140 words.\n\nTASK PROMPT:\n${promptText}\n\nSTUDENT DRAFT:\n${draft.slice(0, 5000)}`);
+      const taskGuidance = taskType === 1
+        ? 'Task 1 coaching must be a factual visual report: paraphrase the task, identify the overall trend, compare key features, and use specific figures only when legible in the supplied visual. Never add an opinion.'
+        : 'Task 2 coaching must address every part of the essay question, help the writer develop a clear position and supported paragraphs, and use counterarguments only when relevant. Never treat it as a chart report.';
+      const requestText = `You are a supportive IELTS writing practice coach. This is IELTS Writing Task ${taskType} (${taskFormat}). ${taskGuidance} Use the exact task prompt, the supplied visual when present, and the student's current draft. ${mode} Do not claim to calculate an official score. Keep feedback under 140 words.\n\nTASK PROMPT:\n${promptText}\n\n${visualText}\n\nSTUDENT DRAFT:\n${draft.slice(0, 5000)}`;
+      const requestParts: Part[] = [{ text: requestText }];
+      if (figureData) requestParts.push({ inlineData: figureData });
+      const response = await writingAI.generateContent(requestParts);
       const message = response.response.text();
       if (typeof message !== 'string' || !message.trim()) throw new Error('Gemini returned no feedback.');
-      if (kind === 'phrases') {
+      if (kind === 'phrases' || kind === 'inline') {
         const options = parsePhraseOptions(message);
         if (!options.length) {
           setAiError('The AI response did not contain usable phrase options. Try requesting suggestions again.');
           return;
         }
         responseCache.current.set(cacheKey, message);
-        setAiPhraseOptions(options);
+        if (kind === 'inline') {
+          setAiInlineSuggestion(options[0]);
+          setAiFigureIncluded(Boolean(figureData));
+        } else {
+          setAiPhraseOptions(options);
+        }
       } else {
         responseCache.current.set(cacheKey, message);
         setAiMessage(message);
       }
     } catch (error) {
       console.error('Writing coach request failed:', error);
+      if (error instanceof Error && /prompt figure|cross-origin|image URL|AI upload limit|image type|downloaded empty|browser could not read/i.test(error.message)) {
+        setAiError(`Could not create a figure-aware suggestion: ${error.message}`);
+        return;
+      }
       const code = String(error?.code || '').toLowerCase();
       const details = String(error?.message || '').toLowerCase();
       setAiError(code.includes('quota') || code.includes('resource-exhausted') || details.includes('quota') || details.includes('rate')
@@ -2011,6 +2091,22 @@ const WritingPractice = ({ tests, userId, onBack }) => {
       setAiBusy(false);
     }
   };
+
+  useEffect(() => {
+    if (!draftRevision || !selectedPrompt || draft.trim().length < 30 || aiBusy) return undefined;
+    if (autoSuggestionTimer.current) window.clearTimeout(autoSuggestionTimer.current);
+    const cooldownRemaining = Math.max(0, 15000 - (Date.now() - lastAutoSuggestionAt.current));
+    autoSuggestionTimer.current = window.setTimeout(() => {
+      lastAutoSuggestionAt.current = Date.now();
+      void requestCoach('inline');
+    }, Math.max(1200, cooldownRemaining));
+    return () => {
+      if (autoSuggestionTimer.current) {
+        window.clearTimeout(autoSuggestionTimer.current);
+        autoSuggestionTimer.current = null;
+      }
+    };
+  }, [draftRevision, selectedPromptId, taskType, aiBusy]);
 
   return (
     <>
@@ -2039,13 +2135,13 @@ const WritingPractice = ({ tests, userId, onBack }) => {
           <div className="space-y-4">
             <div className="p-5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Prompt
-                <select value={selectedPromptId || selectedPrompt.id} onChange={event => { setSelectedPromptId(event.target.value); setDraft(loadDraft(event.target.value)); setAiMessage(''); setAiPhraseOptions([]); setAiError(''); }} className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white">
+                <select value={selectedPromptId || selectedPrompt.id} onChange={event => { setSelectedPromptId(event.target.value); setDraft(loadDraft(event.target.value)); setDraftRevision(previous => previous + 1); setAiMessage(''); setAiPhraseOptions([]); setAiInlineSuggestion(''); setAiFigureIncluded(false); setAiError(''); }} className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white">
                   {prompts.map(prompt => <option key={prompt.id} value={prompt.id}>{prompt.test.title}: {prompt.question.text.slice(0, 90)}</option>)}
                 </select>
               </label>
               <p className="mt-4 whitespace-pre-wrap text-slate-800 dark:text-slate-100">{selectedPrompt.question.text}</p>
               <PromptFigure question={selectedPrompt.question} assessmentId={selectedPrompt.test.id} />
-              <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">Suggested practice length: {taskType === 1 ? 'about 150 words' : 'about 250 words'}. This is guidance, not scoring.</p>
+              <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">Suggested practice length: {taskType === 1 ? 'about 150 words' : 'about 250 words'}. This is guidance, not scoring. {taskType === 1 ? 'Describe the visual accurately; do not add an opinion.' : 'Answer the full essay question and support your position.'}</p>
             </div>
             <div className="p-5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
               <div className="flex items-center justify-between gap-3 mb-3">
@@ -2063,16 +2159,26 @@ const WritingPractice = ({ tests, userId, onBack }) => {
                   onChange={event => {
                     const value = event.target.value;
                     setDraft(value);
+                    setDraftRevision(previous => previous + 1);
                     setLocalSuggestionDismissed(false);
                     setAiMessage('');
                     setAiPhraseOptions([]);
+                    setAiInlineSuggestion('');
+                    setAiFigureIncluded(false);
                     setAiError('');
                     try { if (selectedPrompt) localStorage.setItem(getDraftStorageKey(selectedPrompt.id), value); } catch { /* Storage may be unavailable in private browsing. */ }
                   }}
                   onKeyDown={event => {
-                    if (event.key === 'Tab' && localSuggestions[0] && !localSuggestionDismissed) {
+                    if (event.key === 'Tab' && aiInlineSuggestion) {
+                      event.preventDefault();
+                      insertPhrase(aiInlineSuggestion);
+                      setAiInlineSuggestion('');
+                    } else if (event.key === 'Tab' && localSuggestions[0] && !localSuggestionDismissed) {
                       event.preventDefault();
                       insertPhrase(localSuggestions[0].phrase);
+                    } else if (event.key === 'Escape' && aiInlineSuggestion) {
+                      event.preventDefault();
+                      setAiInlineSuggestion('');
                     } else if (event.key === 'Escape' && localSuggestions[0] && !localSuggestionDismissed) {
                       event.preventDefault();
                       setLocalSuggestionDismissed(true);
@@ -2080,13 +2186,28 @@ const WritingPractice = ({ tests, userId, onBack }) => {
                   }}
                   rows={16}
                   maxLength={12000}
-                  placeholder="Write your response here. Your text stays on this device unless you explicitly request AI feedback."
+                  placeholder="Write your response here. After your one-time consent, AI suggestions are requested online after you pause typing."
                   className="w-full p-4 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white leading-relaxed"
                 />
+                {aiBusy && (
+                  <p className="mt-2 text-xs text-indigo-700 dark:text-indigo-300" role="status">
+                    AI coach is considering your draft{getFigureSource(selectedPrompt.question) ? ' and uploaded figure' : ''}…
+                  </p>
+                )}
+                {aiInlineSuggestion && (
+                  <div className="mt-2 rounded-lg border border-indigo-200 bg-indigo-50 p-3 dark:border-indigo-800 dark:bg-indigo-900/30" role="status" aria-live="polite">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-xs font-semibold text-indigo-800 dark:text-indigo-200">AI next-sentence suggestion{aiFigureIncluded ? ' · figure-aware' : ''}</p>
+                      <button type="button" onClick={() => insertPhrase(aiInlineSuggestion)} className="rounded bg-indigo-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-800">Insert at cursor</button>
+                    </div>
+                    <p className="mt-1 text-sm text-slate-800 dark:text-slate-100">{aiInlineSuggestion}</p>
+                    <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">Review and adapt it. Nothing is inserted unless you choose to accept it.</p>
+                  </div>
+                )}
               </div>
               {localSuggestions[0] && !localSuggestionDismissed && (
                 <p className="mt-2 text-xs text-slate-600 dark:text-slate-300" role="status">
-                  Optional local suggestion: <span className="font-medium">{localSuggestions[0].phrase}</span> Press Tab to insert it at your cursor, or Escape to dismiss.
+                  Offline suggestion: <span className="font-medium">{localSuggestions[0].phrase}</span> Press Tab to insert it when no AI suggestion is showing, or Escape to dismiss.
                 </p>
               )}
             </div>
@@ -2098,8 +2219,9 @@ const WritingPractice = ({ tests, userId, onBack }) => {
             </div>
             <div className="p-5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
               <h3 className="font-semibold text-slate-800 dark:text-white mb-1">Phrase suggestions</h3>
-              <p className="mb-3 text-xs font-medium text-emerald-700 dark:text-emerald-300">Local suggestions are always available, including offline. AI suggestions are optional and only requested when you click an AI button.</p>
-              <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">AI is optional. The selected prompt and draft are sent only after you click an AI button; the free-tier provider may use submissions to improve its products.</p>
+              <p className="mb-3 text-xs font-medium text-emerald-700 dark:text-emerald-300">Local suggestions are always available, including offline. After you consent, online AI suggestions are requested after you pause typing and appear below the writing box; accept one to insert it.</p>
+              {!appCheckSiteKey && <p className="mb-3 rounded bg-amber-50 p-2 text-xs text-amber-800 dark:bg-amber-900/20 dark:text-amber-200" role="status">Online AI is not configured for this deployment. The offline suggestions still work; configure Firebase AI Logic and the App Check site key to enable Gemini.</p>}
+              <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">After your consent, the prompt, draft, and attached figure (when present) are sent to Gemini after you pause typing or request coaching. Google’s free-tier terms and quotas can change; there is no paid fallback.</p>
               <div className="space-y-2">{localSuggestions.map(suggestion => <div key={suggestion.phrase} className="p-3 rounded-lg bg-slate-50 dark:bg-slate-700"><button onClick={() => insertPhrase(suggestion.phrase)} className="text-left font-semibold text-blue-700 dark:text-blue-300 underline">{suggestion.phrase}</button><p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{suggestion.why}</p></div>)}</div>
               <button onClick={() => requestCoach('phrases')} disabled={aiBusy || !draft.trim()} className="w-full mt-4 px-3 py-2 rounded-lg bg-indigo-600 text-white font-semibold disabled:opacity-50">{aiBusy ? 'Preparing suggestions…' : 'Suggest 3 AI phrase options'}</button>
               {aiPhraseOptions.length > 0 && <div className="mt-3 space-y-2" aria-label="AI phrase options">{aiPhraseOptions.map((phrase, index) => <div key={`${phrase}-${index}`} className="p-3 rounded-lg bg-indigo-50 dark:bg-indigo-900/30"><button onClick={() => insertPhrase(phrase)} className="text-left font-semibold text-indigo-800 dark:text-indigo-200 underline">{phrase}</button><p className="text-xs text-slate-600 dark:text-slate-300 mt-1">Select to insert at your cursor. Adapt it to your own ideas.</p></div>)}</div>}
