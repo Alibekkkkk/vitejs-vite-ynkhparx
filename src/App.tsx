@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Clock, BookOpen, FileText, CheckCircle, LogOut, User, Play,
   ArrowRight, LayoutDashboard, History, Check, Plus, Edit3, Users,
@@ -258,6 +258,33 @@ const formatTime = (totalSeconds) => {
 const formatAnswerForReview = (answer: unknown) => answer == null || answer === ''
   ? 'No answer'
   : typeof answer === 'object' ? JSON.stringify(answer) : String(answer);
+
+const renderTeacherAnnotatedAnswer = (answer: unknown, annotations: unknown) => {
+  const text = formatAnswerForReview(answer);
+  if (typeof answer !== 'string' || !Array.isArray(annotations)) return text;
+  const ranges = annotations
+    .filter((item): item is { quote: string; comment: string; start?: number } => Boolean(
+      item && typeof item.quote === 'string' && item.quote && typeof item.comment === 'string' && item.comment
+    ))
+    .map(item => {
+      const savedStart = Number.isInteger(item.start) && text.slice(item.start, item.start + item.quote.length) === item.quote
+        ? item.start
+        : text.indexOf(item.quote);
+      return { ...item, start: savedStart };
+    })
+    .filter(item => item.start >= 0)
+    .sort((left, right) => left.start - right.start || right.quote.length - left.quote.length);
+  const rendered: React.ReactNode[] = [];
+  let cursor = 0;
+  ranges.forEach((item, index) => {
+    if (item.start < cursor) return;
+    if (item.start > cursor) rendered.push(text.slice(cursor, item.start));
+    rendered.push(<mark key={`annotation-${index}`} title={item.comment} className="rounded bg-amber-200 px-0.5 text-amber-950 dark:bg-amber-700 dark:text-white">{item.quote}</mark>);
+    cursor = item.start + item.quote.length;
+  });
+  if (cursor < text.length) rendered.push(text.slice(cursor));
+  return rendered.length ? rendered : text;
+};
 
 const getStatusColor = (category) => {
   switch (category) {
@@ -655,8 +682,50 @@ const LoginScreen = ({ onAuthAction }) => {
 const TeacherReviewFields = ({ attempt, review, onSaveReview }) => {
   const [feedback, setFeedback] = useState(review.teacherReview?.feedback || '');
   const [points, setPoints] = useState(review.teacherReview?.points ?? '');
+  const [annotations, setAnnotations] = useState<Array<{ id: string; quote: string; comment: string; start: number; end: number }>>(
+    Array.isArray(review.teacherReview?.annotations) ? review.teacherReview.annotations : []
+  );
+  const [selectedText, setSelectedText] = useState<{ quote: string; start: number; end: number } | null>(null);
+  const [commentDraft, setCommentDraft] = useState('');
   const [saving, setSaving] = useState(false);
   const [alertState, setAlertState] = useState<null | { title: string; message: string }>(null);
+  const responseRef = useRef<HTMLDivElement>(null);
+  const responseText = typeof review.studentAnswer === 'string' ? review.studentAnswer : '';
+  const captureSelection = () => {
+    const selection = window.getSelection();
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    if (!range || !responseRef.current
+      || !responseRef.current.contains(range.startContainer)
+      || !responseRef.current.contains(range.endContainer)) return;
+    if (typeof review.studentAnswer !== 'string') return;
+    const rawText = selection?.toString() || '';
+    const leadingWhitespace = rawText.length - rawText.trimStart().length;
+    const quote = rawText.trim().slice(0, 1000);
+    if (!quote) return;
+    const prefix = range.cloneRange();
+    prefix.selectNodeContents(responseRef.current);
+    prefix.setEnd(range.startContainer, range.startOffset);
+    const start = prefix.toString().length + leadingWhitespace;
+    setSelectedText({ quote, start, end: start + quote.length });
+  };
+  const addAnnotation = () => {
+    const comment = commentDraft.trim();
+    if (!selectedText || !comment) return;
+    if (annotations.length >= 50) {
+      setAlertState({ title: 'Comment limit reached', message: 'A response can have up to 50 phrase comments.' });
+      return;
+    }
+    setAnnotations(current => [...current, {
+      id: crypto.randomUUID(),
+      quote: selectedText.quote,
+      comment: comment.slice(0, 1000),
+      start: selectedText.start,
+      end: selectedText.end,
+    }]);
+    setSelectedText(null);
+    setCommentDraft('');
+    window.getSelection()?.removeAllRanges();
+  };
   const save = async () => {
     setSaving(true);
     if (points === '') {
@@ -664,7 +733,7 @@ const TeacherReviewFields = ({ attempt, review, onSaveReview }) => {
       setAlertState({ title: 'Review incomplete', message: 'Enter the awarded points before saving this review.' });
       return;
     }
-    try { await onSaveReview(attempt.id, review.questionId, { feedback, points: Number(points) }); }
+    try { await onSaveReview(attempt.id, review.questionId, { feedback: feedback.trim().slice(0, 2000), points: Number(points), annotations }); }
     catch (error) {
       setAlertState({
         title: 'Save failed',
@@ -674,7 +743,64 @@ const TeacherReviewFields = ({ attempt, review, onSaveReview }) => {
     finally { setSaving(false); }
   };
   return <>
-    <div className="mt-3 grid md:grid-cols-[1fr_8rem_auto] gap-2"><textarea value={feedback} onChange={event => setFeedback(event.target.value)} aria-label="Teacher feedback" placeholder="Teacher feedback" rows={2} className="p-2 rounded border dark:bg-slate-700 dark:border-slate-600"/><input type="number" min="0" max={review.points ?? 0} step="0.5" value={points} onChange={event => setPoints(event.target.value)} aria-label="Reviewed points" placeholder="Points" className="p-2 rounded border dark:bg-slate-700 dark:border-slate-600"/><button disabled={saving} onClick={save} className="px-3 py-2 rounded bg-blue-600 text-white disabled:opacity-50">{saving ? 'Saving…' : 'Save review'}</button></div>
+    <div className="mt-4 rounded-xl border border-blue-200 bg-white p-4 dark:border-blue-900 dark:bg-slate-800">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h4 className="font-semibold text-slate-900 dark:text-white">Review this response</h4>
+          <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">Select a word, phrase, or sentence in the response to attach a comment to it.</p>
+        </div>
+        <label className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200">
+          Score
+          <span className="flex items-center gap-1">
+            <input type="number" min="0" max={review.points ?? 0} step="0.5" value={points} onChange={event => setPoints(event.target.value)} aria-label="Reviewed points" className="w-24 rounded-lg border border-slate-300 bg-white px-3 py-2 dark:border-slate-600 dark:bg-slate-700" />
+            <span className="text-slate-500 dark:text-slate-400">/ {review.points ?? 0}</span>
+          </span>
+        </label>
+      </div>
+
+      <div
+        ref={responseRef}
+        onMouseUp={captureSelection}
+        onKeyUp={captureSelection}
+        className="mt-4 max-h-96 overflow-y-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm leading-7 text-slate-800 selection:bg-amber-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:selection:bg-amber-700"
+        aria-label="Student response; select text to comment"
+      >
+        {responseText || formatAnswerForReview(review.studentAnswer)}
+      </div>
+
+      {selectedText && <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/30">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-amber-900 dark:text-amber-200">Comment on selected text</p>
+          <button type="button" onClick={() => setSelectedText(null)} className="text-xs font-medium text-slate-600 underline dark:text-slate-300">Cancel</button>
+        </div>
+        <blockquote className="mt-2 border-l-2 border-amber-500 pl-3 text-sm text-slate-800 dark:text-slate-100">“{selectedText.quote}”</blockquote>
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+          <textarea value={commentDraft} onChange={event => setCommentDraft(event.target.value)} maxLength={1000} aria-label="Comment on selected text" placeholder="Explain what works or how to improve this part…" rows={2} className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white p-3 dark:border-slate-600 dark:bg-slate-700" />
+          <button type="button" onClick={addAnnotation} disabled={!commentDraft.trim()} className="self-end rounded-lg bg-amber-600 px-4 py-2 font-semibold text-white hover:bg-amber-700 disabled:opacity-50">Add comment</button>
+        </div>
+      </div>}
+
+      {annotations.length > 0 && <section className="mt-4 space-y-2" aria-label="Phrase comments">
+        <h5 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Phrase comments ({annotations.length})</h5>
+        {annotations.map((annotation, index) => <div key={annotation.id} className="flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
+          <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-blue-100 text-xs font-bold text-blue-800 dark:bg-blue-900 dark:text-blue-200">{index + 1}</span>
+          <div className="min-w-0 flex-1">
+            <blockquote className="border-l-2 border-blue-500 pl-3 text-sm font-medium text-slate-800 dark:text-slate-100">“{annotation.quote}”</blockquote>
+            <p className="mt-1 whitespace-pre-wrap text-sm text-slate-600 dark:text-slate-300">{annotation.comment}</p>
+          </div>
+          <button type="button" onClick={() => setAnnotations(current => current.filter(item => item.id !== annotation.id))} aria-label={`Remove comment ${index + 1}`} className="shrink-0 rounded px-2 py-1 text-sm text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/40">Remove</button>
+        </div>)}
+      </section>}
+
+      <label className="mt-4 block text-sm font-medium text-slate-700 dark:text-slate-200">
+        Overall feedback
+        <textarea value={feedback} onChange={event => setFeedback(event.target.value)} maxLength={2000} aria-label="Overall teacher feedback" placeholder="Add a summary or next step for the student…" rows={3} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white p-3 dark:border-slate-600 dark:bg-slate-700" />
+      </label>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-slate-500 dark:text-slate-400">Your phrase comments and overall feedback will appear in the student’s results.</p>
+        <button type="button" disabled={saving} onClick={save} className="rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700 disabled:opacity-50">{saving ? 'Saving…' : 'Save review'}</button>
+      </div>
+    </div>
     {alertState && (
       <Modal isOpen={true} title={alertState.title} onClose={() => setAlertState(null)}>
         <p className="whitespace-pre-wrap text-left">{alertState.message}</p>
@@ -1533,7 +1659,36 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                   <button onClick={async () => { try { await onSaveReview(attempt.id, '__finalize__', { feedback: '', points: null }); } catch (error) { await showAlertDialog('Could not save grading', error instanceof Error ? error.message : 'Could not save grading. Try again.'); } }} className="px-3 py-2 rounded bg-blue-600 text-white text-sm font-semibold">Save objective grading and results</button>
                   <p className="text-xs text-slate-500">Uses the saved teacher-only answer key. Written responses remain pending until you review them.</p>
                 </>}
-                {(attempt.questionReviews || []).map((review: any, index: number) => <div key={review.questionId || index} className="rounded-lg bg-slate-50 dark:bg-slate-900/60 p-3"><p className="font-semibold">Q{index + 1}. {review.questionText}</p><p className="text-sm mt-1">Student response: <span className="whitespace-pre-wrap">{typeof review.studentAnswer === 'object' ? JSON.stringify(review.studentAnswer) : String(review.studentAnswer || '—')}</span></p><p className="text-sm">Status: {review.status}{review.earnedPoints != null ? ` · ${review.earnedPoints}/${review.points} pts` : ''}{review.teacherReview?.points != null ? ` · teacher awarded ${review.teacherReview.points}/${review.points} pts` : ''}</p><p className="text-sm">Key: {JSON.stringify(review.answerKey ?? review.correctAnswer ?? '')}{review.acceptedAnswers?.length ? ` · Accepted: ${review.acceptedAnswers.join(', ')}` : ''}</p>{review.explanation && <p className="text-sm">Explanation: {review.explanation}</p>}{review.teacherReview?.feedback && <p className="text-sm text-blue-700 dark:text-blue-300">Teacher feedback: {review.teacherReview.feedback}</p>}{review.status === 'manual-review' && <TeacherReviewFields attempt={attempt} review={review} onSaveReview={onSaveReview} />}</div>)}
+                {(attempt.questionReviews || []).map((review: any, index: number) => <article key={review.questionId || index} className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
+                  <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-900/70">
+                    <h3 className="font-semibold text-slate-900 dark:text-white">Question {index + 1}</h3>
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <span className="rounded-full bg-slate-200 px-2.5 py-1 font-medium text-slate-700 dark:bg-slate-700 dark:text-slate-200">{review.status === 'manual-review' ? (review.teacherReview?.reviewedAt ? 'Reviewed' : 'Needs review') : review.status}</span>
+                      {review.teacherReview?.points != null && <span className="rounded-full bg-blue-100 px-2.5 py-1 font-semibold text-blue-800 dark:bg-blue-900/50 dark:text-blue-200">{review.teacherReview.points} / {review.points} points</span>}
+                    </div>
+                  </header>
+                  <div className="space-y-4 p-4">
+                    <section>
+                      <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Question prompt</h4>
+                      <div className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-800 dark:text-slate-100"><FormattedQuestionText text={review.questionText || ''} /></div>
+                    </section>
+                    {review.status !== 'manual-review' && <section>
+                      <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Student response</h4>
+                      <p className="mt-1 whitespace-pre-wrap rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-800 dark:bg-slate-900 dark:text-slate-100">{formatAnswerForReview(review.studentAnswer)}</p>
+                    </section>}
+                    <p className="text-sm text-slate-600 dark:text-slate-300">Status: {review.status}{review.earnedPoints != null ? ` · ${review.earnedPoints}/${review.points} points` : ''}</p>
+                    {(review.answerKey || review.acceptedAnswers?.length || review.explanation) && <details className="rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-700">
+                      <summary className="cursor-pointer font-medium text-slate-700 dark:text-slate-200">Marking guide</summary>
+                      <div className="mt-2 space-y-1 text-slate-600 dark:text-slate-300">
+                        {review.answerKey && <p>Answer key: {formatAnswerForReview(review.answerKey)}</p>}
+                        {review.acceptedAnswers?.length > 0 && <p>Accepted answers: {review.acceptedAnswers.join(', ')}</p>}
+                        {review.explanation && <p>Explanation: {review.explanation}</p>}
+                      </div>
+                    </details>}
+                    {review.teacherReview?.feedback && <p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-900 dark:bg-blue-950/40 dark:text-blue-200">Overall feedback: {review.teacherReview.feedback}</p>}
+                    {review.status === 'manual-review' && <TeacherReviewFields attempt={attempt} review={review} onSaveReview={onSaveReview} />}
+                  </div>
+                </article>)}
               </div>
             </details>)}</div>
           </section>
@@ -3363,11 +3518,18 @@ const StudentDashboard = ({ user, tests, results, writingResources, writingResou
                            <summary className="cursor-pointer font-medium">Review answers and explanations</summary>
                            <div className="space-y-3 mt-3">{result.questionReviews.map((review, reviewIndex) => <div key={review.questionId || reviewIndex} className="p-3 rounded-lg bg-slate-50 dark:bg-slate-900">
                              <p className="font-medium">{reviewIndex + 1}. {review.questionText}</p>
-                             <p className="mt-1">Your answer: {formatAnswerForReview(review.studentAnswer)}</p>
+                             <p className="mt-1 whitespace-pre-wrap">Your answer: {renderTeacherAnnotatedAnswer(review.studentAnswer, review.teacherReview?.annotations)}</p>
                              {review.status === 'graded' ? <p className={review.isCorrect ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'}>{review.isCorrect ? 'Correct' : `Incorrect. Answer key: ${formatAnswerForReview(review.answerKey)}`}{review.earnedPoints > 0 && !review.isCorrect ? ` — ${review.earnedPoints} / ${review.points} points` : ''}{review.acceptedAnswers?.length ? ` (also accepted: ${review.acceptedAnswers.join(', ')})` : ''}</p>
                                : review.status === 'manual-review' ? <div className="text-amber-700 dark:text-amber-300">{review.teacherReview?.reviewedAt ? <p>Teacher reviewed this response{review.teacherReview.points != null ? ` · awarded ${review.teacherReview.points}/${review.points} points` : ''}.</p> : <p>Awaiting teacher review; excluded from the automatic score.</p>}{review.teacherReview?.feedback && <p className="mt-1 text-slate-700 dark:text-slate-200">Teacher feedback: {review.teacherReview.feedback}</p>}</div>
                                  : review.status === 'ungraded' ? <p>This response is ungraded practice.</p>
                                    : <p>Unanswered.</p>}
+                             {review.teacherReview?.annotations?.length > 0 && <section className="mt-3 space-y-2" aria-label="Teacher comments on your response">
+                               <h5 className="font-semibold text-slate-800 dark:text-slate-100">Comments on your writing</h5>
+                               {review.teacherReview.annotations.map((annotation, annotationIndex) => <article key={annotation.id || annotationIndex} className="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
+                                 <blockquote className="border-l-2 border-amber-500 pl-3 font-medium text-slate-800 dark:text-slate-100">“{annotation.quote}”</blockquote>
+                                 <p className="mt-1 whitespace-pre-wrap text-slate-700 dark:text-slate-200">{annotation.comment}</p>
+                               </article>)}
+                             </section>}
                              {review.explanation && <p className="mt-1">{review.explanation}</p>}
                            </div>)}</div>
                          </details>}
@@ -3701,7 +3863,7 @@ export default function App() {
     }
   };
 
-  const saveTeacherReview = async (submissionId: string, questionId: string, reviewData: { feedback: string; points: number | null }) => {
+  const saveTeacherReview = async (submissionId: string, questionId: string, reviewData: { feedback: string; points: number | null; annotations?: Array<{ id: string; quote: string; comment: string; start: number; end: number }> }) => {
     const submissionRef = doc(db, 'artifacts', appId, 'public', 'data', 'submissions', submissionId);
     const snapshot = await getDoc(submissionRef);
     if (!snapshot.exists()) throw new Error('Submission not found.');
@@ -3724,7 +3886,26 @@ export default function App() {
       const questionMaximum = question.points;
       if (reviewData.points == null) throw new Error('Enter awarded points before saving the review.');
       if (reviewData.points < 0 || reviewData.points > questionMaximum) throw new Error('Points must be within the assessment question maximum.');
-      question.teacherReview = { feedback: reviewData.feedback.trim(), points: reviewData.points, reviewedAt: new Date().toISOString() };
+      const annotations = reviewData.annotations ?? question.teacherReview?.annotations ?? [];
+      if (!Array.isArray(annotations) || annotations.length > 50) throw new Error('A response can have up to 50 phrase comments.');
+      const responseText = typeof question.studentAnswer === 'string' ? question.studentAnswer : '';
+      const safeAnnotations = annotations.map(annotation => {
+        const id = typeof annotation?.id === 'string' ? annotation.id.trim().slice(0, 100) : '';
+        const quote = typeof annotation?.quote === 'string' ? annotation.quote.trim().slice(0, 1000) : '';
+        const comment = typeof annotation?.comment === 'string' ? annotation.comment.trim().slice(0, 1000) : '';
+        const start = Number.isInteger(annotation?.start) ? annotation.start : -1;
+        const end = Number.isInteger(annotation?.end) ? annotation.end : -1;
+        if (!id || !quote || !comment || start < 0 || end !== start + quote.length || responseText.slice(start, end) !== quote) {
+          throw new Error('Each phrase comment must match selected text in the student response.');
+        }
+        return { id, quote, comment, start, end };
+      });
+      question.teacherReview = {
+        feedback: reviewData.feedback.trim().slice(0, 2000),
+        points: reviewData.points,
+        annotations: safeAnnotations,
+        reviewedAt: new Date().toISOString()
+      };
     }
     const pendingReviewCount = questionReviews.filter((item: any) => item.status === 'manual-review' && !item.teacherReview?.reviewedAt).length;
     const maxPossibleScore = trustedQuestions.filter((item: any) => !item.ungraded).reduce((total: number, item: any) => total + Math.max(0, Number(item.points ?? 1) || 0), 0);

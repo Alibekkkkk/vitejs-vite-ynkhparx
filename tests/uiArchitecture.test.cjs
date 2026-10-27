@@ -65,3 +65,17 @@ test('exam theme control is in the header and the floating toggle is hidden duri
   assert.match(app, /\{currentView === 'exam' \? null : \([\s\S]*?className="fixed bottom-24 sm:bottom-6 right-6/);
   assert.match(app, /onToggleTheme=\{\(\) => setIsDark\(previous => !previous\)\}/);
 });
+
+test('teacher review supports phrase comments and publishes them with student results', () => {
+  assert.match(app, /aria-label="Student response; select text to comment"/);
+  assert.match(app, /const start = prefix\.toString\(\)\.length \+ leadingWhitespace/);
+  assert.match(app, /Comment on selected text/);
+  assert.match(app, /Phrase comments \(\{annotations\.length\}\)/);
+  assert.match(app, /reviewData\.annotations/);
+  assert.match(app, /responseText\.slice\(start, end\) !== quote/);
+  assert.match(app, /question\.teacherReview = \{[\s\S]*?annotations: safeAnnotations/);
+  assert.match(app, /await updateDoc\(submissionRef, reviewSummary\);[\s\S]*?await updateDoc\(studentResultRef, reviewSummary\)/);
+  assert.match(app, /renderTeacherAnnotatedAnswer\(review\.studentAnswer, review\.teacherReview\?\.annotations\)/);
+  assert.match(app, /Comments on your writing/);
+  assert.match(app, /Marking guide/);
+});
