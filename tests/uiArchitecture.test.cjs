@@ -36,3 +36,11 @@ test('reading practice retains a one-passage pane with independent scroll positi
   assert.match(app, /questionPaneRef[\s\S]*?questionScroll\.current/);
   assert.match(app, /No questions are assigned to Passage/);
 });
+
+test('assigned writing exams show the matching published resource beside the writing response', () => {
+  assert.match(app, /writingResources=\{writingResources\} writingResourcesError=\{writingResourcesError\} onComplete=\{completeTest\}/);
+  assert.match(app, /isWritingQuestion \? <ResizableSplitPane/);
+  assert.match(app, /leftLabel="Writing task and response"[\s\S]*?rightLabel="Vocabulary resource"/);
+  assert.match(app, /<WritingResourceTable[\s\S]*?assessmentId=\{test\?\.practiceSourceTestId \|\| test\?\.id\}[\s\S]*?questionId=\{currentQuestion\.id\}/);
+  assert.match(app, /Writing task and response[\s\S]*?renderAnswerInput\(\)/);
+});

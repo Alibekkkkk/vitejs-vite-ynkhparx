@@ -2512,7 +2512,7 @@ const ReadingPracticeWorkspace = ({ test, userId, questions, answers, currentInd
   );
 };
 
-const ExamInterface = ({ test, onComplete, userId }) => {
+const ExamInterface = ({ test, onComplete, userId, writingResources, writingResourcesError }) => {
   const questions = Array.isArray(test?.questions) ? test.questions : [];
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, unknown>>({});
@@ -2533,6 +2533,8 @@ const ExamInterface = ({ test, onComplete, userId }) => {
   const currentValue = currentQuestion ? answers[currentQuestion.id] ?? '' : '';
   const unansweredCount = questions.filter(question => !isAnswerPresent(answers[question.id])).length;
   const isReadingPractice = test?.practiceMetadata?.kind === 'reading';
+  const isWritingQuestion = currentQuestion?.section === 'writing';
+  const writingTaskType: 1 | 2 = Number(currentQuestion?.writingTaskType || 2) === 1 ? 1 : 2;
 
   const updateAnswer = (value: unknown) => {
     if (!currentQuestion) return;
@@ -2673,7 +2675,7 @@ const ExamInterface = ({ test, onComplete, userId }) => {
       )}
       {submissionError && <p className="mt-3 text-sm text-red-600 dark:text-red-400" role="alert">{submissionError}</p>}
     </Modal>
-    <section className="mx-auto max-w-4xl rounded-xl border border-slate-200 bg-white p-6 text-left shadow-sm dark:border-slate-700 dark:bg-slate-800">
+    <section className={`mx-auto ${isWritingQuestion ? 'max-w-6xl' : 'max-w-4xl'} rounded-xl border border-slate-200 bg-white p-6 text-left shadow-sm dark:border-slate-700 dark:bg-slate-800`}>
       <div className="mb-5 flex items-center justify-between gap-3 border-b border-slate-200 pb-4 dark:border-slate-700">
         <div>
           <p className="text-sm font-medium uppercase tracking-wide text-blue-600 dark:text-blue-400">Exam</p>
@@ -2711,7 +2713,28 @@ const ExamInterface = ({ test, onComplete, userId }) => {
           renderAnswerInput={renderAnswerInput}
           disabled={timeExpired || isSubmitting}
         />
-      ) : <div className="space-y-5">
+      ) : isWritingQuestion ? <ResizableSplitPane
+        workspaceKey={`exam-writing:${userId}:${test?.id}:${currentQuestion.id}`}
+        leftLabel="Writing task and response"
+        rightLabel="Vocabulary resource"
+        left={<div className="space-y-5">
+          <div className="rounded-lg bg-slate-50 p-4 dark:bg-slate-700/50">
+            <p className="whitespace-pre-wrap text-base font-medium text-slate-800 dark:text-slate-100">{currentQuestion.text || 'Question prompt'}</p>
+            <PromptFigure question={currentQuestion} assessmentId={test?.id || 'unknown'} />
+          </div>
+          {renderAnswerInput()}
+        </div>}
+        right={<aside className="space-y-4 rounded-lg bg-slate-50 p-4 dark:bg-slate-700/50">
+          <h3 className="font-semibold text-slate-800 dark:text-white">Vocabulary resource</h3>
+          {writingResourcesError && <p role="alert" className="text-sm text-red-700 dark:text-red-300">Could not load writing resources: {writingResourcesError}</p>}
+          <WritingResourceTable
+            resources={writingResources || []}
+            taskType={writingTaskType}
+            assessmentId={test?.practiceSourceTestId || test?.id}
+            questionId={currentQuestion.id}
+          />
+        </aside>}
+      /> : <div className="space-y-5">
         <div className="rounded-lg bg-slate-50 p-4 dark:bg-slate-700/50">
           <p className="whitespace-pre-wrap text-base font-medium text-slate-800 dark:text-slate-100">{currentQuestion.text || 'Question prompt'}</p>
           <PromptFigure question={currentQuestion} assessmentId={test?.id || 'unknown'} />
@@ -3927,7 +3950,7 @@ export default function App() {
       {currentView === 'login' && <LoginScreen onAuthAction={handleAuthAction} />}
       {currentView === 'teacher_dashboard' && <TeacherDashboard user={user} tests={tests} resources={writingResources} resourceError={writingResourcesError} onSaveResource={saveWritingResource} onDeleteResource={deleteWritingResource} submissions={submissions} submissionsLoading={submissionsLoading} submissionsError={submissionsError} onSaveReview={saveTeacherReview} onBackfillLegacy={backfillLegacySubmissions} onSecureAnswerKeys={secureExistingAnswerKeys} onLogout={handleLogout} />}
       {currentView === 'student_dashboard' && <StudentDashboard user={user} tests={tests} results={results} writingResources={writingResources} writingResourcesError={writingResourcesError} onStartTest={startTest} onSaveGroupCode={saveStudentGroupCode} onLogout={handleLogout} />}
-      {currentView === 'exam' && activeTest && user && <ExamInterface key={`${user.uid}:${activeTest.id}`} test={activeTest} userId={user.uid} onComplete={completeTest} />}
+      {currentView === 'exam' && activeTest && user && <ExamInterface key={`${user.uid}:${activeTest.id}`} test={activeTest} userId={user.uid} writingResources={writingResources} writingResourcesError={writingResourcesError} onComplete={completeTest} />}
 
       <Modal isOpen={modalInfo.isOpen} title={modalInfo.title} onClose={() => setModalInfo(prev => ({ ...prev, isOpen: false }))}>
         <p className="whitespace-pre-wrap text-left">{modalInfo.message}</p>
