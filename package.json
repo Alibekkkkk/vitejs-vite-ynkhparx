@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "test:question-engine": "node --experimental-strip-types --test tests/questionEngine.test.ts tests/questionBank.test.ts tests/figureAssets.test.ts tests/functionGrading.test.cjs tests/securityArchitecture.test.cjs",
-    "test:features": "node --experimental-strip-types --test tests/writingResources.test.ts tests/legacyMigration.test.ts tests/answerKeyMigration.test.ts tests/readingSession.test.ts tests/uiArchitecture.test.cjs",
+    "test:features": "node --experimental-strip-types --test tests/writingResources.test.ts tests/legacyMigration.test.ts tests/answerKeyMigration.test.ts tests/readingSession.test.ts tests/questionTextFormatting.test.ts tests/uiArchitecture.test.cjs",
     "validate:banks": "node --experimental-strip-types scripts/validate-sample-banks.mjs",
     "preview": "vite preview"
   },

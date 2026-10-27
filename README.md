@@ -52,6 +52,8 @@ The local original banks include Academic and General Training Reading (40 quest
 
 Teachers can create and manage reusable vocabulary resources in **Teacher Portal → Writing resources**. Resources use `schemaVersion: 1`, preserve section and row order, and store alternatives as string arrays. Teachers can import/export canonical JSON, edit rows and sections, link a resource to a writing task/figure, preview the student table, and publish/unpublish it. Draft resources are not returned to student clients. PDF extraction is not used as canonical storage; review extracted material and enter or import structured JSON instead.
 
+Question prompts support safe inline emphasis in the teacher editor: select text and use **B**, *I*, or <u>U</u>. Formatting is stored as plain text markers (`**bold**`, `*italic*`, and `++underline++`) and rendered in the teacher preview, practice prompts, sample-bank preview, and exams. Existing plain-text prompts continue to display unchanged; arbitrary HTML is not interpreted.
+
 The vocabulary table uses semantic classes for the green original-word cells, neutral definitions, and peach alternative-phrase cells. It does not depend on screenshot coordinates. Reading practice shows one passage alongside its associated questions; passage and question navigation retain answer state, and the panes keep independent scroll positions. Writing and reading split-pane widths are keyboard/pointer adjustable and stored per user and workspace in the current browser.
 
 Manual theme QA checklist for teacher and student forms:
