@@ -60,6 +60,7 @@ test('teacher question editor offers safe bold, italic, and underline formatting
   assert.match(questionTextEditor, /label: 'Underline', marker: '\+\+'/);
   assert.match(questionTextEditor, /Align selected text \$\{alignment\}/);
   assert.match(questionTextEditor, /\[\[size:\$\{size\}\]\]/);
+  assert.match(questionTextEditor, /Live preview/);
   assert.match(app, /ariaLabel="Assessment description and instructions"/);
   assert.match(app, /ariaLabel=\{`Reading Passage \$\{activeReadingPassage\} text`\}/);
   assert.match(app, /ariaLabel="Candidate instructions"/);
@@ -105,7 +106,10 @@ test('reading exams use full-screen independent panes with selectable annotation
   assert.match(app, /const isReadingWorkspace = isReadingPractice \|\| Boolean\(currentQuestion && \([\s\S]*?currentQuestion\.section === 'reading'[\s\S]*?currentQuestion\.passageNumber/);
   assert.match(app, /exam-interface--reading/);
   assert.match(app, /<ReadingAnnotations[\s\S]*?storageKey=\{`reading-annotations:/);
+  assert.match(app, /<FormattedQuestionText text=\{passage\?\.title/);
+  assert.match(app, /dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600/);
   assert.match(globalStyles, /\.exam-interface--reading[\s\S]*?height: 100dvh/);
+  assert.match(globalStyles, /\.reading-annotations__text \{[\s\S]*?font-size: 1\.35rem/);
   assert.match(globalStyles, /\.exam-interface--reading \.reading-workspace > \.split-pane[\s\S]*?flex: 1 1 auto/);
   assert.match(readingAnnotations, /Select passage text to highlight, underline, or add a note/);
   assert.match(readingAnnotations, /const HIGHLIGHT_COLORS = \[/);

@@ -2729,10 +2729,10 @@ const ReadingPracticeWorkspace = ({ test, userId, questions, answers, currentInd
         maxLeftPercent={65}
         left={<div className="space-y-3">
           <div className="sticky top-0 z-10 rounded-lg border bg-white p-3 dark:border-slate-600 dark:bg-slate-800">
-            <h3 className="font-bold text-slate-800 dark:text-white">{passage?.title || `Passage ${activePassageNumber}`}</h3>
+            <h3 className="font-bold text-slate-800 dark:text-white"><FormattedQuestionText text={passage?.title || `Passage ${activePassageNumber}`} /></h3>
             <p className="text-sm text-slate-600 dark:text-slate-300">Passage {activePassageNumber} of {passageNumbers.length || 1}</p>
             <nav className="mt-2 flex flex-wrap gap-2" aria-label="Passage navigation">
-                  {passageNumbers.map(number => <button key={number} type="button" onClick={() => changePassage(number)} aria-current={activePassageNumber === number ? 'page' : undefined} className={`rounded border px-3 py-1.5 ${activePassageNumber === number ? 'bg-blue-600 text-white' : 'dark:border-slate-600 dark:text-slate-100'}`}>Passage {number}</button>)}
+                  {passageNumbers.map(number => <button key={number} type="button" onClick={() => changePassage(number)} aria-current={activePassageNumber === number ? 'page' : undefined} className={`rounded border px-3 py-1.5 font-medium transition-colors ${activePassageNumber === number ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600'}`}>Passage {number}</button>)}
             </nav>
           </div>
           {passageText.trim()

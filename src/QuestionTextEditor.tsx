@@ -1,4 +1,5 @@
 import { useRef } from 'react';
+import { FormattedQuestionText } from './FormattedQuestionText';
 
 type Props = {
   value: string;
@@ -113,6 +114,12 @@ export function QuestionTextEditor({ value, onChange, insertions = [], rows = 3,
         aria-label={ariaLabel}
         className={`w-full rounded-lg border border-slate-300 bg-white p-3 text-slate-800 outline-none dark:border-slate-600 dark:bg-slate-700 dark:text-white ${className}`}
       />
+      {value.trim() && <div className="question-text-editor__preview" aria-label={`${ariaLabel} live preview`}>
+        <span className="question-text-editor__preview-label">Live preview</span>
+        <div className="whitespace-pre-wrap break-words text-slate-800 dark:text-slate-100">
+          <FormattedQuestionText text={value} />
+        </div>
+      </div>}
     </div>
   );
 }
