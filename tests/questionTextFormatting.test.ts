@@ -45,3 +45,18 @@ test('question formatting supports safe alignment and bounded font sizes, includ
   assert.equal(stripQuestionTextFormatting('[[align:justify]]not a supported tag[[/align]]'), '[[align:justify]]not a supported tag[[/align]]');
   assert.equal(stripQuestionTextFormatting('[[size:100]]not a supported size[[/size]]'), '[[size:100]]not a supported size[[/size]]');
 });
+
+test('question formatting renders alignment and emphasis nested inside size and bold wrappers', () => {
+  const formatted = '[[size:24]]**[[align:center]]Why we need to protect polar bears[[/align]]**[[/size]]';
+  const parts = parseQuestionTextFormatting(formatted);
+
+  assert.equal(parts[0].style, 'size');
+  assert.equal(parts[0].fontSize, 24);
+  assert.equal(parts[0].children?.[0].style, 'bold');
+  assert.equal(parts[0].children?.[0].children?.[0].style, 'align');
+  assert.equal(parts[0].children?.[0].children?.[0].align, 'center');
+  assert.equal(stripQuestionTextFormatting(formatted), 'Why we need to protect polar bears');
+  assert.deepEqual(getQuestionTextFormattingRuns(formatted).map(({ start, end, style, align, fontSize }) => ({ start, end, style, align, fontSize })), [
+    { start: 0, end: 34, style: 'bold', align: 'center', fontSize: 24 },
+  ]);
+});

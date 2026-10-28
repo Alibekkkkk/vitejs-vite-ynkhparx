@@ -179,7 +179,9 @@ service cloud.firestore {
       allow update: if (isAuthorizedTeacher()
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['questionReviews', 'pendingReviewCount', 'manualReviewCount', 'ungradedCount', 'reviewStatus', 'score', 'maxPossibleScore', 'maxAutoScore', 'correctCount', 'incorrectCount', 'answeredCount', 'unansweredCount', 'reviewedAt']))
         || validStudentFeedbackReplyUpdate(userId);
-      allow delete: if false;
+      allow delete: if signedIn()
+        && request.auth.uid == userId
+        && resultId == resource.data.get('attemptId', '');
     }
 
     match /artifacts/{appId}/public/data/submissions/{submissionId} {
@@ -229,7 +231,10 @@ service cloud.firestore {
           'questionReviews', 'pendingReviewCount', 'manualReviewCount', 'ungradedCount', 'reviewStatus', 'reviewedBy', 'reviewedAt', 'score', 'maxPossibleScore', 'maxAutoScore', 'correctCount', 'incorrectCount', 'answeredCount', 'unansweredCount'
         ])
         || (resource.data.get('studentUid', '') == request.auth.uid && validStudentFeedbackReplyUpdate(resource.data.get('studentUid', '')));
-      allow delete: if false;
+      allow delete: if signedIn()
+        && resource.data.get('studentUid', '') == request.auth.uid
+        && submissionId == request.auth.uid + '_' + resource.data.get('attemptId', '')
+        && resource.data.get('gradingMode', '') != 'legacy-unverified';
     }
   }
 }

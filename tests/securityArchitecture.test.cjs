@@ -111,6 +111,15 @@ test('student feedback replies are append-only and cannot modify grading data', 
   assert.match(appSource, /Student reply/);
 });
 
+test('students can delete only their own past result and matching submission records', () => {
+  assert.match(rules, /match \/artifacts\/\{appId\}\/users\/\{userId\}\/results\/\{resultId\}[\s\S]*?allow delete: if signedIn\(\)[\s\S]*?request\.auth\.uid == userId[\s\S]*?resultId == resource\.data\.get\('attemptId', ''\)/);
+  assert.match(rules, /match \/artifacts\/\{appId\}\/public\/data\/submissions\/\{submissionId\}[\s\S]*?allow delete: if signedIn\(\)[\s\S]*?resource\.data\.get\('studentUid', ''\) == request\.auth\.uid[\s\S]*?submissionId == request\.auth\.uid \+ '_' \+ resource\.data\.get\('attemptId', ''\)[\s\S]*?gradingMode', ''\) != 'legacy-unverified'/);
+  assert.match(appSource, /batch\.delete\(studentResultRefs\[resultIndex\]\)/);
+  assert.match(appSource, /batch\.delete\(centralSubmissionRefs\[resultIndex\]\)/);
+  assert.match(appSource, /Delete all/);
+  assert.match(appSource, /Delete selected/);
+});
+
 test('only archived assessments can be deleted and the UI preserves their historical results', () => {
   assert.match(rules, /allow delete: if isAuthorizedTeacher\(\) && resource\.data\.get\('status', ''\) == 'archived'/);
   assert.match(appSource, /batch\.delete\(doc\(db, 'artifacts', appId, 'public', 'data', 'tests', test\.id\)\)/);

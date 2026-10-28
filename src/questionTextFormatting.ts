@@ -31,9 +31,13 @@ export function parseQuestionTextFormatting(value: string): FormattedTextPart[] 
       const bold = match[5];
       const underline = match[6];
       const italic = match[7];
+      const text = bold ?? underline ?? italic ?? '';
+      const nestedParts = parseQuestionTextFormatting(text);
+      const children = nestedParts.some(part => part.style !== 'plain') ? nestedParts : undefined;
       parts.push({
         style: bold !== undefined ? 'bold' : underline !== undefined ? 'underline' : 'italic',
-        text: bold ?? underline ?? italic ?? '',
+        text,
+        ...(children ? { children } : {}),
       });
     }
     cursor = index + match[0].length;
@@ -65,9 +69,13 @@ export function getQuestionTextFormattingRuns(value: string): FormattedTextRun[]
           offset = end;
         }
       } else {
-        const end = offset + part.text.length;
-        runs.push({ start: offset, end, ...parent, style: part.style === 'plain' ? parent.style : part.style });
-        offset = end;
+        const nextParent = { ...parent, style: part.style === 'plain' ? parent.style : part.style };
+        if (part.children) visit(part.children, nextParent);
+        else {
+          const end = offset + part.text.length;
+          runs.push({ start: offset, end, ...nextParent });
+          offset = end;
+        }
       }
     }
   };

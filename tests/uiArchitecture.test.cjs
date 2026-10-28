@@ -29,6 +29,7 @@ test('split pane exposes keyboard and pointer resizing with mobile tabs and boun
   assert.match(splitPane, /ArrowRight/);
   assert.match(splitPane, /Reset pane width/);
   assert.match(splitPane, /role="tablist"/);
+  assert.match(splitPane, /aria-label=\{`Resize \$\{leftLabel\} and \$\{rightLabel\} panes`\}/);
   assert.match(globalStyles, /@media \(max-width: 767px\)[\s\S]*?\.split-pane__mobile-tabs/);
 });
 
@@ -100,6 +101,16 @@ test('students can select and confirm deletion of past results in bulk', () => {
   assert.match(app, /Delete selected/);
   assert.match(app, /Delete past results\?/);
   assert.match(app, /onDeleteResults=\{deleteStudentResults\}/);
+  assert.match(app, /Promise\.all\(\[\s*Promise\.all\(studentResultRefs\.map\(resultRef => getDoc\(resultRef\)\)\),\s*Promise\.all\(centralSubmissionRefs\.map\(submissionRef => getDoc\(submissionRef\)\)\)/);
+  assert.match(app, /If the problem continues, ask the site administrator to deploy the latest Firestore rules/);
+  assert.match(app, /deleteResultsError && <p role="alert"/);
+});
+
+test('assessment titles support teacher formatting and student-facing rendering', () => {
+  assert.match(app, /QuestionTextEditor value=\{newTest\.title\} onChange=\{value => setNewTest\(\{ \.\.\.newTest, title: value \}\)\}[\s\S]*ariaLabel="Assessment title"/);
+  assert.match(app, /exam-interface__header[^"]*grid-cols-\[minmax\(0,1fr\)_minmax\(0,2fr\)_minmax\(0,1fr\)\]/);
+  assert.match(app, /<h2 className="break-words text-2xl font-bold[^>]*><FormattedQuestionText text=\{test\?\.title \|\| 'Practice exam'\} \/><\/h2>/);
+  assert.match(app, /border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100/);
 });
 
 test('reading exams use full-screen independent panes with selectable annotations', () => {
@@ -110,6 +121,9 @@ test('reading exams use full-screen independent panes with selectable annotation
   assert.match(app, /dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600/);
   assert.match(globalStyles, /\.exam-interface--reading[\s\S]*?height: 100dvh/);
   assert.match(globalStyles, /\.reading-annotations__text \{[\s\S]*?font-size: clamp\(24px, 2vw, 30px\)/);
+  assert.match(globalStyles, /\.exam-interface--reading \{[\s\S]*?background-color: #f3f7f5/);
+  assert.match(globalStyles, /\.exam-interface--reading \.split-pane__left \.reading-workspace__scroll \{[\s\S]*?background-color: #fbfcf9/);
+  assert.match(globalStyles, /\.dark \.exam-interface--reading \.reading-workspace \.split-pane__panel \{[\s\S]*?background-color: #1e2935/);
   assert.match(readingAnnotations, /data-mark-ids=\{markIds\.join\(','\)\}/);
   assert.match(readingAnnotations, /current => current\.filter\(mark => !markIds\.includes\(mark\.id\)\)/);
   assert.match(readingAnnotations, /Click to remove this highlight or underline/);
@@ -143,4 +157,28 @@ test('teacher question formats configure matching answer controls and candidate 
   assert.match(questionPrompt, /question\.answerSlots\?\.\[slotNumber - 1\]/);
   assert.match(questionPrompt, /question-prompt__number/);
   assert.match(questionTextEditor, /insertions\.map/);
+});
+
+test('reading matching-headings questions show every shared heading above the question', () => {
+  assert.match(app, /currentQuestion\.questionType === 'matching-headings' && currentQuestion\.sharedChoices\?\.some\(\(heading: string\) => heading\.trim\(\)\)/);
+  assert.match(app, /<h4 id=\{`headings-\$\{currentQuestion\.id\}`\}[^>]*>List of headings<\/h4>/);
+  assert.match(app, /currentQuestion\.sharedChoices\.filter\(\(heading: string\) => heading\.trim\(\)\)\.map\(\(heading: string, index: number\) =>/);
+  assert.match(app, /<FormattedQuestionText text=\{heading\} \/>/);
+});
+
+test('reading question navigation explains answer states and can jump to unanswered items', () => {
+  assert.match(app, /const moveToNextUnanswered = \(\) =>/);
+  assert.match(app, /Next unanswered \(\$\{unansweredReadingCount\}\)/);
+  assert.match(app, /All reading questions answered/);
+  assert.match(app, /Question status legend/);
+  assert.match(app, />Current<\/span>/);
+  assert.match(app, />Answered<\/span>/);
+  assert.match(app, />Not answered<\/span>/);
+  assert.match(app, /of \{passageQuestions\.length\} answered in this passage/);
+  assert.match(app, /Question \{questions\.findIndex\(\(question: any\) => question\.id === currentQuestion\.id\) \+ 1\} of \{questions\.length\}/);
+  assert.match(app, /selected\.includes\(choice\) \? 'border-blue-500 bg-blue-50/);
+  assert.match(app, /questionScroll\.current\[questionId\] \|\| 0/);
+  assert.match(app, /questionScroll\.current\[String\(currentQuestion\.id\)\] = event\.currentTarget\.scrollTop/);
+  assert.match(app, /Review unanswered/);
+  assert.match(app, /<button type="button" onClick=\{onFinish\}[^>]*>Finish exam<\/button>/);
 });

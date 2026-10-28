@@ -59,7 +59,7 @@ export function ResizableSplitPane({
       <div
         className="split-pane__divider"
         role="separator"
-        aria-label="Resize writing workspace panes"
+        aria-label={`Resize ${leftLabel} and ${rightLabel} panes`}
         aria-orientation="vertical"
         aria-valuenow={Math.round(leftPercent)}
         aria-valuemin={minLeftPercent}

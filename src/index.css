@@ -178,6 +178,13 @@ html.dark #root {
   flex-direction: column;
   overflow: hidden;
   border-radius: 0;
+  border-color: #d7e1df;
+  background-color: #f3f7f5;
+}
+
+.dark .exam-interface--reading {
+  border-color: #334155;
+  background-color: #17212b;
 }
 
 .exam-interface--reading .exam-interface__header,
@@ -199,13 +206,34 @@ html.dark #root {
 }
 
 .exam-interface--reading .reading-workspace .split-pane__panel {
+  box-sizing: border-box;
   height: 100%;
   min-height: 0;
   overflow: hidden;
+  padding: .55rem;
+  border-radius: 1rem;
+  background-color: #eaf0ef;
+}
+
+.dark .exam-interface--reading .reading-workspace .split-pane__panel {
+  background-color: #1e2935;
 }
 
 .exam-interface--reading .reading-workspace__scroll {
   max-height: none;
+}
+
+.exam-interface--reading .split-pane__left .reading-workspace__scroll {
+  background-color: #fbfcf9;
+}
+
+.exam-interface--reading .split-pane__right .reading-workspace__scroll {
+  background-color: #f7f9fa;
+}
+
+.dark .exam-interface--reading .split-pane__left .reading-workspace__scroll,
+.dark .exam-interface--reading .split-pane__right .reading-workspace__scroll {
+  background-color: #0f172a;
 }
 
 .split-pane__panel {

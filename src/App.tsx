@@ -204,7 +204,7 @@ const QuestionResponse = ({ question: rawQuestion, value, onChange, preview = fa
 
   if (question.responseType === 'single-choice') return (
     responseControl(<div className="space-y-2" role="radiogroup" aria-label="Answer choices">
-      {choices.map((choice, index) => <label key={`${question.id}-choice-${index}`} className="flex items-center gap-3 rounded-lg border border-slate-200 dark:border-slate-600 p-3 cursor-pointer">
+      {choices.map((choice, index) => <label key={`${question.id}-choice-${index}`} className={`flex min-h-12 items-center gap-3 rounded-lg border p-3 transition-colors cursor-pointer ${value === choice ? 'border-blue-500 bg-blue-50 dark:border-blue-400 dark:bg-blue-950/40' : 'border-slate-200 hover:border-blue-300 hover:bg-slate-50 dark:border-slate-600 dark:hover:border-blue-700 dark:hover:bg-slate-700/60'}`}>
         <input type="radio" name={`answer-${question.id}-${preview ? 'preview' : 'exam'}`} checked={value === choice} onChange={() => onChange(choice)} disabled={disabled} />
         <span><FormattedQuestionText text={choice} /></span>
       </label>)}
@@ -213,7 +213,7 @@ const QuestionResponse = ({ question: rawQuestion, value, onChange, preview = fa
 
   if (question.responseType === 'multiple-select') {
     const selected = Array.isArray(value) ? value : [];
-    return responseControl(<div className="space-y-2">{choices.map((choice, index) => <label key={`${question.id}-multi-${index}`} className="flex items-center gap-3 rounded-lg border border-slate-200 dark:border-slate-600 p-3 cursor-pointer">
+    return responseControl(<div className="space-y-2">{choices.map((choice, index) => <label key={`${question.id}-multi-${index}`} className={`flex min-h-12 items-center gap-3 rounded-lg border p-3 transition-colors cursor-pointer ${selected.includes(choice) ? 'border-blue-500 bg-blue-50 dark:border-blue-400 dark:bg-blue-950/40' : 'border-slate-200 hover:border-blue-300 hover:bg-slate-50 dark:border-slate-600 dark:hover:border-blue-700 dark:hover:bg-slate-700/60'}`}>
       <input type="checkbox" checked={selected.includes(choice)} onChange={event => onChange(event.target.checked ? [...selected, choice] : selected.filter(item => item !== choice))} disabled={disabled} />
       <span><FormattedQuestionText text={choice} /></span>
     </label>)}</div>);
@@ -1913,7 +1913,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                 <div className="grid grid-cols-2 gap-4">
                   <div className="col-span-2">
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Assessment Title</label>
-                    <input type="text" value={newTest.title} onChange={e => setNewTest({...newTest, title: e.target.value})} placeholder="e.g. Midterm Physics Exam" className="w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:ring-2 focus:ring-purple-500 outline-none" />
+                    <QuestionTextEditor value={newTest.title} onChange={value => setNewTest({ ...newTest, title: value })} rows={2} placeholder="e.g. Midterm Physics Exam" ariaLabel="Assessment title" />
                   </div>
                   <div className="col-span-2">
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Description / Instructions</label>
@@ -2664,7 +2664,7 @@ const WritingPractice = ({ tests, resources, resourceError, userId, onBack }) =>
   );
 };
 
-const ReadingPracticeWorkspace = ({ test, userId, questions, answers, currentIndex, setCurrentIndex, currentQuestion, updateAnswer, renderAnswerInput, disabled }) => {
+const ReadingPracticeWorkspace = ({ test, userId, questions, answers, currentIndex, setCurrentIndex, currentQuestion, updateAnswer, renderAnswerInput, onFinish, disabled }) => {
   const [activePassageNumber, setActivePassageNumber] = useState(Number(currentQuestion?.passageNumber || 1));
   const [visitedQuestionIds, setVisitedQuestionIds] = useState<string[]>(currentQuestion?.id ? [currentQuestion.id] : []);
   const readingQuestions = questions.filter((question: any) => question.section === 'reading'
@@ -2696,8 +2696,12 @@ const ReadingPracticeWorkspace = ({ test, userId, questions, answers, currentInd
 
   useEffect(() => {
     if (passagePaneRef.current) passagePaneRef.current.scrollTop = passageScroll.current[String(activePassageNumber)] || 0;
-    if (questionPaneRef.current) questionPaneRef.current.scrollTop = questionScroll.current[String(activePassageNumber)] || 0;
   }, [activePassageNumber]);
+
+  useEffect(() => {
+    const questionId = String(currentQuestion?.id || '');
+    if (questionPaneRef.current) questionPaneRef.current.scrollTop = questionScroll.current[questionId] || 0;
+  }, [currentQuestion?.id]);
 
   const passageQuestions = readingQuestions
     .map((question: any, index: number) => ({ question, index }))
@@ -2710,6 +2714,18 @@ const ReadingPracticeWorkspace = ({ test, userId, questions, answers, currentInd
       const nextPassage = Number(questions[index].passageNumber || 1);
       setActivePassageNumber(nextPassage);
       setCurrentIndex(index);
+    }
+  };
+  const unansweredReadingCount = readingQuestions.filter((question: any) => !isAnswerPresent(answers[question.id])).length;
+  const moveToNextUnanswered = () => {
+    if (!readingQuestions.length || !unansweredReadingCount) return;
+    const currentReadingIndex = readingQuestions.findIndex((question: any) => String(question.id) === String(currentQuestion?.id));
+    for (let step = 1; step <= readingQuestions.length; step += 1) {
+      const question = readingQuestions[(currentReadingIndex + step + readingQuestions.length) % readingQuestions.length];
+      if (!isAnswerPresent(answers[question.id])) {
+        moveQuestion(String(question.id));
+        return;
+      }
     }
   };
   const changePassage = (number: number) => {
@@ -2754,21 +2770,55 @@ const ReadingPracticeWorkspace = ({ test, userId, questions, answers, currentInd
                 const index = questions.findIndex((question: any) => String(question.id) === questionId);
                 const question = questions[index];
                 const answered = isAnswerPresent(answers[question.id]);
-                return <button key={questionId} type="button" aria-current={activeQuestionId === questionId ? 'step' : undefined} aria-label={`Question ${index + 1}, ${answered ? 'answered' : 'unanswered'}${visitedQuestionIds.includes(questionId) ? ', visited' : ''}`} onClick={() => moveQuestion(questionId)} className={`rounded border px-2 py-1 text-sm ${activeQuestionId === questionId ? 'bg-blue-600 text-white' : answered ? 'border-emerald-500 text-emerald-800 dark:text-emerald-200' : 'dark:border-slate-600 dark:text-slate-100'}`}>{index + 1}</button>;
+                return <button key={questionId} type="button" aria-current={activeQuestionId === questionId ? 'step' : undefined} aria-label={`Question ${index + 1}, ${answered ? 'answered' : 'unanswered'}${visitedQuestionIds.includes(questionId) ? ', visited' : ''}`} onClick={() => moveQuestion(questionId)} className={`rounded border px-2 py-1 text-sm transition-colors ${activeQuestionId === questionId ? 'border-blue-600 bg-blue-600 text-white' : answered ? 'border-emerald-500 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-200 dark:hover:bg-emerald-900/50' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600'}`}>{index + 1}</button>;
               })}
+            </div>
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-slate-600 dark:text-slate-300" aria-live="polite">
+                {passageQuestions.filter(({ question }: any) => isAnswerPresent(answers[question.id])).length} of {passageQuestions.length} answered in this passage
+              </p>
+              <button type="button" onClick={moveToNextUnanswered} disabled={!unansweredReadingCount || disabled} className="rounded border border-blue-300 bg-blue-50 px-3 py-1.5 text-sm font-semibold text-blue-800 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-200 dark:hover:bg-blue-900/50">
+                {unansweredReadingCount ? `Next unanswered (${unansweredReadingCount})` : 'All reading questions answered'}
+              </button>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600 dark:text-slate-300" aria-label="Question status legend">
+              <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded border border-blue-600 bg-blue-600" aria-hidden="true" />Current</span>
+              <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded border border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40" aria-hidden="true" />Answered</span>
+              <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded border border-slate-300 bg-white dark:border-slate-600 dark:bg-slate-700" aria-hidden="true" />Not answered</span>
             </div>
           </div>
           {passageQuestions.length && currentQuestion ? (
-            <div ref={questionPaneRef} onScroll={event => { questionScroll.current[String(activePassageNumber)] = event.currentTarget.scrollTop; }} className="reading-workspace__scroll space-y-4 rounded-lg border bg-white p-5 dark:border-slate-600 dark:bg-slate-800">
+            <div ref={questionPaneRef} onScroll={event => { if (currentQuestion?.id) questionScroll.current[String(currentQuestion.id)] = event.currentTarget.scrollTop; }} className="reading-workspace__scroll space-y-4 rounded-lg border bg-white p-5 dark:border-slate-600 dark:bg-slate-800">
+              {currentQuestion.questionType === 'matching-headings' && currentQuestion.sharedChoices?.some((heading: string) => heading.trim()) && (
+                <section aria-labelledby={`headings-${currentQuestion.id}`} className="rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/30">
+                  <h4 id={`headings-${currentQuestion.id}`} className="mb-2 font-bold text-amber-950 dark:text-amber-100">List of headings</h4>
+                  <ul className="space-y-2">
+                    {currentQuestion.sharedChoices.filter((heading: string) => heading.trim()).map((heading: string, index: number) => (
+                      <li key={`${currentQuestion.id}-heading-${index}`} className="rounded-lg bg-white/80 px-3 py-2 text-sm leading-6 text-slate-800 dark:bg-slate-900/60 dark:text-slate-100">
+                        <FormattedQuestionText text={heading} />
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
               <div className="rounded-xl border border-blue-100 bg-blue-50/70 p-4 dark:border-blue-900/70 dark:bg-blue-950/30">
-                <p className="text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">{IELTS_QUESTION_FORMATS.find(item => item[0] === currentQuestion.questionType)?.[1] || currentQuestion.questionType || 'Reading question'}</p>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">{IELTS_QUESTION_FORMATS.find(item => item[0] === currentQuestion.questionType)?.[1] || currentQuestion.questionType || 'Reading question'}</p>
+                  <span className="rounded-full bg-white/80 px-2.5 py-1 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200">Question {questions.findIndex((question: any) => question.id === currentQuestion.id) + 1} of {questions.length}</span>
+                </div>
                 <p className="mt-2 whitespace-pre-wrap font-semibold leading-7 text-slate-900 dark:text-slate-100"><QuestionPrompt question={currentQuestion} value={answers[currentQuestion.id]} onChange={updateAnswer} disabled={disabled} /></p>
                 <PromptFigure question={currentQuestion} assessmentId={test?.practiceSourceTestId || test?.id || 'unknown'} />
               </div>
               {renderAnswerInput()}
               <div className="flex justify-between gap-2 border-t pt-3 dark:border-slate-600">
-                <button type="button" onClick={() => moveQuestion(String(questions[currentIndex - 1]?.id || ''))} disabled={disabled || currentIndex === 0} className="rounded border px-3 py-2 disabled:opacity-50">Previous question</button>
-                <button type="button" onClick={() => moveQuestion(String(questions[currentIndex + 1]?.id || ''))} disabled={disabled || currentIndex >= questions.length - 1} className="rounded bg-blue-600 px-3 py-2 text-white disabled:opacity-50">Next question</button>
+                <button type="button" onClick={() => moveQuestion(String(questions[currentIndex - 1]?.id || ''))} disabled={disabled || currentIndex === 0} className="rounded border border-slate-300 bg-white px-3 py-2 text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600 dark:disabled:bg-slate-800 dark:disabled:text-slate-400">Previous question</button>
+                {currentIndex < questions.length - 1 ? (
+                  <button type="button" onClick={() => moveQuestion(String(questions[currentIndex + 1]?.id || ''))} disabled={disabled} className="rounded bg-blue-600 px-3 py-2 text-white disabled:cursor-not-allowed disabled:opacity-50">Next question</button>
+                ) : unansweredReadingCount ? (
+                  <button type="button" onClick={moveToNextUnanswered} disabled={disabled} className="rounded bg-blue-600 px-3 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">Review unanswered</button>
+                ) : (
+                  <button type="button" onClick={onFinish} disabled={disabled} className="rounded bg-emerald-600 px-3 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">Finish exam</button>
+                )}
               </div>
             </div>
           ) : <p className="rounded-lg border border-dashed p-5 text-slate-600 dark:border-slate-600 dark:text-slate-300">No questions are assigned to Passage {activePassageNumber}.</p>}
@@ -2903,10 +2953,11 @@ const ExamInterface = ({ test, onComplete, userId, writingResources, writingReso
       {submissionError && <p className="mt-3 text-sm text-red-600 dark:text-red-400" role="alert">{submissionError}</p>}
     </Modal>
     <section className={`${isWritingQuestion ? 'exam-interface--writing' : isReadingWorkspace ? 'exam-interface--reading' : 'mx-auto max-w-4xl'} rounded-xl border border-slate-200 bg-white p-6 text-left shadow-sm dark:border-slate-700 dark:bg-slate-800`}>
-      <div className="exam-interface__header mb-5 flex items-center justify-between gap-3 border-b border-slate-200 pb-4 dark:border-slate-700">
-        <div>
+      <div className="exam-interface__header mb-5 grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] items-center gap-3 border-b border-slate-200 pb-4 dark:border-slate-700">
+        <div aria-hidden="true" />
+        <div className="min-w-0 text-center">
           <p className="text-sm font-medium uppercase tracking-wide text-blue-600 dark:text-blue-400">Exam</p>
-          <h2 className="text-xl font-bold text-slate-800 dark:text-white">{test?.title || 'Practice exam'}</h2>
+          <h2 className="break-words text-2xl font-bold text-slate-800 dark:text-white"><FormattedQuestionText text={test?.title || 'Practice exam'} /></h2>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
           <button
@@ -2948,6 +2999,7 @@ const ExamInterface = ({ test, onComplete, userId, writingResources, writingReso
           currentQuestion={currentQuestion}
           updateAnswer={updateAnswer}
           renderAnswerInput={renderAnswerInput}
+          onFinish={() => setFinishConfirmationOpen(true)}
           disabled={timeExpired || isSubmitting}
         />
       ) : isWritingQuestion ? <ResizableSplitPane
@@ -3462,6 +3514,7 @@ const StudentDashboard = ({ user, tests, results, writingResources, writingResou
   const [selectedResultIds, setSelectedResultIds] = useState<string[]>([]);
   const [deleteResultsConfirm, setDeleteResultsConfirm] = useState<string[] | null>(null);
   const [deletingResults, setDeletingResults] = useState(false);
+  const [deleteResultsError, setDeleteResultsError] = useState('');
   const [pinModal, setPinModal] = useState({ isOpen: false, test: null, enteredPin: '', error: '' });
   const [groupCodeInput, setGroupCodeInput] = useState(user?.groupCode || '');
   const [isSavingGroupCode, setIsSavingGroupCode] = useState(false);
@@ -3520,6 +3573,7 @@ const StudentDashboard = ({ user, tests, results, writingResources, writingResou
   const confirmDeleteResults = async () => {
     if (!deleteResultsConfirm?.length || deletingResults) return;
     setDeletingResults(true);
+    setDeleteResultsError('');
     try {
       await onDeleteResults(deleteResultsConfirm);
       setSelectedResultIds(current => current.filter(id => !deleteResultsConfirm.includes(id)));
@@ -3527,7 +3581,11 @@ const StudentDashboard = ({ user, tests, results, writingResources, writingResou
       await showStudentAlert('Results deleted', `${deleteResultsConfirm.length} past result${deleteResultsConfirm.length === 1 ? '' : 's'} and matching teacher submission${deleteResultsConfirm.length === 1 ? '' : 's'} deleted.`);
     } catch (error) {
       console.error('Could not delete past results:', error);
-      await showStudentAlert('Could not delete results', error instanceof Error ? error.message : 'Could not delete the selected results. Please try again.');
+      const code = typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : '';
+      const message = error instanceof Error ? error.message : 'Could not delete the selected results. Please try again.';
+      setDeleteResultsError(code.includes('permission-denied')
+        ? `${message} If the problem continues, ask the site administrator to deploy the latest Firestore rules.`
+        : message);
     } finally {
       setDeletingResults(false);
     }
@@ -3650,10 +3708,10 @@ const StudentDashboard = ({ user, tests, results, writingResources, writingResou
                 Select all ({selectedResultIds.length} selected)
               </label>
               <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={() => setDeleteResultsConfirm(results.map(result => result.id))} className="rounded-lg border border-red-300 px-3 py-1.5 text-sm font-semibold text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950/40">
+                <button type="button" onClick={() => { setDeleteResultsError(''); setDeleteResultsConfirm(results.map(result => result.id)); }} className="rounded-lg border border-red-300 px-3 py-1.5 text-sm font-semibold text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950/40">
                   Delete all
                 </button>
-                <button type="button" onClick={() => setDeleteResultsConfirm(selectedResultIds)} disabled={!selectedResultIds.length} className="inline-flex items-center gap-1 rounded-lg bg-red-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50">
+                <button type="button" onClick={() => { setDeleteResultsError(''); setDeleteResultsConfirm(selectedResultIds); }} disabled={!selectedResultIds.length} className="inline-flex items-center gap-1 rounded-lg bg-red-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50">
                   <Trash2 className="h-4 w-4" /> Delete selected
                 </button>
               </div>
@@ -3718,11 +3776,12 @@ const StudentDashboard = ({ user, tests, results, writingResources, writingResou
           </div>
         )}
 
-        <Modal isOpen={Boolean(deleteResultsConfirm)} title="Delete past results?" onClose={() => !deletingResults && setDeleteResultsConfirm(null)} actions={[
-          { label: 'Cancel', onClick: () => setDeleteResultsConfirm(null), disabled: deletingResults },
+        <Modal isOpen={Boolean(deleteResultsConfirm)} title="Delete past results?" onClose={() => { if (!deletingResults) { setDeleteResultsConfirm(null); setDeleteResultsError(''); } }} actions={[
+          { label: 'Cancel', onClick: () => { setDeleteResultsConfirm(null); setDeleteResultsError(''); }, disabled: deletingResults },
           { label: deletingResults ? 'Deleting…' : 'Delete permanently', onClick: confirmDeleteResults, disabled: deletingResults, destructive: true },
         ]}>
           <p className="whitespace-pre-wrap">Permanently delete {deleteResultsConfirm?.length || 0} selected past result{deleteResultsConfirm?.length === 1 ? '' : 's'} and their matching teacher submission records? This cannot be undone. The assessments themselves will remain available to you if they are still assigned.</p>
+          {deleteResultsError && <p role="alert" className="mt-3 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200">{deleteResultsError}</p>}
         </Modal>
 
         <Modal isOpen={pinModal.isOpen} title="Enter Secret PIN" onClose={() => setPinModal({ isOpen: false, test: null, enteredPin: '', error: '' })}>
@@ -4069,20 +4128,25 @@ export default function App() {
     for (let index = 0; index < uniqueIds.length; index += 250) {
       const batch = writeBatch(db);
       const chunk = uniqueIds.slice(index, index + 250);
-      for (const resultId of chunk) {
-        const studentResultRef = doc(db, 'artifacts', appId, 'users', user.uid, 'results', resultId);
-        const studentResult = await getDoc(studentResultRef);
+      const studentResultRefs = chunk.map(resultId => doc(db, 'artifacts', appId, 'users', user.uid, 'results', resultId));
+      const centralSubmissionRefs = chunk.map(resultId => doc(db, 'artifacts', appId, 'public', 'data', 'submissions', `${user.uid}_${resultId}`));
+      const [studentResults, centralSubmissions] = await Promise.all([
+        Promise.all(studentResultRefs.map(resultRef => getDoc(resultRef))),
+        Promise.all(centralSubmissionRefs.map(submissionRef => getDoc(submissionRef)))
+      ]);
+
+      for (let resultIndex = 0; resultIndex < chunk.length; resultIndex += 1) {
+        const resultId = chunk[resultIndex];
+        const studentResult = studentResults[resultIndex];
         if (!studentResult.exists() || studentResult.data().attemptId !== resultId) {
           throw new Error('One or more selected result records could not be verified. No result in that batch was deleted.');
         }
-        const centralId = `${user.uid}_${resultId}`;
-        const centralSubmissionRef = doc(db, 'artifacts', appId, 'public', 'data', 'submissions', centralId);
-        const centralSubmission = await getDoc(centralSubmissionRef);
+        const centralSubmission = centralSubmissions[resultIndex];
         if (centralSubmission.exists() && centralSubmission.data().studentUid !== user.uid) {
           throw new Error('A matching teacher submission could not be verified as yours.');
         }
-        batch.delete(studentResultRef);
-        if (centralSubmission.exists()) batch.delete(centralSubmissionRef);
+        batch.delete(studentResultRefs[resultIndex]);
+        if (centralSubmission.exists()) batch.delete(centralSubmissionRefs[resultIndex]);
       }
       await batch.commit();
     }
