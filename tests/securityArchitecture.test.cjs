@@ -88,6 +88,16 @@ test('timed exams show a countdown and submit automatically when time expires', 
   assert.match(appSource, /Time is up\. Your answers are being submitted\./);
 });
 
+test('active exam refreshes restore answers and the original deadline, with a five-minute return limit', () => {
+  assert.match(appSource, /examAttempt:\$\{userId\}:\$\{test\?\.id\}/);
+  assert.match(appSource, /attemptId,\s*answers,[\s\S]*?startedAtMs,/);
+  assert.match(appSource, /answers, currentIndex, startedAtMs/);
+  assert.match(appSource, /window\.addEventListener\('pagehide', markAttemptExit\)/);
+  assert.match(appSource, /EXAM_RETURN_GRACE_MS/);
+  assert.match(appSource, /Exam attempt closed/);
+  assert.match(appSource, /restoreExamAttempt\(localStorage\.getItem\(attemptStorageKey\)/);
+});
+
 test('student dashboard distinguishes assigned assessments from coached practice', () => {
   assert.match(appSource, /Available Tasks are assessments assigned by your teacher/);
   assert.match(appSource, /Practice is self-directed skill work/);

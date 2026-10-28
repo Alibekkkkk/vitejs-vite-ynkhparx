@@ -10,6 +10,7 @@ const app = readFileSync(join(root, 'src', 'App.tsx'), 'utf8');
 const questionTextEditor = readFileSync(join(root, 'src', 'QuestionTextEditor.tsx'), 'utf8');
 const readingAnnotations = readFileSync(join(root, 'src', 'ReadingAnnotations.tsx'), 'utf8');
 const questionPrompt = readFileSync(join(root, 'src', 'QuestionPrompt.tsx'), 'utf8');
+const formattedQuestionText = readFileSync(join(root, 'src', 'FormattedQuestionText.tsx'), 'utf8');
 
 test('form-control theme rules explicitly style light/dark text, focus, disabled, errors, autofill, and selects', () => {
   for (const token of ['background-color', 'color:', 'border-color', 'caret-color', '::placeholder', ':focus-visible', ':disabled', '[aria-invalid="true"]', ':-webkit-autofill', 'select option', '::selection']) {
@@ -118,28 +119,44 @@ test('reading exams use full-screen independent panes with selectable annotation
   assert.match(app, /const isReadingWorkspace = isReadingPractice \|\| Boolean\(currentQuestion && \([\s\S]*?currentQuestion\.section === 'reading'[\s\S]*?currentQuestion\.passageNumber/);
   assert.match(app, /exam-interface--reading/);
   assert.match(app, /<ReadingAnnotations[\s\S]*?storageKey=\{`reading-annotations:/);
-  assert.match(app, /<FormattedQuestionText text=\{passage\?\.title/);
+  assert.match(app, /<FormattedQuestionText text=\{passage\?\.title[^>]*minFontSize=\{30\}/);
   assert.match(app, /dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600/);
   assert.match(globalStyles, /\.exam-interface--reading[\s\S]*?height: 100dvh/);
-  assert.match(globalStyles, /\.reading-annotations__text \{[\s\S]*?font-size: clamp\(24px, 2vw, 30px\)/);
-  assert.match(globalStyles, /\.exam-interface--reading \{[\s\S]*?background-color: #f3f7f5/);
-  assert.match(globalStyles, /\.exam-interface--reading \.split-pane__left \.reading-workspace__scroll \{[\s\S]*?background-color: #fbfcf9/);
+  assert.match(globalStyles, /\.reading-annotations__text \{[\s\S]*?font-size: 20px/);
+  assert.match(app, /reading-text-scale:\$\{userId\}/);
+  assert.match(app, /role="group" aria-label="Passage text size"/);
+  assert.match(app, /min="80" max="150" step="10" value=\{readingTextScale\}/);
+  assert.match(app, /aria-label="Reset passage text size"/);
+  assert.match(app, /fontScale=\{readingTextScale \/ 100\}/);
+  assert.match(readingAnnotations, /fontSize: `\$\{segment\.format\.fontSize \* fontScale\}px`/);
+  assert.match(readingAnnotations, /style=\{\{ fontSize: `\$\{20 \* fontScale\}px` \}\}/);
+  assert.match(globalStyles, /\.exam-interface--reading \{[\s\S]*?background-color: #f4f0df/);
+  assert.match(globalStyles, /\.exam-interface--reading \.split-pane__left \.reading-workspace__scroll \{[\s\S]*?background-color: #fffdf0/);
   assert.match(globalStyles, /\.dark \.exam-interface--reading \.reading-workspace \.split-pane__panel \{[\s\S]*?background-color: #1e2935/);
   assert.match(globalStyles, /\.reading-question-nav button\[aria-current="step"\][\s\S]*?color: #fff !important/);
   assert.match(globalStyles, /\.dark \.reading-question-nav button\[data-answered="true"\][\s\S]*?color: #d1fae5 !important/);
   assert.match(readingAnnotations, /data-mark-ids=\{markIds\.join\(','\)\}/);
   assert.match(readingAnnotations, /const alreadySelected = selectedMarkIds\.length === markIds\.length/);
   assert.match(readingAnnotations, /setMarks\(current => current\.filter\(mark => !selectedMarkIds\.includes\(mark\.id\)\)\)/);
-  assert.match(readingAnnotations, /Remove selected mark/);
-  assert.match(readingAnnotations, /Delete selected highlight or underline/);
+  assert.match(readingAnnotations, /onContextMenu=\{event => \{/);
+  assert.match(readingAnnotations, /Underline selected text/);
+  assert.match(readingAnnotations, /Highlight selected text/);
+  assert.match(readingAnnotations, /Add sticky note to selected text/);
+  assert.match(readingAnnotations, /Remove selected highlight or underline/);
   assert.match(globalStyles, /\.reading-annotations__mark-remove \{[\s\S]*?display: inline-flex/);
+  assert.match(globalStyles, /\.reading-annotations__context-menu \{[\s\S]*?position: fixed/);
   assert.match(globalStyles, /\.reading-annotations__highlighted \{[\s\S]*?color: #172033 !important/);
-  assert.match(globalStyles, /\.reading-annotations__toolbar \{[\s\S]*?position: relative/);
+  assert.match(globalStyles, /\.reading-sticky-note \{[\s\S]*?resize: both;[\s\S]*?container-type: inline-size/);
+  assert.match(globalStyles, /\.reading-sticky-note textarea \{[\s\S]*?font-size: clamp\(/);
+  assert.match(readingAnnotations, /new ResizeObserver\(entries =>/);
+  assert.match(readingAnnotations, /width: Math\.max\(240, Math\.min\(760, size\.width\)\)/);
+  assert.match(readingAnnotations, /height: Math\.max\(220, Math\.min\(700, size\.height\)\)/);
+  assert.match(formattedQuestionText, /Math\.max\(part\.fontSize \|\| 0, minFontSize \|\| 0\)/);
+  assert.match(globalStyles, /\.reading-passage-title \{[\s\S]*?font-size: 2rem;[\s\S]*?text-align: center/);
   assert.match(globalStyles, /\.exam-interface--reading \.reading-workspace > \.split-pane[\s\S]*?flex: 1 1 auto/);
-  assert.match(readingAnnotations, /Select passage text to highlight, underline, or add a note/);
+  assert.match(readingAnnotations, /Select passage text, then right-click to highlight, underline, or add a note/);
   assert.match(readingAnnotations, /const HIGHLIGHT_COLORS = \[/);
   assert.equal((readingAnnotations.match(/\{ name: '(?:Yellow|Orange|Coral|Pink|Purple|Blue|Cyan|Green|Lime|Gray)'/g) || []).length, 10);
-  assert.match(readingAnnotations, /role="group" aria-label="Choose highlight color"/);
   assert.match(readingAnnotations, /Drag sticky note/);
   assert.match(readingAnnotations, /onClick=\{\(\) => setVisibleNotes/);
   assert.match(readingAnnotations, /setNotes\(current => current\.filter\(item => item\.id !== note\.id\)\)/);
@@ -176,6 +193,10 @@ test('reading matching-headings questions show every shared heading above the qu
   assert.match(app, /<QuestionResponse[\s\S]*?value=\{questionValue\}[\s\S]*?updateAnswerForQuestion\(question, value\)/);
   assert.match(app, /reading-question-\$\{questionId\}/);
   assert.match(app, /Question \{index \+ 1\} of \{questions\.length\}/);
+  assert.match(app, /const reviewedReadingListeningScores = \['reading', 'listening'\]/);
+  assert.match(app, /aria-label="Reading and listening score table"/);
+  assert.match(app, /Correct<\/th>/);
+  assert.match(app, /Awaiting teacher review/);
 });
 
 test('reading shows every question in passage order with clear answer states and unanswered navigation', () => {

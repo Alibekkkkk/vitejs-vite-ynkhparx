@@ -47,6 +47,7 @@ import { LEGACY_IMPORT_BATCH_SIZE, mapLegacyResult, parseLegacyResultPath } from
 import { ANSWER_KEY_MIGRATION_VERSION, buildAnswerKeyQuestions, hasCompleteAnswerKey, stripPublicAnswerFields } from './answerKeyMigration';
 import { buildReadingSessionViewModel } from './readingSession';
 import { ReadingAnnotations } from './ReadingAnnotations';
+import { createExamAttemptSnapshot, EXAM_RETURN_GRACE_MS, restoreExamAttempt, type ExamAttemptSnapshot } from './examAttempt';
 import {
   fetchFigureForAI,
   getFigureSource,
@@ -2667,6 +2668,16 @@ const WritingPractice = ({ tests, resources, resourceError, userId, onBack }) =>
 const ReadingPracticeWorkspace = ({ test, userId, questions, answers, setCurrentIndex, currentQuestion, updateAnswerForQuestion, onFinish, disabled }) => {
   const [activePassageNumber, setActivePassageNumber] = useState(Number(currentQuestion?.passageNumber || 1));
   const [visitedQuestionIds, setVisitedQuestionIds] = useState<string[]>(currentQuestion?.id ? [currentQuestion.id] : []);
+  const [readingTextScale, setReadingTextScale] = useState(() => {
+    try {
+      const savedScale = localStorage.getItem(`reading-text-scale:${userId}`);
+      const parsedScale = savedScale === null ? 100 : Number(savedScale);
+      return Number.isInteger(parsedScale) && parsedScale >= 80 && parsedScale <= 150 ? parsedScale : 100;
+    } catch (error) {
+      console.warn('Could not restore reading text size:', error);
+      return 100;
+    }
+  });
   const readingQuestions = questions.filter((question: any) => question.section === 'reading'
     || (test?.practiceMetadata?.kind === 'reading' && Number(question.passageNumber || 1) > 0)
     || (test?.type === 'IELTS' && Number(question.passageNumber) > 0));
@@ -2675,6 +2686,13 @@ const ReadingPracticeWorkspace = ({ test, userId, questions, answers, setCurrent
   const passagePaneRef = React.useRef<HTMLDivElement>(null);
   const questionPaneRef = React.useRef<HTMLDivElement>(null);
   const questionCardRefs = React.useRef<Record<string, HTMLElement | null>>({});
+  useEffect(() => {
+    try {
+      localStorage.setItem(`reading-text-scale:${userId}`, String(readingTextScale));
+    } catch (error) {
+      console.warn('Could not save reading text size:', error);
+    }
+  }, [readingTextScale, userId]);
   const readingSession = buildReadingSessionViewModel({
     configuredPassages: test?.sections?.reading?.passages || [],
     questions: readingQuestions,
@@ -2749,7 +2767,17 @@ const ReadingPracticeWorkspace = ({ test, userId, questions, answers, setCurrent
         maxLeftPercent={65}
         left={<div className="space-y-3">
           <div className="sticky top-0 z-10 rounded-lg border bg-white p-3 dark:border-slate-600 dark:bg-slate-800">
-            <h3 className="reading-passage-title font-bold text-slate-800 dark:text-white"><FormattedQuestionText text={passage?.title || `Passage ${activePassageNumber}`} /></h3>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <h3 className="reading-passage-title min-w-0 flex-1 font-bold text-slate-800 dark:text-white"><FormattedQuestionText text={passage?.title || `Passage ${activePassageNumber}`} minFontSize={30} /></h3>
+              <div className="reading-text-size-control" role="group" aria-label="Passage text size">
+                <span className="reading-text-size-control__label">Text size</span>
+                <button type="button" onClick={() => setReadingTextScale(scale => Math.max(80, scale - 10))} disabled={readingTextScale <= 80} aria-label="Decrease passage text size">A−</button>
+                <input type="range" min="80" max="150" step="10" value={readingTextScale} onChange={event => setReadingTextScale(Number(event.target.value))} aria-label="Passage text size" aria-valuetext={`${readingTextScale}%`} />
+                <button type="button" onClick={() => setReadingTextScale(scale => Math.min(150, scale + 10))} disabled={readingTextScale >= 150} aria-label="Increase passage text size">A+</button>
+                <output aria-live="polite">{readingTextScale}%</output>
+                <button type="button" onClick={() => setReadingTextScale(100)} disabled={readingTextScale === 100} aria-label="Reset passage text size">Reset</button>
+              </div>
+            </div>
             <p className="text-sm text-slate-600 dark:text-slate-300">Passage {activePassageNumber} of {passageNumbers.length || 1}</p>
             <nav className="mt-2 flex flex-wrap gap-2" aria-label="Passage navigation">
                   {passageNumbers.map(number => <button key={number} type="button" onClick={() => changePassage(number)} aria-current={activePassageNumber === number ? 'page' : undefined} className={`rounded border px-3 py-1.5 font-medium transition-colors ${activePassageNumber === number ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600'}`}>Passage {number}</button>)}
@@ -2760,6 +2788,7 @@ const ReadingPracticeWorkspace = ({ test, userId, questions, answers, setCurrent
                 <ReadingAnnotations
                   key={`${userId}:${test?.id || 'reading'}:${activePassageNumber}`}
                   text={passageText}
+                  fontScale={readingTextScale / 100}
                   storageKey={`reading-annotations:${userId}:${test?.id || 'reading'}:${activePassageNumber}`}
                 />
               </div>
@@ -2853,22 +2882,35 @@ const ReadingPracticeWorkspace = ({ test, userId, questions, answers, setCurrent
   );
 };
 
-const ExamInterface = ({ test, onComplete, userId, writingResources, writingResourcesError, isDark, onToggleTheme }) => {
+const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, writingResourcesError, isDark, onToggleTheme }) => {
   const questions = Array.isArray(test?.questions) ? test.questions : [];
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [answers, setAnswers] = useState<Record<string, unknown>>({});
+  const attemptStorageKey = `examAttempt:${userId}:${test?.id}`;
+  const [initialAttempt] = useState(() => {
+    try {
+      const restored = restoreExamAttempt(localStorage.getItem(attemptStorageKey), String(test?.id || ''));
+      return restored.status === 'resumable' ? restored.snapshot : createExamAttemptSnapshot(String(test?.id || ''));
+    } catch (error) {
+      console.warn('Could not restore the exam attempt:', error);
+      return createExamAttemptSnapshot(String(test?.id || ''));
+    }
+  });
+  const [currentIndex, setCurrentIndex] = useState(initialAttempt.currentIndex);
+  const [answers, setAnswers] = useState<Record<string, unknown>>(initialAttempt.answers);
   const [finishConfirmationOpen, setFinishConfirmationOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submissionError, setSubmissionError] = useState('');
-  const [attemptId] = useState(() => crypto.randomUUID());
-  const [startedAtMs] = useState(() => Date.now());
+  const [attemptId] = useState(initialAttempt.attemptId);
+  const [startedAtMs] = useState(initialAttempt.startedAtMs);
+  const attemptSnapshotRef = useRef<ExamAttemptSnapshot>(initialAttempt);
   const durationSeconds = Number(test?.durationSeconds);
   const hasTimeLimit = Number.isFinite(durationSeconds) && durationSeconds > 0;
-  const [secondsRemaining, setSecondsRemaining] = useState(() => hasTimeLimit ? Math.ceil(durationSeconds) : null);
+  const [secondsRemaining, setSecondsRemaining] = useState(() => hasTimeLimit ? Math.max(0, Math.ceil((startedAtMs + durationSeconds * 1000 - Date.now()) / 1000)) : null);
   const [timeExpired, setTimeExpired] = useState(false);
   const submissionStarted = React.useRef(false);
   const deadlineMs = React.useRef(startedAtMs + (hasTimeLimit ? durationSeconds * 1000 : 0));
   const submitAttemptRef = React.useRef<(autoSubmitted?: boolean) => Promise<void>>(async () => {});
+  const onAbortRef = useRef(onAbort);
+  onAbortRef.current = onAbort;
   const currentQuestion = questions[currentIndex] || null;
   const currentValue = currentQuestion ? answers[currentQuestion.id] ?? '' : '';
   const unansweredCount = questions.filter(question => !isAnswerPresent(answers[question.id])).length;
@@ -2888,6 +2930,64 @@ const ExamInterface = ({ test, onComplete, userId, writingResources, writingReso
     if (!currentQuestion) return;
     setAnswers(previous => ({ ...previous, [currentQuestion.id]: value }));
   };
+
+  attemptSnapshotRef.current = { ...attemptSnapshotRef.current, answers, currentIndex, startedAtMs };
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(attemptStorageKey, JSON.stringify({ ...attemptSnapshotRef.current, lastExitAtMs: null, lastSeenAtMs: Date.now() }));
+      attemptSnapshotRef.current.lastSeenAtMs = Date.now();
+    } catch (error) {
+      console.warn('Could not save the exam attempt:', error);
+    }
+  }, [attemptStorageKey, answers, currentIndex]);
+
+  useEffect(() => {
+    const saveHeartbeat = () => {
+      try {
+        const snapshot = { ...attemptSnapshotRef.current, lastExitAtMs: null, lastSeenAtMs: Date.now() };
+        attemptSnapshotRef.current = snapshot;
+        localStorage.setItem(attemptStorageKey, JSON.stringify(snapshot));
+      } catch (error) {
+        console.warn('Could not save exam activity:', error);
+      }
+    };
+    const markAttemptExit = () => {
+      try {
+        localStorage.setItem(attemptStorageKey, JSON.stringify({
+          ...attemptSnapshotRef.current,
+          lastExitAtMs: Date.now(),
+          lastSeenAtMs: Date.now(),
+        }));
+      } catch (error) {
+        console.warn('Could not save the exam exit time:', error);
+      }
+    };
+    const validateReturn = () => {
+      try {
+        const restored = restoreExamAttempt(localStorage.getItem(attemptStorageKey), String(test?.id || ''));
+        if (restored.status === 'expired') {
+          onAbortRef.current?.();
+        } else if (restored.status === 'resumable') {
+          attemptSnapshotRef.current = restored.snapshot;
+          localStorage.setItem(attemptStorageKey, JSON.stringify(restored.snapshot));
+        }
+      } catch (error) {
+        console.error('Could not validate the return to this exam:', error);
+      }
+    };
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) validateReturn();
+    };
+    window.addEventListener('pagehide', markAttemptExit);
+    window.addEventListener('pageshow', handlePageShow);
+    const heartbeat = window.setInterval(saveHeartbeat, 15_000);
+    return () => {
+      window.removeEventListener('pagehide', markAttemptExit);
+      window.removeEventListener('pageshow', handlePageShow);
+      window.clearInterval(heartbeat);
+    };
+  }, [attemptStorageKey, test?.id]);
 
   const questionHeader = currentQuestion ? `${currentIndex + 1} / ${questions.length}` : '0 / 0';
 
@@ -3745,6 +3845,22 @@ const StudentDashboard = ({ user, tests, results, writingResources, writingResou
               <div className="divide-y divide-slate-200 dark:divide-slate-700">
                 {results.map((result, idx) => {
                    const testInfo = tests.find(t => t.id === result.testId) || { title: result.displayTitle || 'Practice Session', type: result.practiceMetadata?.kind || 'Unknown' };
+                   const reviewedReadingListeningScores = ['reading', 'listening'].map(section => {
+                     const sectionReviews = (result.questionReviews || []).filter((review: any) => String(review.section || '').toLowerCase() === section);
+                     const sectionQuestionCount = Array.isArray(testInfo.questions)
+                       ? testInfo.questions.filter((question: any) => String(question.section || '').toLowerCase() === section).length
+                       : 0;
+                     const total = sectionReviews.length || sectionQuestionCount;
+                     const scoredReviews = sectionReviews.filter((review: any) => review.status === 'graded'
+                       || (review.status === 'manual-review' && review.teacherReview?.reviewedAt && review.teacherReview.points != null));
+                     const correctAnswers = scoredReviews.filter((review: any) => review.status === 'graded'
+                       ? review.isCorrect === true
+                       : Number(review.teacherReview.points) >= Number(review.points)).length;
+                     const pendingReviews = sectionReviews.length
+                       ? sectionReviews.filter((review: any) => review.status === 'manual-review' && !review.teacherReview?.reviewedAt).length
+                       : result.score == null ? total : Math.max(0, total - scoredReviews.length);
+                     return { section, total, scored: scoredReviews.length, correctAnswers, pendingReviews };
+                   }).filter(section => section.total > 0);
                    return (
                      <div key={result.id || result.attemptId || idx} className="p-6 flex gap-3 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
                        <input type="checkbox" checked={selectedResultIds.includes(result.id)} onChange={() => toggleResultSelection(result.id)} aria-label={`Select result for ${result.displayTitle || testInfo.title}`} className="mt-1 shrink-0" />
@@ -3785,6 +3901,15 @@ const StudentDashboard = ({ user, tests, results, writingResources, writingResou
                            {result.score == null ? '—' : result.score} <span className="text-sm text-slate-400 dark:text-slate-500 font-normal">/ {result.maxPossibleScore == null ? '—' : result.maxPossibleScore}</span>
                            </div>
                            {(result.manualReviewCount > 0 || result.ungradedCount > 0) && <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{result.manualReviewCount ? `${result.manualReviewCount} awaiting review` : ''}{result.manualReviewCount && result.ungradedCount ? ' · ' : ''}{result.ungradedCount ? `${result.ungradedCount} ungraded` : ''}</p>}
+                           {reviewedReadingListeningScores.length > 0 && <table className="mt-3 w-full border-collapse text-left text-xs" aria-label="Reading and listening score table">
+                             <caption className="mb-1 text-left font-semibold">Reading and Listening score summary</caption>
+                             <thead><tr className="border-b border-slate-200 text-slate-500 dark:border-slate-700 dark:text-slate-400"><th className="py-1 pr-3 font-semibold">Section</th><th className="py-1 pr-3 font-semibold">Correct</th><th className="py-1 font-semibold">Status</th></tr></thead>
+                             <tbody>{reviewedReadingListeningScores.map(sectionScore => <tr key={sectionScore.section} className="border-b border-slate-100 last:border-0 dark:border-slate-700">
+                               <th scope="row" className="py-1 pr-3 font-medium capitalize">{sectionScore.section}</th>
+                               <td className="py-1 pr-3 tabular-nums">{sectionScore.scored === sectionScore.total ? `${sectionScore.correctAnswers} / ${sectionScore.total}` : sectionScore.scored ? `${sectionScore.correctAnswers} confirmed / ${sectionScore.total}` : `— / ${sectionScore.total}`}</td>
+                               <td className="py-1">{sectionScore.pendingReviews ? 'Awaiting teacher review' : sectionScore.scored === sectionScore.total ? 'Reviewed' : 'Partially reviewed'}</td>
+                             </tr>)}</tbody>
+                           </table>}
                          </div>
                          </div>
                        </div>
@@ -3876,8 +4001,34 @@ export default function App() {
             let savedExam = null;
             try { savedExam = JSON.parse(localStorage.getItem(`activeExam:${firebaseUser.uid}`) || 'null'); } catch { savedExam = null; }
             if (role === 'student' && savedExam?.questions?.length) {
-              setActiveTest(savedExam);
-              setCurrentView('exam');
+              const attemptStorageKey = `examAttempt:${firebaseUser.uid}:${savedExam.id}`;
+              let restored;
+              try {
+                restored = restoreExamAttempt(localStorage.getItem(attemptStorageKey), String(savedExam.id || ''));
+              } catch (error) {
+                console.error('Could not restore the saved exam attempt:', error);
+                restored = { status: 'invalid' as const };
+              }
+              if (restored.status === 'expired' || restored.status === 'invalid') {
+                localStorage.removeItem(attemptStorageKey);
+                localStorage.removeItem(`activeExam:${firebaseUser.uid}`);
+                setActiveTest(null);
+                setModalInfo({
+                  isOpen: true,
+                  title: 'Exam attempt closed',
+                  message: restored.status === 'expired'
+                    ? `This attempt was closed because you returned more than ${Math.ceil(EXAM_RETURN_GRACE_MS / 60_000)} minutes after leaving the exam.`
+                    : 'This saved attempt could not be restored, so it has been closed. Please contact your teacher if you need help.',
+                });
+                setCurrentView('student_dashboard');
+              } else {
+                const snapshot = restored.status === 'resumable'
+                  ? restored.snapshot
+                  : createExamAttemptSnapshot(String(savedExam.id || ''));
+                localStorage.setItem(attemptStorageKey, JSON.stringify(snapshot));
+                setActiveTest(savedExam);
+                setCurrentView('exam');
+              }
             } else {
               setActiveTest(null);
               setCurrentView(role === 'teacher' ? 'teacher_dashboard' : 'student_dashboard');
@@ -4018,7 +4169,22 @@ export default function App() {
   };
 
   const handleLogout = async () => {
-    // Keep active attempt data in this browser so an accidental sign-out does not erase work.
+    if (user?.uid && activeTest?.id) {
+      try {
+        const key = `examAttempt:${user.uid}:${activeTest.id}`;
+        const rawAttempt = localStorage.getItem(key);
+        const restored = restoreExamAttempt(rawAttempt, String(activeTest.id));
+        if (restored.status === 'resumable') {
+          localStorage.setItem(key, JSON.stringify({
+            ...restored.snapshot,
+            lastExitAtMs: Date.now(),
+            lastSeenAtMs: Date.now(),
+          }));
+        }
+      } catch (error) {
+        console.error('Could not save the exam pause time before logout:', error);
+      }
+    }
     if (auth) {
       await signOut(auth);
     }
@@ -4033,9 +4199,34 @@ export default function App() {
       setModalInfo({ isOpen: true, title: 'Exam not available', message: 'This exam is assigned to a different student group.' });
       return;
     }
-    try { localStorage.setItem(`activeExam:${user.uid}`, JSON.stringify(test)); } catch (error) { console.warn('Could not save the active assessment snapshot:', error); }
+    try {
+      localStorage.setItem(`activeExam:${user.uid}`, JSON.stringify(test));
+      localStorage.setItem(`examAttempt:${user.uid}:${test.id}`, JSON.stringify(createExamAttemptSnapshot(String(test.id))));
+    } catch (error) {
+      console.error('Could not start and save the exam attempt:', error);
+      setModalInfo({ isOpen: true, title: 'Could not start exam', message: 'Your attempt could not be saved in this browser. Check available storage and try again.' });
+      return;
+    }
     setActiveTest(test);
     setCurrentView('exam');
+  };
+
+  const abortActiveExam = () => {
+    if (user?.uid && activeTest?.id) {
+      try {
+        localStorage.removeItem(`activeExam:${user.uid}`);
+        localStorage.removeItem(`examAttempt:${user.uid}:${activeTest.id}`);
+      } catch (error) {
+        console.error('Could not clear the expired exam attempt:', error);
+      }
+    }
+    setActiveTest(null);
+    setCurrentView('student_dashboard');
+    setModalInfo({
+      isOpen: true,
+      title: 'Exam attempt closed',
+      message: `This attempt was closed because you returned more than ${Math.ceil(EXAM_RETURN_GRACE_MS / 60_000)} minutes after leaving the exam.`,
+    });
   };
 
   const saveStudentGroupCode = async (groupCode) => {
@@ -4463,7 +4654,7 @@ export default function App() {
       {currentView === 'login' && <LoginScreen onAuthAction={handleAuthAction} />}
       {currentView === 'teacher_dashboard' && <TeacherDashboard user={user} tests={tests} resources={writingResources} resourceError={writingResourcesError} onSaveResource={saveWritingResource} onDeleteResource={deleteWritingResource} submissions={submissions} submissionsLoading={submissionsLoading} submissionsError={submissionsError} onSaveReview={saveTeacherReview} onBackfillLegacy={backfillLegacySubmissions} onSecureAnswerKeys={secureExistingAnswerKeys} onLogout={handleLogout} />}
       {currentView === 'student_dashboard' && <StudentDashboard user={user} tests={tests} results={results} writingResources={writingResources} writingResourcesError={writingResourcesError} onStartTest={startTest} onSaveGroupCode={saveStudentGroupCode} onReplyTeacherComment={saveTeacherFeedbackReply} onDeleteResults={deleteStudentResults} onLogout={handleLogout} />}
-      {currentView === 'exam' && activeTest && user && <ExamInterface key={`${user.uid}:${activeTest.id}`} test={activeTest} userId={user.uid} writingResources={writingResources} writingResourcesError={writingResourcesError} isDark={isDark} onToggleTheme={() => setIsDark(previous => !previous)} onComplete={completeTest} />}
+      {currentView === 'exam' && activeTest && user && <ExamInterface key={`${user.uid}:${activeTest.id}`} test={activeTest} userId={user.uid} writingResources={writingResources} writingResourcesError={writingResourcesError} isDark={isDark} onToggleTheme={() => setIsDark(previous => !previous)} onComplete={completeTest} onAbort={abortActiveExam} />}
 
       <Modal isOpen={modalInfo.isOpen} title={modalInfo.title} onClose={() => setModalInfo(prev => ({ ...prev, isOpen: false }))}>
         <p className="whitespace-pre-wrap text-left">{modalInfo.message}</p>

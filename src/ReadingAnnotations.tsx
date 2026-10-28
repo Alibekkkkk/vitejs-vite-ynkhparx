@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { Trash2 } from 'lucide-react';
 import { getQuestionTextFormattingRuns, stripQuestionTextFormatting } from './questionTextFormatting';
 
 type ReadingMark = {
@@ -17,9 +18,12 @@ type ReadingNote = {
   body: string;
   x: number;
   y: number;
+  width?: number;
+  height?: number;
 };
 
 type Selection = { start: number; end: number; quote: string };
+type AnnotationMenu = { x: number; y: number };
 type SavedAnnotations = { marks: ReadingMark[]; notes: ReadingNote[] };
 
 const HIGHLIGHT_COLORS = [
@@ -54,7 +58,7 @@ const readSavedAnnotations = (storageKey: string): SavedAnnotations => {
   }
 };
 
-export function ReadingAnnotations({ text, storageKey }: { text: string; storageKey: string }) {
+export function ReadingAnnotations({ text, storageKey, fontScale = 1 }: { text: string; storageKey: string; fontScale?: number }) {
   const plainText = stripQuestionTextFormatting(text);
   const formattingRuns = getQuestionTextFormattingRuns(text);
   const [saved] = useState(() => readSavedAnnotations(storageKey));
@@ -64,7 +68,9 @@ export function ReadingAnnotations({ text, storageKey }: { text: string; storage
   const [noteDraft, setNoteDraft] = useState('');
   const [noteEditorOpen, setNoteEditorOpen] = useState(false);
   const [visibleNotes, setVisibleNotes] = useState<string[]>([]);
-  const [highlightMenuOpen, setHighlightMenuOpen] = useState(false);
+  const [selectedMarkIds, setSelectedMarkIds] = useState<string[]>([]);
+  const [selectedMarkAnchor, setSelectedMarkAnchor] = useState<number | null>(null);
+  const [annotationMenu, setAnnotationMenu] = useState<AnnotationMenu | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const dragOffset = useRef({ x: 0, y: 0 });
 
@@ -77,13 +83,56 @@ export function ReadingAnnotations({ text, storageKey }: { text: string; storage
   }, [storageKey, marks, notes]);
 
   useEffect(() => {
-    const hideNotesOutsideSticker = (event: PointerEvent) => {
-      if (!(event.target instanceof Element) || !event.target.closest('.reading-sticky-note')) {
+    const canvas = canvasRef.current;
+    if (!canvas || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(entries => {
+      const sizes = new Map<string, { width: number; height: number }>();
+      entries.forEach(entry => {
+        const noteId = (entry.target as HTMLElement).dataset.noteId;
+        if (noteId) {
+          const bounds = entry.target.getBoundingClientRect();
+          sizes.set(noteId, { width: Math.round(bounds.width), height: Math.round(bounds.height) });
+        }
+      });
+      if (sizes.size) setNotes(current => {
+        let changed = false;
+        const updated = current.map(note => {
+          const size = sizes.get(note.id);
+          if (!size || (Math.abs((note.width || 340) - size.width) < 2 && Math.abs((note.height || 300) - size.height) < 2)) return note;
+          changed = true;
+          return {
+            ...note,
+            width: Math.max(240, Math.min(760, size.width)),
+            height: Math.max(220, Math.min(700, size.height)),
+          };
+        });
+        return changed ? updated : current;
+      });
+    });
+    canvas.querySelectorAll<HTMLElement>('.reading-sticky-note').forEach(note => observer.observe(note));
+    return () => observer.disconnect();
+  }, [visibleNotes.join(',')]);
+
+  useEffect(() => {
+    const hideAnnotationsOutside = (event: PointerEvent) => {
+      const insideAnnotationMenu = event.target instanceof Element && Boolean(event.target.closest('.reading-annotations__context-menu'));
+      if (!insideAnnotationMenu) setAnnotationMenu(null);
+      if (!(event.target instanceof Element) || (!event.target.closest('.reading-sticky-note') && !event.target.closest('.reading-annotations__context-menu') && !event.target.closest('.reading-annotations__mark-remove') && !event.target.closest('[data-mark-ids]'))) {
         setVisibleNotes([]);
+        setSelectedMarkIds([]);
+        setSelectedMarkAnchor(null);
       }
     };
-    document.addEventListener('pointerdown', hideNotesOutsideSticker);
-    return () => document.removeEventListener('pointerdown', hideNotesOutsideSticker);
+    document.addEventListener('pointerdown', hideAnnotationsOutside);
+    return () => document.removeEventListener('pointerdown', hideAnnotationsOutside);
+  }, []);
+
+  useEffect(() => {
+    const closeMenuOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setAnnotationMenu(null);
+    };
+    document.addEventListener('keydown', closeMenuOnEscape);
+    return () => document.removeEventListener('keydown', closeMenuOnEscape);
   }, []);
 
   const captureSelection = () => {
@@ -91,15 +140,15 @@ export function ReadingAnnotations({ text, storageKey }: { text: string; storage
     const range = currentSelection?.rangeCount ? currentSelection.getRangeAt(0) : null;
     if (!range || !canvasRef.current
       || !canvasRef.current.contains(range.startContainer)
-      || !canvasRef.current.contains(range.endContainer)) return;
+      || !canvasRef.current.contains(range.endContainer)) return null;
     const passageText = canvasRef.current.querySelector('.reading-annotations__text');
-    if (!passageText?.contains(range.startContainer) || !passageText.contains(range.endContainer)) return;
+    if (!passageText?.contains(range.startContainer) || !passageText.contains(range.endContainer)) return null;
     const quote = currentSelection?.toString() || '';
     const trimmed = quote.trim();
     if (!trimmed) {
       setSelection(null);
       setNoteEditorOpen(false);
-      return;
+      return null;
     }
     const leadingWhitespace = quote.length - quote.trimStart().length;
     const prefix = range.cloneRange();
@@ -107,7 +156,9 @@ export function ReadingAnnotations({ text, storageKey }: { text: string; storage
     prefix.setEnd(range.startContainer, range.startOffset);
     const start = prefix.toString().length + leadingWhitespace;
     const boundedQuote = trimmed.slice(0, 1000);
-    setSelection({ start, end: start + boundedQuote.length, quote: boundedQuote });
+    const nextSelection = { start, end: start + boundedQuote.length, quote: boundedQuote };
+    setSelection(nextSelection);
+    return nextSelection;
   };
 
   useEffect(() => {
@@ -127,7 +178,7 @@ export function ReadingAnnotations({ text, storageKey }: { text: string; storage
       ...(color ? { color } : {}),
     }]);
     setSelection(null);
-    setHighlightMenuOpen(false);
+    setAnnotationMenu(null);
     window.getSelection()?.removeAllRanges();
   };
 
@@ -147,6 +198,7 @@ export function ReadingAnnotations({ text, storageKey }: { text: string; storage
     setVisibleNotes(current => [...current, id]);
     setNoteDraft('');
     setNoteEditorOpen(false);
+    setAnnotationMenu(null);
     setSelection(null);
     window.getSelection()?.removeAllRanges();
   };
@@ -183,14 +235,18 @@ export function ReadingAnnotations({ text, storageKey }: { text: string; storage
     const markIds = segment.activeMarks.map(mark => mark.id);
     const hasFormatting = Boolean(segment.format && (segment.format.style !== 'plain' || segment.format.fontSize));
     if (!highlight && !underlined && !noteIds.length && !hasFormatting) return <React.Fragment key={`passage-${index}`}>{segment.value}</React.Fragment>;
-    return <span
-      key={`passage-${index}`}
-      className={underlined ? 'reading-annotations__underline' : undefined}
+    const isMarkSelected = markIds.some(id => selectedMarkIds.includes(id));
+    const content = <span
+      className={[
+        underlined ? 'reading-annotations__underline' : '',
+        highlight ? 'reading-annotations__highlighted' : '',
+        isMarkSelected ? 'reading-annotations__mark-selected' : '',
+      ].filter(Boolean).join(' ') || undefined}
       style={{
         ...(highlight ? { backgroundColor: highlight.color } : {}),
         ...(segment.format?.style === 'bold' ? { fontWeight: 700 } : {}),
         ...(segment.format?.style === 'italic' ? { fontStyle: 'italic' } : {}),
-        ...(segment.format?.fontSize ? { fontSize: `${segment.format.fontSize}px` } : {}),
+        ...(segment.format?.fontSize ? { fontSize: `${segment.format.fontSize * fontScale}px` } : {}),
       }}
       data-note-ids={noteIds.join(',')}
       data-mark-ids={markIds.join(',')}
@@ -198,11 +254,15 @@ export function ReadingAnnotations({ text, storageKey }: { text: string; storage
       role={noteIds.length || markIds.length ? 'button' : undefined}
       aria-label={[
         noteIds.length ? `Open note${noteIds.length > 1 ? 's' : ''} on "${segment.value}"` : '',
-        markIds.length ? `Remove highlight or underline from "${segment.value}"` : '',
+        markIds.length ? `Select highlight or underline on "${segment.value}" for removal` : '',
       ].filter(Boolean).join('; ') || undefined}
-      title={markIds.length ? 'Click to remove this highlight or underline' : undefined}
+      title={markIds.length ? 'Select this mark to reveal its delete button' : undefined}
       onClick={() => {
-        if (markIds.length) setMarks(current => current.filter(mark => !markIds.includes(mark.id)));
+        if (markIds.length) {
+          const alreadySelected = selectedMarkIds.length === markIds.length && markIds.every(id => selectedMarkIds.includes(id));
+          setSelectedMarkIds(alreadySelected ? [] : markIds);
+          setSelectedMarkAnchor(alreadySelected ? null : segment.start);
+        }
         if (noteIds.length) setVisibleNotes(current => {
           const allVisible = noteIds.every(id => current.includes(id));
           return allVisible ? current.filter(id => !noteIds.includes(id)) : [...new Set([...current, ...noteIds])];
@@ -211,11 +271,28 @@ export function ReadingAnnotations({ text, storageKey }: { text: string; storage
       onKeyDown={event => {
         if ((noteIds.length || markIds.length) && (event.key === 'Enter' || event.key === ' ')) {
           event.preventDefault();
-          if (markIds.length) setMarks(current => current.filter(mark => !markIds.includes(mark.id)));
+          if (markIds.length) {
+            setSelectedMarkIds(markIds);
+            setSelectedMarkAnchor(segment.start);
+          }
           if (noteIds.length) setVisibleNotes(current => [...new Set([...current, ...noteIds])]);
         }
       }}
     >{segment.value}</span>;
+    return <React.Fragment key={`passage-${index}`}>
+      {content}
+      {isMarkSelected && selectedMarkAnchor === segment.start && <button
+        type="button"
+        className="reading-annotations__mark-remove"
+        onClick={() => {
+          setMarks(current => current.filter(mark => !selectedMarkIds.includes(mark.id)));
+          setSelectedMarkIds([]);
+          setSelectedMarkAnchor(null);
+        }}
+        aria-label="Remove selected highlight or underline"
+        title="Remove selected highlight or underline"
+      ><Trash2 size={15} aria-hidden="true" /></button>}
+    </React.Fragment>;
   };
   const renderedPassageSegments: React.ReactNode[] = [];
   for (let index = 0; index < textSegments.length;) {
@@ -236,21 +313,21 @@ export function ReadingAnnotations({ text, storageKey }: { text: string; storage
 
   return (
     <section className="reading-annotations" aria-label="Passage annotation tools">
-      <div className="reading-annotations__toolbar">
-        <p className="reading-annotations__hint">Select passage text to highlight, underline, or add a note.</p>
-        <div className="reading-annotations__actions">
-          <button type="button" className="reading-annotations__tool" disabled={!selection} onClick={() => addMark('underline')} aria-label="Underline selected text"><u aria-hidden="true">U</u> <span>Underline</span></button>
-          <div className="reading-highlight-menu">
-            <button type="button" className="reading-annotations__tool" disabled={!selection} aria-expanded={highlightMenuOpen} onClick={() => setHighlightMenuOpen(open => !open)}>
-              <span className="reading-highlight-menu__swatch" aria-hidden="true" /> Highlight <span aria-hidden="true">▾</span>
-            </button>
-            {highlightMenuOpen && <div className="reading-highlight-menu__popover" role="group" aria-label="Choose highlight color">
-              {HIGHLIGHT_COLORS.map(color => <button key={color.name} type="button" title={`${color.name} highlight`} aria-label={`${color.name} highlight`} onClick={() => addMark('highlight', color.value)} style={{ backgroundColor: color.value }} />)}
-            </div>}
-          </div>
-          <button type="button" className="reading-annotations__tool" disabled={!selection} onClick={() => setNoteEditorOpen(open => !open)}>＋ <span>Sticky note</span></button>
+      <p className="reading-annotations__hint">Select passage text, then right-click to highlight, underline, or add a note.</p>
+
+      {annotationMenu && selection && <div
+        className="reading-annotations__context-menu"
+        role="group"
+        aria-label="Actions for selected passage text"
+        style={{ left: annotationMenu.x, top: annotationMenu.y }}
+      >
+        <p>Annotate selected text</p>
+        <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => addMark('underline')} aria-label="Underline selected text"><u aria-hidden="true">U</u> Underline</button>
+        <div className="reading-annotations__context-colors" role="group" aria-label="Highlight selected text">
+          {HIGHLIGHT_COLORS.map(color => <button key={color.name} type="button" onMouseDown={event => event.preventDefault()} onClick={() => addMark('highlight', color.value)} style={{ backgroundColor: color.value }} aria-label={`${color.name} highlight`} title={`${color.name} highlight`} />)}
         </div>
-      </div>
+        <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => { setNoteDraft(''); setNoteEditorOpen(true); setAnnotationMenu(null); }} aria-label="Add sticky note to selected text">＋ Sticky note</button>
+      </div>}
 
       {selection && noteEditorOpen && <div className="reading-note-composer">
         <blockquote>“{selection.quote}”</blockquote>
@@ -261,15 +338,25 @@ export function ReadingAnnotations({ text, storageKey }: { text: string; storage
         </div>
       </div>}
 
-      <div ref={canvasRef} className="reading-annotations__canvas" onMouseUp={captureSelection} onKeyUp={captureSelection}>
-        <p className="reading-annotations__text">
+      <div ref={canvasRef} className="reading-annotations__canvas" onMouseUp={captureSelection} onKeyUp={captureSelection} onContextMenu={event => {
+        const nextSelection = captureSelection();
+        if (!nextSelection) return;
+        event.preventDefault();
+        setNoteEditorOpen(false);
+        setAnnotationMenu({
+          x: Math.max(8, Math.min(event.clientX, window.innerWidth - 240)),
+          y: Math.max(8, Math.min(event.clientY, window.innerHeight - 190)),
+        });
+      }}>
+        <p className="reading-annotations__text" style={{ fontSize: `${20 * fontScale}px` }}>
           {renderedPassageSegments}
         </p>
 
         {validNotes.filter(note => visibleNotes.includes(note.id)).map((note, index) => <article
           key={note.id}
           className="reading-sticky-note"
-          style={{ left: `${note.x}%`, top: `${note.y}%`, zIndex: index + 2 }}
+          data-note-id={note.id}
+          style={{ left: `${note.x}%`, top: `${note.y}%`, width: `${note.width || 340}px`, height: `${note.height || 300}px`, zIndex: index + 2 }}
           onPointerDown={event => event.stopPropagation()}
           onClick={event => event.stopPropagation()}
         >
