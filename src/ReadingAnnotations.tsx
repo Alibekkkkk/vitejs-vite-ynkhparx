@@ -180,6 +180,7 @@ export function ReadingAnnotations({ text, storageKey }: { text: string; storage
     const highlight = [...segment.activeMarks].reverse().find(mark => mark.kind === 'highlight');
     const underlined = segment.activeMarks.some(mark => mark.kind === 'underline') || segment.format?.style === 'underline';
     const noteIds = segment.activeNotes.map(note => note.id);
+    const markIds = segment.activeMarks.map(mark => mark.id);
     const hasFormatting = Boolean(segment.format && (segment.format.style !== 'plain' || segment.format.fontSize));
     if (!highlight && !underlined && !noteIds.length && !hasFormatting) return <React.Fragment key={`passage-${index}`}>{segment.value}</React.Fragment>;
     return <span
@@ -192,17 +193,26 @@ export function ReadingAnnotations({ text, storageKey }: { text: string; storage
         ...(segment.format?.fontSize ? { fontSize: `${segment.format.fontSize}px` } : {}),
       }}
       data-note-ids={noteIds.join(',')}
-      tabIndex={noteIds.length ? 0 : undefined}
-      role={noteIds.length ? 'button' : undefined}
-      aria-label={noteIds.length ? `Open note${noteIds.length > 1 ? 's' : ''} on "${segment.value}"` : undefined}
-      onClick={() => noteIds.length && setVisibleNotes(current => {
-        const allVisible = noteIds.every(id => current.includes(id));
-        return allVisible ? current.filter(id => !noteIds.includes(id)) : [...new Set([...current, ...noteIds])];
-      })}
+      data-mark-ids={markIds.join(',')}
+      tabIndex={noteIds.length || markIds.length ? 0 : undefined}
+      role={noteIds.length || markIds.length ? 'button' : undefined}
+      aria-label={[
+        noteIds.length ? `Open note${noteIds.length > 1 ? 's' : ''} on "${segment.value}"` : '',
+        markIds.length ? `Remove highlight or underline from "${segment.value}"` : '',
+      ].filter(Boolean).join('; ') || undefined}
+      title={markIds.length ? 'Click to remove this highlight or underline' : undefined}
+      onClick={() => {
+        if (markIds.length) setMarks(current => current.filter(mark => !markIds.includes(mark.id)));
+        if (noteIds.length) setVisibleNotes(current => {
+          const allVisible = noteIds.every(id => current.includes(id));
+          return allVisible ? current.filter(id => !noteIds.includes(id)) : [...new Set([...current, ...noteIds])];
+        });
+      }}
       onKeyDown={event => {
-        if (noteIds.length && (event.key === 'Enter' || event.key === ' ')) {
+        if ((noteIds.length || markIds.length) && (event.key === 'Enter' || event.key === ' ')) {
           event.preventDefault();
-          setVisibleNotes(current => [...new Set([...current, ...noteIds])]);
+          if (markIds.length) setMarks(current => current.filter(mark => !markIds.includes(mark.id)));
+          if (noteIds.length) setVisibleNotes(current => [...new Set([...current, ...noteIds])]);
         }
       }}
     >{segment.value}</span>;
