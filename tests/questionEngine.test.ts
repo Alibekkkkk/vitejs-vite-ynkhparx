@@ -30,6 +30,7 @@ test('normalizes case and whitespace and checks teacher accepted alternatives', 
   const q = { id: 'text', type: 'text', responseType: 'short-text', correctAnswer: 'New York', acceptedAnswers: ['NYC'] };
   assert.equal(gradeQuestion(q, '  nEW   york ').isCorrect, true);
   assert.equal(gradeQuestion(q, 'nyc').isCorrect, true);
+  assert.equal(gradeQuestion({ ...q, correctAnswer: '[[align:center]][[size:24]]New York[[/size]][[/align]]' }, '**New York**').isCorrect, true);
   assert.equal(gradeQuestion(q, 'Boston').isCorrect, false);
 });
 

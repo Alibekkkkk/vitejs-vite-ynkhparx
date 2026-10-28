@@ -58,6 +58,12 @@ test('teacher question editor offers safe bold, italic, and underline formatting
   assert.match(questionTextEditor, /label: 'Bold', marker: '\*\*'/);
   assert.match(questionTextEditor, /label: 'Italic', marker: '\*'/);
   assert.match(questionTextEditor, /label: 'Underline', marker: '\+\+'/);
+  assert.match(questionTextEditor, /Align selected text \$\{alignment\}/);
+  assert.match(questionTextEditor, /\[\[size:\$\{size\}\]\]/);
+  assert.match(app, /ariaLabel="Assessment description and instructions"/);
+  assert.match(app, /ariaLabel=\{`Reading Passage \$\{activeReadingPassage\} text`\}/);
+  assert.match(app, /ariaLabel="Candidate instructions"/);
+  assert.match(app, /ariaLabel="Answer explanation"/);
   assert.match(app, /<FormattedQuestionText text=\{currentQuestion\.text \|\| 'Question prompt'\}/);
   assert.match(app, /<FormattedQuestionText text=\{selectedPrompt\.question\.text\}/);
 });

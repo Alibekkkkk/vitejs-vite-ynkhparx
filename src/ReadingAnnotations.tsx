@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { getQuestionTextFormattingRuns, stripQuestionTextFormatting } from './questionTextFormatting';
 
 type ReadingMark = {
   id: string;
@@ -54,6 +55,8 @@ const readSavedAnnotations = (storageKey: string): SavedAnnotations => {
 };
 
 export function ReadingAnnotations({ text, storageKey }: { text: string; storageKey: string }) {
+  const plainText = stripQuestionTextFormatting(text);
+  const formattingRuns = getQuestionTextFormattingRuns(text);
   const [saved] = useState(() => readSavedAnnotations(storageKey));
   const [marks, setMarks] = useState(saved.marks);
   const [notes, setNotes] = useState(saved.notes);
@@ -108,11 +111,11 @@ export function ReadingAnnotations({ text, storageKey }: { text: string; storage
   };
 
   useEffect(() => {
-    setMarks(current => current.filter(mark => mark.start >= 0 && mark.end <= text.length && mark.end > mark.start
+    setMarks(current => current.filter(mark => mark.start >= 0 && mark.end <= plainText.length && mark.end > mark.start
       && (mark.kind === 'underline' || HIGHLIGHT_COLORS.some(color => color.value === mark.color))));
-    setNotes(current => current.filter(note => note.start >= 0 && note.end <= text.length && note.end > note.start
-      && text.slice(note.start, note.end) === note.quote));
-  }, [text]);
+    setNotes(current => current.filter(note => note.start >= 0 && note.end <= plainText.length && note.end > note.start
+      && plainText.slice(note.start, note.end) === note.quote));
+  }, [plainText]);
 
   const addMark = (kind: ReadingMark['kind'], color?: string) => {
     if (!selection || marks.length >= 200) return;
@@ -139,7 +142,7 @@ export function ReadingAnnotations({ text, storageKey }: { text: string; storage
       quote: selection.quote,
       body: body.slice(0, 1000),
       x: 4,
-      y: Math.min(70, Math.max(4, (selection.start / Math.max(1, text.length)) * 100)),
+      y: Math.min(70, Math.max(4, (selection.start / Math.max(1, plainText.length)) * 100)),
     }]);
     setVisibleNotes(current => [...current, id]);
     setNoteDraft('');
@@ -148,17 +151,18 @@ export function ReadingAnnotations({ text, storageKey }: { text: string; storage
     window.getSelection()?.removeAllRanges();
   };
 
-  const validMarks = marks.filter(item => item.start >= 0 && item.end <= text.length && item.end > item.start
+  const validMarks = marks.filter(item => item.start >= 0 && item.end <= plainText.length && item.end > item.start
     && (item.kind === 'underline' || HIGHLIGHT_COLORS.some(color => color.value === item.color)));
-  const validNotes = notes.filter(item => item.start >= 0 && item.end <= text.length && item.end > item.start
-    && text.slice(item.start, item.end) === item.quote);
+  const validNotes = notes.filter(item => item.start >= 0 && item.end <= plainText.length && item.end > item.start
+    && plainText.slice(item.start, item.end) === item.quote);
   const sourceAnnotations = [...validMarks, ...validNotes];
-  const boundaries = [...new Set([0, text.length, ...sourceAnnotations.flatMap(item => [item.start, item.end])])].sort((a, b) => a - b);
+  const boundaries = [...new Set([0, plainText.length, ...sourceAnnotations.flatMap(item => [item.start, item.end]), ...formattingRuns.flatMap(run => [run.start, run.end])])].sort((a, b) => a - b);
   const textSegments = boundaries.slice(0, -1).map((start, index) => {
     const end = boundaries[index + 1];
     const activeMarks = validMarks.filter(mark => mark.start < end && mark.end > start);
     const activeNotes = validNotes.filter(note => note.start < end && note.end > start);
-    return { start, end, value: text.slice(start, end), activeMarks, activeNotes };
+    const format = formattingRuns.find(run => run.start <= start && run.end >= end);
+    return { start, end, value: plainText.slice(start, end), activeMarks, activeNotes, format };
   }).filter(segment => segment.value);
 
   const updateNotePosition = (id: string, event: React.PointerEvent<HTMLButtonElement>) => {
@@ -171,6 +175,54 @@ export function ReadingAnnotations({ text, storageKey }: { text: string; storage
     const y = Math.max(0, Math.min(maxY, ((event.clientY - bounds.top - dragOffset.current.y) / bounds.height) * 100));
     setNotes(current => current.map(note => note.id === id ? { ...note, x, y } : note));
   };
+
+  const renderPassageSegment = (segment: typeof textSegments[number], index: number) => {
+    const highlight = [...segment.activeMarks].reverse().find(mark => mark.kind === 'highlight');
+    const underlined = segment.activeMarks.some(mark => mark.kind === 'underline') || segment.format?.style === 'underline';
+    const noteIds = segment.activeNotes.map(note => note.id);
+    const hasFormatting = Boolean(segment.format && (segment.format.style !== 'plain' || segment.format.fontSize));
+    if (!highlight && !underlined && !noteIds.length && !hasFormatting) return <React.Fragment key={`passage-${index}`}>{segment.value}</React.Fragment>;
+    return <span
+      key={`passage-${index}`}
+      className={underlined ? 'reading-annotations__underline' : undefined}
+      style={{
+        ...(highlight ? { backgroundColor: highlight.color } : {}),
+        ...(segment.format?.style === 'bold' ? { fontWeight: 700 } : {}),
+        ...(segment.format?.style === 'italic' ? { fontStyle: 'italic' } : {}),
+        ...(segment.format?.fontSize ? { fontSize: `${segment.format.fontSize}px` } : {}),
+      }}
+      data-note-ids={noteIds.join(',')}
+      tabIndex={noteIds.length ? 0 : undefined}
+      role={noteIds.length ? 'button' : undefined}
+      aria-label={noteIds.length ? `Open note${noteIds.length > 1 ? 's' : ''} on "${segment.value}"` : undefined}
+      onClick={() => noteIds.length && setVisibleNotes(current => {
+        const allVisible = noteIds.every(id => current.includes(id));
+        return allVisible ? current.filter(id => !noteIds.includes(id)) : [...new Set([...current, ...noteIds])];
+      })}
+      onKeyDown={event => {
+        if (noteIds.length && (event.key === 'Enter' || event.key === ' ')) {
+          event.preventDefault();
+          setVisibleNotes(current => [...new Set([...current, ...noteIds])]);
+        }
+      }}
+    >{segment.value}</span>;
+  };
+  const renderedPassageSegments: React.ReactNode[] = [];
+  for (let index = 0; index < textSegments.length;) {
+    const segment = textSegments[index];
+    if (segment.format?.align) {
+      const alignment = segment.format.align;
+      const group = [];
+      while (index < textSegments.length && textSegments[index].format?.align === alignment) {
+        group.push(renderPassageSegment(textSegments[index], index));
+        index++;
+      }
+      renderedPassageSegments.push(<span key={`aligned-${index}`} style={{ display: 'block', textAlign: alignment }}>{group}</span>);
+    } else {
+      renderedPassageSegments.push(renderPassageSegment(segment, index));
+      index++;
+    }
+  }
 
   return (
     <section className="reading-annotations" aria-label="Passage annotation tools">
@@ -201,31 +253,7 @@ export function ReadingAnnotations({ text, storageKey }: { text: string; storage
 
       <div ref={canvasRef} className="reading-annotations__canvas" onMouseUp={captureSelection} onKeyUp={captureSelection}>
         <p className="reading-annotations__text">
-          {textSegments.map((segment, index) => {
-            const highlight = [...segment.activeMarks].reverse().find(mark => mark.kind === 'highlight');
-            const underlined = segment.activeMarks.some(mark => mark.kind === 'underline');
-            const noteIds = segment.activeNotes.map(note => note.id);
-            if (!highlight && !underlined && !noteIds.length) return <React.Fragment key={`passage-${index}`}>{segment.value}</React.Fragment>;
-            return <span
-              key={`passage-${index}`}
-              className={underlined ? 'reading-annotations__underline' : undefined}
-              style={highlight ? { backgroundColor: highlight.color } : undefined}
-              data-note-ids={noteIds.join(',')}
-              tabIndex={noteIds.length ? 0 : undefined}
-              role={noteIds.length ? 'button' : undefined}
-              aria-label={noteIds.length ? `Open note${noteIds.length > 1 ? 's' : ''} on "${segment.value}"` : undefined}
-              onClick={() => noteIds.length && setVisibleNotes(current => {
-                const allVisible = noteIds.every(id => current.includes(id));
-                return allVisible ? current.filter(id => !noteIds.includes(id)) : [...new Set([...current, ...noteIds])];
-              })}
-              onKeyDown={event => {
-                if (noteIds.length && (event.key === 'Enter' || event.key === ' ')) {
-                  event.preventDefault();
-                  setVisibleNotes(current => [...new Set([...current, ...noteIds])]);
-                }
-              }}
-            >{segment.value}</span>;
-          })}
+          {renderedPassageSegments}
         </p>
 
         {validNotes.filter(note => visibleNotes.includes(note.id)).map((note, index) => <article

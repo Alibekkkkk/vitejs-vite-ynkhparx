@@ -1,3 +1,5 @@
+import { stripQuestionTextFormatting } from './questionTextFormatting.ts';
+
 export type ResponseType =
   | 'single-choice'
   | 'multiple-select'
@@ -82,7 +84,7 @@ export function responseTypeForQuestionType(questionType: string): ResponseType 
 }
 
 export function normalizeText(value: unknown): string {
-  return String(value ?? '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+  return stripQuestionTextFormatting(String(value ?? '')).normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
 }
 
 export function resolveResponseType(question: EngineQuestion): ResponseType {
@@ -150,7 +152,7 @@ function numericMatches(value: unknown, accepted: Array<string | number>, tolera
   const actual = Number(String(value ?? '').trim().replace(',', '.'));
   if (!Number.isFinite(actual)) return false;
   return accepted.some(candidate => {
-    const expected = Number(String(candidate).trim().replace(',', '.'));
+    const expected = Number(stripQuestionTextFormatting(String(candidate)).trim().replace(',', '.'));
     return Number.isFinite(expected) && Math.abs(actual - expected) <= Math.max(0, tolerance);
   });
 }

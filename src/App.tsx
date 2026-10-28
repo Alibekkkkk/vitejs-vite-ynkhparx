@@ -197,7 +197,7 @@ const QuestionResponse = ({ question: rawQuestion, value, onChange, preview = fa
   const answerWordLimit = Number(question.answerWordLimit) || 0;
   const wordCount = typeof value === 'string' ? value.trim().split(/\s+/).filter(Boolean).length : 0;
   const responseControl = (control: React.ReactNode) => <div className="space-y-2">
-    {question.answerInstruction && <p className="rounded-lg bg-blue-50 px-3 py-2 text-sm font-medium text-blue-900 dark:bg-blue-950/40 dark:text-blue-200">{question.answerInstruction}</p>}
+    {question.answerInstruction && <p className="rounded-lg bg-blue-50 px-3 py-2 text-sm font-medium text-blue-900 dark:bg-blue-950/40 dark:text-blue-200"><FormattedQuestionText text={question.answerInstruction} /></p>}
     {control}
     {question.responseType === 'long-text' && answerWordLimit > 0 && <p className={`text-right text-xs ${wordCount > answerWordLimit ? 'font-semibold text-red-700 dark:text-red-300' : 'text-slate-500 dark:text-slate-400'}`} aria-live="polite">{wordCount} / {answerWordLimit} words{wordCount > answerWordLimit ? ' · over the suggested limit' : ''}</p>}
   </div>;
@@ -206,7 +206,7 @@ const QuestionResponse = ({ question: rawQuestion, value, onChange, preview = fa
     responseControl(<div className="space-y-2" role="radiogroup" aria-label="Answer choices">
       {choices.map((choice, index) => <label key={`${question.id}-choice-${index}`} className="flex items-center gap-3 rounded-lg border border-slate-200 dark:border-slate-600 p-3 cursor-pointer">
         <input type="radio" name={`answer-${question.id}-${preview ? 'preview' : 'exam'}`} checked={value === choice} onChange={() => onChange(choice)} disabled={disabled} />
-        <span>{choice}</span>
+        <span><FormattedQuestionText text={choice} /></span>
       </label>)}
     </div>)
   );
@@ -215,7 +215,7 @@ const QuestionResponse = ({ question: rawQuestion, value, onChange, preview = fa
     const selected = Array.isArray(value) ? value : [];
     return responseControl(<div className="space-y-2">{choices.map((choice, index) => <label key={`${question.id}-multi-${index}`} className="flex items-center gap-3 rounded-lg border border-slate-200 dark:border-slate-600 p-3 cursor-pointer">
       <input type="checkbox" checked={selected.includes(choice)} onChange={event => onChange(event.target.checked ? [...selected, choice] : selected.filter(item => item !== choice))} disabled={disabled} />
-      <span>{choice}</span>
+      <span><FormattedQuestionText text={choice} /></span>
     </label>)}</div>);
   }
 
@@ -227,9 +227,9 @@ const QuestionResponse = ({ question: rawQuestion, value, onChange, preview = fa
       const selected = answers[slot.id] || '';
       const usedByOtherSlot = new Set(slots.filter(other => other.id !== slot.id).map(other => answers[other.id]).filter(Boolean));
       return <label key={`${question.id}-${slot.id}`} className="block text-sm font-medium text-slate-700 dark:text-slate-200">
-        <span className="block mb-1">{slot.label || `Answer ${index + 1}`}{slot.prompt ? ` — ${slot.prompt}` : ''}</span>
+        <span className="mb-1 block"><FormattedQuestionText text={`${slot.label || `Answer ${index + 1}`}${slot.prompt ? ` — ${slot.prompt}` : ''}`} /></span>
         {question.responseType === 'matching' ? <select className={inputClass} value={selected} onChange={event => onChange({ ...answers, [slot.id]: event.target.value })} disabled={disabled}>
-          <option value="">Choose…</option>{choicesForMatching.map((choice, choiceIndex) => <option key={`${slot.id}-shared-${choiceIndex}`} value={choice} disabled={!question.allowChoiceReuse && usedByOtherSlot.has(choice)}>{choice}</option>)}
+          <option value="">Choose…</option>{choicesForMatching.map((choice, choiceIndex) => <option key={`${slot.id}-shared-${choiceIndex}`} value={choice} disabled={!question.allowChoiceReuse && usedByOtherSlot.has(choice)}>{stripQuestionTextFormatting(choice)}</option>)}
         </select> : <input className={inputClass} value={selected} onChange={event => onChange({ ...answers, [slot.id]: event.target.value })} placeholder={question.answerPlaceholder || 'Type your answer'} disabled={disabled} />}
       </label>;
     })}</div>);
@@ -245,7 +245,7 @@ const QuestionResponse = ({ question: rawQuestion, value, onChange, preview = fa
         if (previousIndex >= 0 && previousIndex !== index) next[previousIndex] = next[index] || '';
         next[index] = event.target.value;
         onChange(next);
-      }} disabled={disabled}><option value="">Choose an item…</option>{[...new Set([...available, ordered[index]].filter(Boolean))].map(item => <option key={item} value={item}>{item}</option>)}</select>
+      }} disabled={disabled}><option value="">Choose an item…</option>{[...new Set([...available, ordered[index]].filter(Boolean))].map(item => <option key={item} value={item}>{stripQuestionTextFormatting(item)}</option>)}</select>
     </label>)}</div>);
   }
 
@@ -1767,7 +1767,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                       <div className="mt-2 space-y-1 text-slate-600 dark:text-slate-300">
                         {review.answerKey && <p>Answer key: {formatAnswerForReview(review.answerKey)}</p>}
                         {review.acceptedAnswers?.length > 0 && <p>Accepted answers: {review.acceptedAnswers.join(', ')}</p>}
-                        {review.explanation && <p>Explanation: {review.explanation}</p>}
+                        {review.explanation && <p>Explanation: <FormattedQuestionText text={review.explanation} /></p>}
                       </div>
                     </details>}
                     {review.teacherReview?.feedback && <p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-900 dark:bg-blue-950/40 dark:text-blue-200">Overall feedback: {review.teacherReview.feedback}</p>}
@@ -1884,7 +1884,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                     </div>
                   </div>
                   <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2">{test.title}</h3>
-                  <p className="text-sm text-slate-600 dark:text-slate-400 mb-4 flex-grow line-clamp-2">{test.description}</p>
+                          <p className="text-sm text-slate-600 dark:text-slate-400 mb-4 flex-grow line-clamp-2"><FormattedQuestionText text={test.description || ''} /></p>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">Group: {test.groupCode === 'all' ? 'All students' : test.groupCode || 'Not assigned (hidden from students)'}</p>
                   <div className="flex justify-between items-center text-sm text-slate-500 dark:text-slate-400 border-t border-slate-100 dark:border-slate-700 pt-4 mt-auto">
                     <span className="flex items-center gap-1"><Clock className="w-4 h-4" /> {Math.floor(test.durationSeconds / 60)} mins</span>
@@ -1917,7 +1917,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                   </div>
                   <div className="col-span-2">
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Description / Instructions</label>
-                  <textarea value={newTest.description} onChange={e => setNewTest({...newTest, description: e.target.value})} placeholder="Paste instructions or reading materials from your PDF here..." rows={3} className="w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:ring-2 focus:ring-purple-500 outline-none"></textarea>
+                    <QuestionTextEditor value={newTest.description} onChange={value => setNewTest({ ...newTest, description: value })} placeholder="Paste instructions or reading materials from your PDF here..." rows={3} ariaLabel="Assessment description and instructions" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Category</label>
@@ -1988,7 +1988,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                             {[1, 2, 3, 4].map(number => <button key={number} type="button" onClick={() => setActiveListeningSection(number)} className={`px-3 py-1.5 rounded border text-sm ${activeListeningSection === number ? 'bg-purple-600 text-white border-purple-600' : 'bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-600'}`}>Section {number}</button>)}
                           </div>
                           <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Section instructions
-                            <textarea value={newTest.sections?.listening?.parts?.find(part => part.sectionNumber === activeListeningSection)?.instructions || ''} onChange={event => updateListeningPart(activeListeningSection, 'instructions', event.target.value)} rows={2} placeholder={`Instructions for Listening Section ${activeListeningSection}`} className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-purple-500" />
+                            <QuestionTextEditor value={newTest.sections?.listening?.parts?.find(part => part.sectionNumber === activeListeningSection)?.instructions || ''} onChange={value => updateListeningPart(activeListeningSection, 'instructions', value)} rows={2} placeholder={`Instructions for Listening Section ${activeListeningSection}`} ariaLabel={`Instructions for Listening Section ${activeListeningSection}`} className="mt-1" />
                           </label>
                           <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Audio URL
                             <input type="url" value={newTest.sections?.listening?.parts?.find(part => part.sectionNumber === activeListeningSection)?.audioUrl || ''} onChange={event => updateListeningPart(activeListeningSection, 'audioUrl', event.target.value)} placeholder="Paste a direct link to a browser-playable audio file" className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-purple-500" />
@@ -2005,13 +2005,13 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                             <input type="text" value={newTest.sections?.reading?.passages?.find(passage => passage.passageNumber === activeReadingPassage)?.title || `Passage ${activeReadingPassage}`} onChange={event => updateReadingPassage(activeReadingPassage, 'title', event.target.value)} className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-purple-500" />
                           </label>
                           <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Reading passage
-                            <textarea value={newTest.sections?.reading?.passages?.find(passage => passage.passageNumber === activeReadingPassage)?.content || ''} onChange={event => updateReadingPassage(activeReadingPassage, 'content', event.target.value)} rows={6} placeholder="Paste this passage's text" className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-purple-500" />
+                            <QuestionTextEditor value={newTest.sections?.reading?.passages?.find(passage => passage.passageNumber === activeReadingPassage)?.content || ''} onChange={value => updateReadingPassage(activeReadingPassage, 'content', value)} rows={6} placeholder="Paste this passage's text" ariaLabel={`Reading Passage ${activeReadingPassage} text`} className="mt-1" />
                           </label>
                         </div>
                       )}
                       {activeQuestionSection === 'writing' && (
                         <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Writing section instructions
-                          <textarea value={newTest.sections?.writing?.instructions || ''} onChange={event => updateSection('writing', 'instructions', event.target.value)} rows={3} placeholder="Instructions displayed before the writing tasks" className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-purple-500" />
+                          <QuestionTextEditor value={newTest.sections?.writing?.instructions || ''} onChange={value => updateSection('writing', 'instructions', value)} rows={3} placeholder="Instructions displayed before the writing tasks" ariaLabel="Writing section instructions" className="mt-1" />
                         </label>
                       )}
                     </div>
@@ -2095,7 +2095,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                        </div>
                        <div className="mb-4 grid gap-3 rounded-lg border border-indigo-200 bg-indigo-50/60 p-3 dark:border-indigo-900 dark:bg-indigo-950/20 md:grid-cols-2">
                          <label className="text-sm font-medium text-slate-700 dark:text-slate-200">Candidate instructions (optional)
-                           <textarea value={q.answerInstruction || ''} onChange={event => handleUpdateQuestion(qIndex, 'answerInstruction', event.target.value)} rows={2} placeholder="For example: Choose ONE WORD ONLY from the passage." className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2 dark:border-slate-600 dark:bg-slate-700" />
+                           <QuestionTextEditor value={q.answerInstruction || ''} onChange={value => handleUpdateQuestion(qIndex, 'answerInstruction', value)} rows={2} placeholder="For example: Choose ONE WORD ONLY from the passage." ariaLabel="Candidate instructions" className="mt-1" />
                          </label>
                          <div className="space-y-3">
                            <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">Answer placeholder (optional)
@@ -2126,7 +2126,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                        )}
                         {(resolveResponseType(q) === 'short-text' || resolveResponseType(q) === 'numeric') && (
                          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">Accepted answer alternatives (one per line)
-                           <textarea value={(q.acceptedAnswers || []).join('\n')} onChange={event => handleUpdateQuestion(qIndex, 'acceptedAnswers', event.target.value.split('\n').map(answer => answer.trim()).filter(Boolean))} rows={2} className="mt-1 w-full p-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white" />
+                           <QuestionTextEditor value={(q.acceptedAnswers || []).join('\n')} onChange={value => handleUpdateQuestion(qIndex, 'acceptedAnswers', value.split('\n').map(answer => answer.trim()).filter(Boolean))} rows={2} ariaLabel="Accepted answer alternatives, one per line" className="mt-1" />
                          </label>
                        )}
                         {(q.responseType === 'multi-blank' || q.responseType === 'matching') && (
@@ -2137,7 +2137,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                               <label className="text-sm">Prompt / target<input className="mt-1 w-full rounded border p-2 dark:bg-slate-700" value={slot.prompt || ''} onChange={event => updateAnswerSlot(qIndex, slotIndex, 'prompt', event.target.value)} /></label>
                               <label className="text-sm sm:col-span-2">{q.responseType === 'matching' ? 'Correct shared choice' : 'Accepted answers, one per line'}
                                 {q.responseType === 'matching' ? <select className="mt-1 w-full rounded border p-2 dark:bg-slate-700" value={slot.correctAnswers?.[0] || ''} onChange={event => updateAnswerSlot(qIndex, slotIndex, 'correctAnswers', event.target.value ? [event.target.value] : [])}><option value="">Choose the key…</option>{(q.sharedChoices || []).filter(Boolean).map((choice, choiceIndex) => <option key={`${slot.id}-key-${choiceIndex}`}>{choice}</option>)}</select>
-                                  : <textarea className="mt-1 w-full rounded border p-2 dark:bg-slate-700" rows={2} value={(slot.correctAnswers || []).join('\n')} onChange={event => updateSlotAnswers(qIndex, slotIndex, event.target.value)} />}
+                                  : <QuestionTextEditor className="mt-1" ariaLabel={`Accepted answers for ${slot.label || `Answer ${slotIndex + 1}`}`} rows={2} value={(slot.correctAnswers || []).join('\n')} onChange={value => updateSlotAnswers(qIndex, slotIndex, value)} />}
                               </label>
                               {(q.answerSlots || []).length > 1 && <button type="button" className="text-left text-red-500" onClick={() => handleUpdateQuestion(qIndex, 'answerSlots', q.answerSlots.filter((_, index) => index !== slotIndex))}>Remove answer part</button>}
                             </div>)}
@@ -2163,7 +2163,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                         {q.responseType === 'long-text' && <div className="mb-3 space-y-2 text-sm"><p className="text-slate-600 dark:text-slate-300">Written responses are excluded from automatic scoring and flagged for teacher review.</p><label className="flex gap-2"><input type="checkbox" checked={Boolean(q.ungraded)} onChange={event => handleUpdateQuestion(qIndex, 'ungraded', event.target.checked)} />Treat as ungraded practice</label></div>}
                         {q.responseType !== 'long-text' && <label className="mb-3 flex gap-2 text-sm text-slate-700 dark:text-slate-200"><input type="checkbox" checked={Boolean(q.manualReview)} onChange={event => handleUpdateQuestion(qIndex, 'manualReview', event.target.checked)} />Mark for manual teacher review (exclude from automatic score)</label>}
                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">Answer explanation (optional)
-                         <textarea value={q.explanation || ''} onChange={event => handleUpdateQuestion(qIndex, 'explanation', event.target.value)} rows={2} className="mt-1 w-full p-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white" />
+                         <QuestionTextEditor value={q.explanation || ''} onChange={value => handleUpdateQuestion(qIndex, 'explanation', value)} rows={2} ariaLabel="Answer explanation" className="mt-1" />
                        </label>
 
                        <div className="mb-4 space-y-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-left dark:border-blue-800 dark:bg-blue-900/20">
@@ -3597,7 +3597,7 @@ const StudentDashboard = ({ user, tests, results, writingResources, writingResou
                   <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2 flex items-center gap-2">
                       {test.pin && <Lock className="w-4 h-4 text-slate-400 dark:text-slate-500" aria-label="PIN required" />} {test.title}
                   </h3>
-                  <p className="text-sm text-slate-600 dark:text-slate-400 mb-6 flex-grow line-clamp-3">{test.description}</p>
+                  <p className="text-sm text-slate-600 dark:text-slate-400 mb-6 flex-grow line-clamp-3"><FormattedQuestionText text={test.description || ''} /></p>
                   
                   <div className="mt-auto">
                     {completed ? (
@@ -3652,7 +3652,7 @@ const StudentDashboard = ({ user, tests, results, writingResources, writingResou
                                    : review.status === 'manual-review' ? <div className="text-amber-700 dark:text-amber-300">{review.teacherReview?.reviewedAt ? <p>Teacher reviewed this response{review.teacherReview.points != null ? ` · awarded ${review.teacherReview.points}/${review.points} points` : ''}.</p> : <p>Awaiting teacher review; excluded from the automatic score.</p>}</div>
                                      : review.status === 'ungraded' ? <p>This response is ungraded practice.</p>
                                        : <p>Unanswered.</p>}
-                                 {review.explanation && <p className="mt-1">{review.explanation}</p>}
+                                 {review.explanation && <p className="mt-1"><FormattedQuestionText text={review.explanation} /></p>}
                                </div>
                                <StudentTeacherFeedbackNotes result={result} review={review} onReply={onReplyTeacherComment} />
                              </div>
