@@ -86,9 +86,19 @@ test('teacher review supports phrase comments and publishes them with student re
   assert.match(app, /renderTeacherAnnotatedAnswer\(review\.studentAnswer, review\.teacherReview\?\.annotations\)/);
   assert.match(app, /student-feedback-layout/);
   assert.match(app, /Teacher feedback notes/);
+  assert.match(app, /count \? ` · \$\{count\} teacher note/);
+  assert.match(globalStyles, /\.student-feedback-notes \{[\s\S]*?min-width: 0/);
   assert.match(app, /onReplyTeacherComment/);
   assert.match(app, /arrayUnion\(reply\)/);
   assert.match(app, /Marking guide/);
+});
+
+test('students can select and confirm deletion of past results in bulk', () => {
+  assert.match(app, /Select all past results/);
+  assert.match(app, /Delete all/);
+  assert.match(app, /Delete selected/);
+  assert.match(app, /Delete past results\?/);
+  assert.match(app, /onDeleteResults=\{deleteStudentResults\}/);
 });
 
 test('reading exams use full-screen independent panes with selectable annotations', () => {

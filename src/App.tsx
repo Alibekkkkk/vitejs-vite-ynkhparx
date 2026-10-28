@@ -3457,8 +3457,11 @@ const StudentTeacherFeedbackNotes = ({ result, review, onReply }) => {
   </aside>;
 };
 
-const StudentDashboard = ({ user, tests, results, writingResources, writingResourcesError, onStartTest, onSaveGroupCode, onReplyTeacherComment, onLogout }) => {
+const StudentDashboard = ({ user, tests, results, writingResources, writingResourcesError, onStartTest, onSaveGroupCode, onReplyTeacherComment, onDeleteResults, onLogout }) => {
   const [activeTab, setActiveTab] = useState('tests');
+  const [selectedResultIds, setSelectedResultIds] = useState<string[]>([]);
+  const [deleteResultsConfirm, setDeleteResultsConfirm] = useState<string[] | null>(null);
+  const [deletingResults, setDeletingResults] = useState(false);
   const [pinModal, setPinModal] = useState({ isOpen: false, test: null, enteredPin: '', error: '' });
   const [groupCodeInput, setGroupCodeInput] = useState(user?.groupCode || '');
   const [isSavingGroupCode, setIsSavingGroupCode] = useState(false);
@@ -3505,6 +3508,28 @@ const StudentDashboard = ({ user, tests, results, writingResources, writingResou
       setPinModal({ isOpen: false, test: null, enteredPin: '', error: '' });
     } else {
       setPinModal(prev => ({ ...prev, error: 'Incorrect PIN. Please try again.' }));
+    }
+  };
+
+  const toggleResultSelection = (resultId: string) => {
+    setSelectedResultIds(current => current.includes(resultId)
+      ? current.filter(id => id !== resultId)
+      : [...current, resultId]);
+  };
+
+  const confirmDeleteResults = async () => {
+    if (!deleteResultsConfirm?.length || deletingResults) return;
+    setDeletingResults(true);
+    try {
+      await onDeleteResults(deleteResultsConfirm);
+      setSelectedResultIds(current => current.filter(id => !deleteResultsConfirm.includes(id)));
+      setDeleteResultsConfirm(null);
+      await showStudentAlert('Results deleted', `${deleteResultsConfirm.length} past result${deleteResultsConfirm.length === 1 ? '' : 's'} and matching teacher submission${deleteResultsConfirm.length === 1 ? '' : 's'} deleted.`);
+    } catch (error) {
+      console.error('Could not delete past results:', error);
+      await showStudentAlert('Could not delete results', error instanceof Error ? error.message : 'Could not delete the selected results. Please try again.');
+    } finally {
+      setDeletingResults(false);
     }
   };
 
@@ -3619,6 +3644,20 @@ const StudentDashboard = ({ user, tests, results, writingResources, writingResou
 
         {activeTab === 'results' && (
           <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden max-w-5xl mx-auto">
+            {results.length > 0 && <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-900">
+              <label className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200">
+                <input type="checkbox" checked={selectedResultIds.length === results.length && results.length > 0} onChange={event => setSelectedResultIds(event.target.checked ? results.map(result => result.id) : [])} aria-label="Select all past results" />
+                Select all ({selectedResultIds.length} selected)
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={() => setDeleteResultsConfirm(results.map(result => result.id))} className="rounded-lg border border-red-300 px-3 py-1.5 text-sm font-semibold text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950/40">
+                  Delete all
+                </button>
+                <button type="button" onClick={() => setDeleteResultsConfirm(selectedResultIds)} disabled={!selectedResultIds.length} className="inline-flex items-center gap-1 rounded-lg bg-red-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50">
+                  <Trash2 className="h-4 w-4" /> Delete selected
+                </button>
+              </div>
+            </div>}
             {results.length === 0 ? (
               <div className="p-8 text-center text-slate-500 dark:text-slate-400 flex flex-col items-center">
                 <FileText className="w-12 h-12 mb-3 text-slate-300 dark:text-slate-600" />
@@ -3629,8 +3668,10 @@ const StudentDashboard = ({ user, tests, results, writingResources, writingResou
                 {results.map((result, idx) => {
                    const testInfo = tests.find(t => t.id === result.testId) || { title: result.displayTitle || 'Practice Session', type: result.practiceMetadata?.kind || 'Unknown' };
                    return (
-                     <div key={idx} className="p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
-                       <div className="text-left">
+                     <div key={result.id || result.attemptId || idx} className="p-6 flex gap-3 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                       <input type="checkbox" checked={selectedResultIds.includes(result.id)} onChange={() => toggleResultSelection(result.id)} aria-label={`Select result for ${result.displayTitle || testInfo.title}`} className="mt-1 shrink-0" />
+                       <div className="flex min-w-0 flex-1 flex-col justify-between gap-4 sm:flex-row sm:items-center">
+                       <div className="min-w-0 text-left">
                          <div className="flex items-center gap-3 mb-1">
                            <h4 className="font-semibold text-slate-800 dark:text-white">{result.displayTitle || testInfo.title}</h4>
                            <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-600">
@@ -3642,7 +3683,7 @@ const StudentDashboard = ({ user, tests, results, writingResources, writingResou
                          </p>
                          {result.practiceMetadata && <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">Practice: {[result.practiceMetadata.domain, result.practiceMetadata.skill, result.practiceMetadata.mode, result.practiceMetadata.questionType].filter(Boolean).join(' • ') || result.practiceMetadata.kind}</p>}
                          {result.questionReviews?.length > 0 && <details className="mt-3 text-sm text-slate-700 dark:text-slate-300">
-                           <summary className="cursor-pointer font-medium">Review answers and explanations</summary>
+                           <summary className="cursor-pointer font-medium">Review answers and explanations{(() => { const count = (result.questionReviews || []).reduce((total, item) => total + (item.teacherReview?.annotations?.length || 0) + (item.teacherReview?.feedback?.trim() ? 1 : 0), 0); return count ? ` · ${count} teacher note${count === 1 ? '' : 's'}` : ''; })()}</summary>
                            <div className="mt-3 space-y-3">{result.questionReviews.map((review, reviewIndex) => <div key={review.questionId || reviewIndex} className="rounded-lg bg-slate-50 p-3 dark:bg-slate-900">
                              <p className="font-medium">{reviewIndex + 1}. {review.questionText}</p>
                              <div className={review.teacherReview?.annotations?.length || review.teacherReview?.feedback?.trim() ? 'student-feedback-layout mt-2' : 'mt-2'}>
@@ -3667,6 +3708,7 @@ const StudentDashboard = ({ user, tests, results, writingResources, writingResou
                            </div>
                            {(result.manualReviewCount > 0 || result.ungradedCount > 0) && <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{result.manualReviewCount ? `${result.manualReviewCount} awaiting review` : ''}{result.manualReviewCount && result.ungradedCount ? ' · ' : ''}{result.ungradedCount ? `${result.ungradedCount} ungraded` : ''}</p>}
                          </div>
+                         </div>
                        </div>
                      </div>
                    );
@@ -3675,6 +3717,13 @@ const StudentDashboard = ({ user, tests, results, writingResources, writingResou
             )}
           </div>
         )}
+
+        <Modal isOpen={Boolean(deleteResultsConfirm)} title="Delete past results?" onClose={() => !deletingResults && setDeleteResultsConfirm(null)} actions={[
+          { label: 'Cancel', onClick: () => setDeleteResultsConfirm(null), disabled: deletingResults },
+          { label: deletingResults ? 'Deleting…' : 'Delete permanently', onClick: confirmDeleteResults, disabled: deletingResults, destructive: true },
+        ]}>
+          <p className="whitespace-pre-wrap">Permanently delete {deleteResultsConfirm?.length || 0} selected past result{deleteResultsConfirm?.length === 1 ? '' : 's'} and their matching teacher submission records? This cannot be undone. The assessments themselves will remain available to you if they are still assigned.</p>
+        </Modal>
 
         <Modal isOpen={pinModal.isOpen} title="Enter Secret PIN" onClose={() => setPinModal({ isOpen: false, test: null, enteredPin: '', error: '' })}>
           <p className="text-slate-600 dark:text-slate-300 mb-4 text-left">This assessment is protected. Please enter the PIN provided by your teacher to begin.</p>
@@ -4012,6 +4061,33 @@ export default function App() {
     await batch.commit();
   };
 
+  const deleteStudentResults = async (resultIds: string[]) => {
+    if (!user || user.role !== 'student') throw new Error('Only students can delete their own past results.');
+    const uniqueIds = [...new Set(resultIds.filter(id => typeof id === 'string' && id.length > 0))];
+    if (!uniqueIds.length) throw new Error('Select at least one result to delete.');
+
+    for (let index = 0; index < uniqueIds.length; index += 250) {
+      const batch = writeBatch(db);
+      const chunk = uniqueIds.slice(index, index + 250);
+      for (const resultId of chunk) {
+        const studentResultRef = doc(db, 'artifacts', appId, 'users', user.uid, 'results', resultId);
+        const studentResult = await getDoc(studentResultRef);
+        if (!studentResult.exists() || studentResult.data().attemptId !== resultId) {
+          throw new Error('One or more selected result records could not be verified. No result in that batch was deleted.');
+        }
+        const centralId = `${user.uid}_${resultId}`;
+        const centralSubmissionRef = doc(db, 'artifacts', appId, 'public', 'data', 'submissions', centralId);
+        const centralSubmission = await getDoc(centralSubmissionRef);
+        if (centralSubmission.exists() && centralSubmission.data().studentUid !== user.uid) {
+          throw new Error('A matching teacher submission could not be verified as yours.');
+        }
+        batch.delete(studentResultRef);
+        if (centralSubmission.exists()) batch.delete(centralSubmissionRef);
+      }
+      await batch.commit();
+    }
+  };
+
   const saveTeacherReview = async (submissionId: string, questionId: string, reviewData: { feedback: string; points: number | null; annotations?: Array<{ id: string; quote: string; comment: string; start: number; end: number }> }) => {
     const submissionRef = doc(db, 'artifacts', appId, 'public', 'data', 'submissions', submissionId);
     const snapshot = await getDoc(submissionRef);
@@ -4302,7 +4378,7 @@ export default function App() {
 
       {currentView === 'login' && <LoginScreen onAuthAction={handleAuthAction} />}
       {currentView === 'teacher_dashboard' && <TeacherDashboard user={user} tests={tests} resources={writingResources} resourceError={writingResourcesError} onSaveResource={saveWritingResource} onDeleteResource={deleteWritingResource} submissions={submissions} submissionsLoading={submissionsLoading} submissionsError={submissionsError} onSaveReview={saveTeacherReview} onBackfillLegacy={backfillLegacySubmissions} onSecureAnswerKeys={secureExistingAnswerKeys} onLogout={handleLogout} />}
-      {currentView === 'student_dashboard' && <StudentDashboard user={user} tests={tests} results={results} writingResources={writingResources} writingResourcesError={writingResourcesError} onStartTest={startTest} onSaveGroupCode={saveStudentGroupCode} onReplyTeacherComment={saveTeacherFeedbackReply} onLogout={handleLogout} />}
+      {currentView === 'student_dashboard' && <StudentDashboard user={user} tests={tests} results={results} writingResources={writingResources} writingResourcesError={writingResourcesError} onStartTest={startTest} onSaveGroupCode={saveStudentGroupCode} onReplyTeacherComment={saveTeacherFeedbackReply} onDeleteResults={deleteStudentResults} onLogout={handleLogout} />}
       {currentView === 'exam' && activeTest && user && <ExamInterface key={`${user.uid}:${activeTest.id}`} test={activeTest} userId={user.uid} writingResources={writingResources} writingResourcesError={writingResourcesError} isDark={isDark} onToggleTheme={() => setIsDark(previous => !previous)} onComplete={completeTest} />}
 
       <Modal isOpen={modalInfo.isOpen} title={modalInfo.title} onClose={() => setModalInfo(prev => ({ ...prev, isOpen: false }))}>
