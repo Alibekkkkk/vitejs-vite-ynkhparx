@@ -64,6 +64,7 @@ test('teacher question editor offers safe bold, italic, and underline formatting
   assert.match(questionTextEditor, /Live preview/);
   assert.match(app, /ariaLabel="Assessment description and instructions"/);
   assert.match(app, /ariaLabel=\{`Reading Passage \$\{activeReadingPassage\} text`\}/);
+  assert.match(app, /ariaLabel=\{`Reading Passage \$\{activeReadingPassage\} title`\}/);
   assert.match(app, /ariaLabel="Candidate instructions"/);
   assert.match(app, /ariaLabel="Answer explanation"/);
   assert.match(app, /<FormattedQuestionText text=\{currentQuestion\.text \|\| 'Question prompt'\}/);
@@ -124,9 +125,16 @@ test('reading exams use full-screen independent panes with selectable annotation
   assert.match(globalStyles, /\.exam-interface--reading \{[\s\S]*?background-color: #f3f7f5/);
   assert.match(globalStyles, /\.exam-interface--reading \.split-pane__left \.reading-workspace__scroll \{[\s\S]*?background-color: #fbfcf9/);
   assert.match(globalStyles, /\.dark \.exam-interface--reading \.reading-workspace \.split-pane__panel \{[\s\S]*?background-color: #1e2935/);
+  assert.match(globalStyles, /\.reading-question-nav button\[aria-current="step"\][\s\S]*?color: #fff !important/);
+  assert.match(globalStyles, /\.dark \.reading-question-nav button\[data-answered="true"\][\s\S]*?color: #d1fae5 !important/);
   assert.match(readingAnnotations, /data-mark-ids=\{markIds\.join\(','\)\}/);
-  assert.match(readingAnnotations, /current => current\.filter\(mark => !markIds\.includes\(mark\.id\)\)/);
-  assert.match(readingAnnotations, /Click to remove this highlight or underline/);
+  assert.match(readingAnnotations, /const alreadySelected = selectedMarkIds\.length === markIds\.length/);
+  assert.match(readingAnnotations, /setMarks\(current => current\.filter\(mark => !selectedMarkIds\.includes\(mark\.id\)\)\)/);
+  assert.match(readingAnnotations, /Remove selected mark/);
+  assert.match(readingAnnotations, /Delete selected highlight or underline/);
+  assert.match(globalStyles, /\.reading-annotations__mark-remove \{[\s\S]*?display: inline-flex/);
+  assert.match(globalStyles, /\.reading-annotations__highlighted \{[\s\S]*?color: #172033 !important/);
+  assert.match(globalStyles, /\.reading-annotations__toolbar \{[\s\S]*?position: relative/);
   assert.match(globalStyles, /\.exam-interface--reading \.reading-workspace > \.split-pane[\s\S]*?flex: 1 1 auto/);
   assert.match(readingAnnotations, /Select passage text to highlight, underline, or add a note/);
   assert.match(readingAnnotations, /const HIGHLIGHT_COLORS = \[/);
@@ -150,7 +158,7 @@ test('teacher question formats configure matching answer controls and candidate 
   assert.match(app, /words\{wordCount > answerWordLimit \? ' · over the suggested limit' : ''\}/);
   assert.match(app, /insertions=\{resolveResponseType\(q\) === 'multi-blank'/);
   assert.match(app, /token: `\{\{\$\{index \+ 1\}\}\}`/);
-  assert.match(app, /<QuestionPrompt question=\{currentQuestion\} value=\{answers\[currentQuestion\.id\]\}/);
+  assert.match(app, /<QuestionPrompt question=\{currentQuestion\} value=\{currentValue\}/);
   assert.match(app, /if \(hasInlineAnswerSlots\(currentQuestion\)\) return null/);
   assert.match(app, /!hasInlineAnswerSlots\(q\) && <QuestionResponse/);
   assert.ok(questionPrompt.includes(String.raw`const INLINE_ANSWER_PATTERN = /\{\{(\d+)\}\}/g;`));
@@ -160,25 +168,29 @@ test('teacher question formats configure matching answer controls and candidate 
 });
 
 test('reading matching-headings questions show every shared heading above the question', () => {
-  assert.match(app, /currentQuestion\.questionType === 'matching-headings' && currentQuestion\.sharedChoices\?\.some\(\(heading: string\) => heading\.trim\(\)\)/);
-  assert.match(app, /<h4 id=\{`headings-\$\{currentQuestion\.id\}`\}[^>]*>List of headings<\/h4>/);
-  assert.match(app, /currentQuestion\.sharedChoices\.filter\(\(heading: string\) => heading\.trim\(\)\)\.map\(\(heading: string, index: number\) =>/);
+  assert.match(app, /question\.questionType === 'matching-headings' && question\.sharedChoices\?\.some\(\(heading: string\) => heading\.trim\(\)\)/);
+  assert.match(app, /<h4 id=\{`headings-\$\{questionId\}`\}[^>]*>List of headings<\/h4>/);
+  assert.match(app, /question\.sharedChoices\.filter\(\(heading: string\) => heading\.trim\(\)\)\.map\(\(heading: string, headingIndex: number\) =>/);
   assert.match(app, /<FormattedQuestionText text=\{heading\} \/>/);
+  assert.match(app, /passageQuestions\.map\(\(\{ question, index \}: any\) =>/);
+  assert.match(app, /<QuestionResponse[\s\S]*?value=\{questionValue\}[\s\S]*?updateAnswerForQuestion\(question, value\)/);
+  assert.match(app, /reading-question-\$\{questionId\}/);
+  assert.match(app, /Question \{index \+ 1\} of \{questions\.length\}/);
 });
 
-test('reading question navigation explains answer states and can jump to unanswered items', () => {
+test('reading shows every question in passage order with clear answer states and unanswered navigation', () => {
   assert.match(app, /const moveToNextUnanswered = \(\) =>/);
-  assert.match(app, /Next unanswered \(\$\{unansweredReadingCount\}\)/);
+  assert.match(app, /Review next unanswered question \(\{unansweredReadingCount\} remaining\)/);
   assert.match(app, /All reading questions answered/);
   assert.match(app, /Question status legend/);
   assert.match(app, />Current<\/span>/);
   assert.match(app, />Answered<\/span>/);
   assert.match(app, />Not answered<\/span>/);
   assert.match(app, /of \{passageQuestions\.length\} answered in this passage/);
-  assert.match(app, /Question \{questions\.findIndex\(\(question: any\) => question\.id === currentQuestion\.id\) \+ 1\} of \{questions\.length\}/);
+  assert.match(app, /Question \{index \+ 1\} of \{questions\.length\}/);
   assert.match(app, /selected\.includes\(choice\) \? 'border-blue-500 bg-blue-50/);
-  assert.match(app, /questionScroll\.current\[questionId\] \|\| 0/);
-  assert.match(app, /questionScroll\.current\[String\(currentQuestion\.id\)\] = event\.currentTarget\.scrollTop/);
-  assert.match(app, /Review unanswered/);
-  assert.match(app, /<button type="button" onClick=\{onFinish\}[^>]*>Finish exam<\/button>/);
+  assert.match(app, /questionScroll\.current\[passageId\] \|\| 0/);
+  assert.match(app, /questionScroll\.current\[String\(activePassageNumber\)\] = event\.currentTarget\.scrollTop/);
+  assert.match(app, /questionCardRefs\.current\[questionId\]\?\.scrollIntoView/);
+  assert.match(app, /aria-current=\{activeQuestionId === questionId \? 'step' : undefined\}/);
 });

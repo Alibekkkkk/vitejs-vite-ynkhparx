@@ -2002,7 +2002,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                             {[1, 2, 3].map(number => <button key={number} type="button" onClick={() => setActiveReadingPassage(number)} className={`px-3 py-1.5 rounded border text-sm ${activeReadingPassage === number ? 'bg-purple-600 text-white border-purple-600' : 'bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-600'}`}>Passage {number}</button>)}
                           </div>
                           <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Passage title
-                            <input type="text" value={newTest.sections?.reading?.passages?.find(passage => passage.passageNumber === activeReadingPassage)?.title || `Passage ${activeReadingPassage}`} onChange={event => updateReadingPassage(activeReadingPassage, 'title', event.target.value)} className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-purple-500" />
+                            <QuestionTextEditor value={newTest.sections?.reading?.passages?.find(passage => passage.passageNumber === activeReadingPassage)?.title || `Passage ${activeReadingPassage}`} onChange={value => updateReadingPassage(activeReadingPassage, 'title', value)} rows={2} placeholder={`Passage ${activeReadingPassage}`} ariaLabel={`Reading Passage ${activeReadingPassage} title`} className="mt-1" />
                           </label>
                           <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Reading passage
                             <QuestionTextEditor value={newTest.sections?.reading?.passages?.find(passage => passage.passageNumber === activeReadingPassage)?.content || ''} onChange={value => updateReadingPassage(activeReadingPassage, 'content', value)} rows={6} placeholder="Paste this passage's text" ariaLabel={`Reading Passage ${activeReadingPassage} text`} className="mt-1" />
@@ -2664,7 +2664,7 @@ const WritingPractice = ({ tests, resources, resourceError, userId, onBack }) =>
   );
 };
 
-const ReadingPracticeWorkspace = ({ test, userId, questions, answers, currentIndex, setCurrentIndex, currentQuestion, updateAnswer, renderAnswerInput, onFinish, disabled }) => {
+const ReadingPracticeWorkspace = ({ test, userId, questions, answers, setCurrentIndex, currentQuestion, updateAnswerForQuestion, onFinish, disabled }) => {
   const [activePassageNumber, setActivePassageNumber] = useState(Number(currentQuestion?.passageNumber || 1));
   const [visitedQuestionIds, setVisitedQuestionIds] = useState<string[]>(currentQuestion?.id ? [currentQuestion.id] : []);
   const readingQuestions = questions.filter((question: any) => question.section === 'reading'
@@ -2674,6 +2674,7 @@ const ReadingPracticeWorkspace = ({ test, userId, questions, answers, currentInd
   const questionScroll = React.useRef<Record<string, number>>({});
   const passagePaneRef = React.useRef<HTMLDivElement>(null);
   const questionPaneRef = React.useRef<HTMLDivElement>(null);
+  const questionCardRefs = React.useRef<Record<string, HTMLElement | null>>({});
   const readingSession = buildReadingSessionViewModel({
     configuredPassages: test?.sections?.reading?.passages || [],
     questions: readingQuestions,
@@ -2692,19 +2693,19 @@ const ReadingPracticeWorkspace = ({ test, userId, questions, answers, currentInd
     const questionPassage = Number(currentQuestion?.passageNumber || 1);
     if (questionPassage !== activePassageNumber) setActivePassageNumber(questionPassage);
     if (currentQuestion?.id) setVisitedQuestionIds(previous => previous.includes(currentQuestion.id) ? previous : [...previous, currentQuestion.id]);
-  }, [currentQuestion?.id]);
+  }, [currentQuestion?.id, activePassageNumber]);
 
   useEffect(() => {
     if (passagePaneRef.current) passagePaneRef.current.scrollTop = passageScroll.current[String(activePassageNumber)] || 0;
   }, [activePassageNumber]);
 
   useEffect(() => {
-    const questionId = String(currentQuestion?.id || '');
-    if (questionPaneRef.current) questionPaneRef.current.scrollTop = questionScroll.current[questionId] || 0;
+    const passageId = String(currentQuestion?.passageNumber || activePassageNumber);
+    if (questionPaneRef.current) questionPaneRef.current.scrollTop = questionScroll.current[passageId] || 0;
   }, [currentQuestion?.id]);
 
   const passageQuestions = readingQuestions
-    .map((question: any, index: number) => ({ question, index }))
+    .map((question: any) => ({ question, index: questions.findIndex((item: any) => String(item.id) === String(question.id)) }))
     .filter(({ question }: any) => Number(question.passageNumber || 1) === activePassageNumber);
   const passage = (test?.sections?.reading?.passages || []).find((item: any) => Number(item.passageNumber) === activePassageNumber);
   const passageText = getReadingPassage(test, activePassageNumber);
@@ -2714,6 +2715,9 @@ const ReadingPracticeWorkspace = ({ test, userId, questions, answers, currentInd
       const nextPassage = Number(questions[index].passageNumber || 1);
       setActivePassageNumber(nextPassage);
       setCurrentIndex(index);
+      window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+        questionCardRefs.current[questionId]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }));
     }
   };
   const unansweredReadingCount = readingQuestions.filter((question: any) => !isAnswerPresent(answers[question.id])).length;
@@ -2745,7 +2749,7 @@ const ReadingPracticeWorkspace = ({ test, userId, questions, answers, currentInd
         maxLeftPercent={65}
         left={<div className="space-y-3">
           <div className="sticky top-0 z-10 rounded-lg border bg-white p-3 dark:border-slate-600 dark:bg-slate-800">
-            <h3 className="font-bold text-slate-800 dark:text-white"><FormattedQuestionText text={passage?.title || `Passage ${activePassageNumber}`} /></h3>
+            <h3 className="reading-passage-title font-bold text-slate-800 dark:text-white"><FormattedQuestionText text={passage?.title || `Passage ${activePassageNumber}`} /></h3>
             <p className="text-sm text-slate-600 dark:text-slate-300">Passage {activePassageNumber} of {passageNumbers.length || 1}</p>
             <nav className="mt-2 flex flex-wrap gap-2" aria-label="Passage navigation">
                   {passageNumbers.map(number => <button key={number} type="button" onClick={() => changePassage(number)} aria-current={activePassageNumber === number ? 'page' : undefined} className={`rounded border px-3 py-1.5 font-medium transition-colors ${activePassageNumber === number ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600'}`}>Passage {number}</button>)}
@@ -2765,12 +2769,12 @@ const ReadingPracticeWorkspace = ({ test, userId, questions, answers, currentInd
           <div className="rounded-lg border bg-white p-3 dark:border-slate-600 dark:bg-slate-800">
             <h3 className="font-bold text-slate-800 dark:text-white">Questions for Passage {activePassageNumber}</h3>
             <p className="text-sm text-slate-600 dark:text-slate-300">{passageQuestions.length} question(s) · {questions.length} total</p>
-            <div className="mt-2 grid grid-cols-5 gap-2 sm:grid-cols-8" aria-label="Question navigator">
+            <div className="reading-question-nav mt-2 grid grid-cols-5 gap-2 sm:grid-cols-8" aria-label="Question navigator">
               {questionIdsByPassage[String(activePassageNumber)]?.map(questionId => {
                 const index = questions.findIndex((question: any) => String(question.id) === questionId);
                 const question = questions[index];
                 const answered = isAnswerPresent(answers[question.id]);
-                return <button key={questionId} type="button" aria-current={activeQuestionId === questionId ? 'step' : undefined} aria-label={`Question ${index + 1}, ${answered ? 'answered' : 'unanswered'}${visitedQuestionIds.includes(questionId) ? ', visited' : ''}`} onClick={() => moveQuestion(questionId)} className={`rounded border px-2 py-1 text-sm transition-colors ${activeQuestionId === questionId ? 'border-blue-600 bg-blue-600 text-white' : answered ? 'border-emerald-500 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-200 dark:hover:bg-emerald-900/50' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600'}`}>{index + 1}</button>;
+                return <button key={questionId} type="button" data-answered={answered} aria-current={activeQuestionId === questionId ? 'step' : undefined} aria-label={`Question ${index + 1}, ${answered ? 'answered' : 'unanswered'}${visitedQuestionIds.includes(questionId) ? ', visited' : ''}`} onClick={() => moveQuestion(questionId)} className={`rounded border px-2 py-1 text-sm transition-colors ${activeQuestionId === questionId ? 'border-blue-600 bg-blue-600 text-white' : answered ? 'border-emerald-500 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-200 dark:hover:bg-emerald-900/50' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600'}`}>{index + 1}</button>;
               })}
             </div>
             <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
@@ -2787,39 +2791,57 @@ const ReadingPracticeWorkspace = ({ test, userId, questions, answers, currentInd
               <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded border border-slate-300 bg-white dark:border-slate-600 dark:bg-slate-700" aria-hidden="true" />Not answered</span>
             </div>
           </div>
-          {passageQuestions.length && currentQuestion ? (
-            <div ref={questionPaneRef} onScroll={event => { if (currentQuestion?.id) questionScroll.current[String(currentQuestion.id)] = event.currentTarget.scrollTop; }} className="reading-workspace__scroll space-y-4 rounded-lg border bg-white p-5 dark:border-slate-600 dark:bg-slate-800">
-              {currentQuestion.questionType === 'matching-headings' && currentQuestion.sharedChoices?.some((heading: string) => heading.trim()) && (
-                <section aria-labelledby={`headings-${currentQuestion.id}`} className="rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/30">
-                  <h4 id={`headings-${currentQuestion.id}`} className="mb-2 font-bold text-amber-950 dark:text-amber-100">List of headings</h4>
-                  <ul className="space-y-2">
-                    {currentQuestion.sharedChoices.filter((heading: string) => heading.trim()).map((heading: string, index: number) => (
-                      <li key={`${currentQuestion.id}-heading-${index}`} className="rounded-lg bg-white/80 px-3 py-2 text-sm leading-6 text-slate-800 dark:bg-slate-900/60 dark:text-slate-100">
-                        <FormattedQuestionText text={heading} />
-                      </li>
-                    ))}
-                  </ul>
-                </section>
+          {passageQuestions.length ? (
+            <div ref={questionPaneRef} onScroll={event => { questionScroll.current[String(activePassageNumber)] = event.currentTarget.scrollTop; }} className="reading-workspace__scroll space-y-4 rounded-lg border bg-white p-5 dark:border-slate-600 dark:bg-slate-800">
+              {passageQuestions.map(({ question, index }: any) => {
+                const questionId = String(question.id);
+                const questionValue = answers[question.id] ?? '';
+                return <React.Fragment key={questionId}>
+                  {question.questionType === 'matching-headings' && question.sharedChoices?.some((heading: string) => heading.trim()) && (
+                    <section aria-labelledby={`headings-${questionId}`} className="rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/30">
+                      <h4 id={`headings-${questionId}`} className="mb-2 font-bold text-amber-950 dark:text-amber-100">List of headings</h4>
+                      <ul className="space-y-2">
+                        {question.sharedChoices.filter((heading: string) => heading.trim()).map((heading: string, headingIndex: number) => (
+                          <li key={`${questionId}-heading-${headingIndex}`} className="rounded-lg bg-white/80 px-3 py-2 text-sm leading-6 text-slate-800 dark:bg-slate-900/60 dark:text-slate-100">
+                            <FormattedQuestionText text={heading} />
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  )}
+                  <article
+                    id={`reading-question-${questionId}`}
+                    ref={element => { questionCardRefs.current[questionId] = element; }}
+                    onFocusCapture={() => setCurrentIndex(index)}
+                    className="scroll-m-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-600 dark:bg-slate-800"
+                    aria-label={`Question ${index + 1}`}
+                  >
+                    <div className="rounded-xl border border-blue-100 bg-blue-50/70 p-4 dark:border-blue-900/70 dark:bg-blue-950/30">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">{IELTS_QUESTION_FORMATS.find(item => item[0] === question.questionType)?.[1] || question.questionType || 'Reading question'}</p>
+                        <span className="rounded-full bg-white/80 px-2.5 py-1 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200">Question {index + 1} of {questions.length}</span>
+                      </div>
+                      <p className="mt-2 whitespace-pre-wrap font-semibold leading-7 text-slate-900 dark:text-slate-100"><QuestionPrompt question={question} value={questionValue} onChange={value => updateAnswerForQuestion(question, value)} disabled={disabled} /></p>
+                      <PromptFigure question={question} assessmentId={test?.practiceSourceTestId || test?.id || 'unknown'} />
+                    </div>
+                    {!hasInlineAnswerSlots(question) && <div className="mt-4"><QuestionResponse
+                      question={question}
+                      value={questionValue}
+                      onChange={value => updateAnswerForQuestion(question, value)}
+                      disabled={disabled}
+                    /></div>}
+                  </article>
+                </React.Fragment>;
+              })}
+              {unansweredReadingCount ? (
+                <button type="button" onClick={moveToNextUnanswered} disabled={disabled} className="w-full rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 font-semibold text-blue-800 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-200 dark:hover:bg-blue-900/50">
+                  Review next unanswered question ({unansweredReadingCount} remaining)
+                </button>
+              ) : (
+                <button type="button" onClick={onFinish} disabled={disabled} className="w-full rounded-lg bg-emerald-600 px-3 py-2 font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50">
+                  Finish exam
+                </button>
               )}
-              <div className="rounded-xl border border-blue-100 bg-blue-50/70 p-4 dark:border-blue-900/70 dark:bg-blue-950/30">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">{IELTS_QUESTION_FORMATS.find(item => item[0] === currentQuestion.questionType)?.[1] || currentQuestion.questionType || 'Reading question'}</p>
-                  <span className="rounded-full bg-white/80 px-2.5 py-1 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200">Question {questions.findIndex((question: any) => question.id === currentQuestion.id) + 1} of {questions.length}</span>
-                </div>
-                <p className="mt-2 whitespace-pre-wrap font-semibold leading-7 text-slate-900 dark:text-slate-100"><QuestionPrompt question={currentQuestion} value={answers[currentQuestion.id]} onChange={updateAnswer} disabled={disabled} /></p>
-                <PromptFigure question={currentQuestion} assessmentId={test?.practiceSourceTestId || test?.id || 'unknown'} />
-              </div>
-              {renderAnswerInput()}
-              <div className="flex justify-between gap-2 border-t pt-3 dark:border-slate-600">
-                <button type="button" onClick={() => moveQuestion(String(questions[currentIndex - 1]?.id || ''))} disabled={disabled || currentIndex === 0} className="rounded border border-slate-300 bg-white px-3 py-2 text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600 dark:disabled:bg-slate-800 dark:disabled:text-slate-400">Previous question</button>
-                {currentIndex < questions.length - 1 ? (
-                  <button type="button" onClick={() => moveQuestion(String(questions[currentIndex + 1]?.id || ''))} disabled={disabled} className="rounded bg-blue-600 px-3 py-2 text-white disabled:cursor-not-allowed disabled:opacity-50">Next question</button>
-                ) : unansweredReadingCount ? (
-                  <button type="button" onClick={moveToNextUnanswered} disabled={disabled} className="rounded bg-blue-600 px-3 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">Review unanswered</button>
-                ) : (
-                  <button type="button" onClick={onFinish} disabled={disabled} className="rounded bg-emerald-600 px-3 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">Finish exam</button>
-                )}
-              </div>
             </div>
           ) : <p className="rounded-lg border border-dashed p-5 text-slate-600 dark:border-slate-600 dark:text-slate-300">No questions are assigned to Passage {activePassageNumber}.</p>}
         </div>}
@@ -2994,11 +3016,9 @@ const ExamInterface = ({ test, onComplete, userId, writingResources, writingReso
           userId={userId}
           questions={questions}
           answers={answers}
-          currentIndex={currentIndex}
           setCurrentIndex={setCurrentIndex}
           currentQuestion={currentQuestion}
-          updateAnswer={updateAnswer}
-          renderAnswerInput={renderAnswerInput}
+          updateAnswerForQuestion={(question, value) => setAnswers(previous => ({ ...previous, [question.id]: value }))}
           onFinish={() => setFinishConfirmationOpen(true)}
           disabled={timeExpired || isSubmitting}
         />
