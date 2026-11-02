@@ -15,14 +15,24 @@ export type FormattedTextRun = {
 };
 
 const FORMAT_TOKEN = /\[\[align:(left|center|right)\]\]([\s\S]+?)\[\[\/align\]\]|\[\[size:(10|12|14|16|18|20|24|28|32|36|40|48)\]\]([\s\S]+?)\[\[\/size\]\]|\*\*([\s\S]+?)\*\*|\+\+([\s\S]+?)\+\+|(?<!\*)\*([^*\n]+?)\*(?!\*)/g;
+const LEGACY_FORMAT_SIZE_PATTERN = '10|12|14|16|18|20|24|28|32|36|40|48';
+
+function normalizeLegacyFormattingTags(value: string): string {
+  return value
+    .replace(/(?<!\[)\[align:(left|center|right)\](?!\])/gi, (_, align: string) => `[[align:${align.toLowerCase()}]]`)
+    .replace(/(?<!\[)\[\/align\](?!\])/gi, '[[/align]]')
+    .replace(new RegExp(`(?<!\\[)\\[size:(${LEGACY_FORMAT_SIZE_PATTERN})\\](?!\\])`, 'gi'), (_, size: string) => `[[size:${size}]]`)
+    .replace(/(?<!\[)\[\/size\](?!\])/gi, '[[/size]]');
+}
 
 export function parseQuestionTextFormatting(value: string): FormattedTextPart[] {
+  const normalizedValue = normalizeLegacyFormattingTags(value);
   const parts: FormattedTextPart[] = [];
   let cursor = 0;
 
-  for (const match of value.matchAll(FORMAT_TOKEN)) {
+  for (const match of normalizedValue.matchAll(FORMAT_TOKEN)) {
     const index = match.index ?? 0;
-    if (index > cursor) parts.push({ style: 'plain', text: value.slice(cursor, index) });
+    if (index > cursor) parts.push({ style: 'plain', text: normalizedValue.slice(cursor, index) });
     if (match[1] !== undefined) {
       parts.push({ style: 'align', align: match[1] as 'left' | 'center' | 'right', text: match[2], children: parseQuestionTextFormatting(match[2]) });
     } else if (match[3] !== undefined) {
@@ -43,7 +53,7 @@ export function parseQuestionTextFormatting(value: string): FormattedTextPart[] 
     cursor = index + match[0].length;
   }
 
-  if (cursor < value.length) parts.push({ style: 'plain', text: value.slice(cursor) });
+  if (cursor < normalizedValue.length) parts.push({ style: 'plain', text: normalizedValue.slice(cursor) });
   return parts;
 }
 

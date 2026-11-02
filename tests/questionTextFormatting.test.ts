@@ -60,3 +60,11 @@ test('question formatting renders alignment and emphasis nested inside size and 
     { start: 0, end: 34, style: 'bold', align: 'center', fontSize: 24 },
   ]);
 });
+
+test('question formatting supports legacy single-bracket align and size tags', () => {
+  const formatted = '**[align:center]NUET Critical Thinking Mock Exam #1[/align]**';
+  assert.equal(stripQuestionTextFormatting(formatted), 'NUET Critical Thinking Mock Exam #1');
+
+  const withSize = '[size:24]Title[/size]';
+  assert.equal(stripQuestionTextFormatting(withSize), 'Title');
+});

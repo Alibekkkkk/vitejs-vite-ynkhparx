@@ -104,6 +104,10 @@ const removeUndefinedValues = <T,>(value: T): T => {
   }
   return value;
 };
+const formatAssessmentTitle = (value: unknown): string => {
+  const plainText = stripQuestionTextFormatting(String(value || '')).replace(/\s+/g, ' ').trim();
+  return plainText || 'Untitled assessment';
+};
 const SAMPLE_BANKS = [
   { file: 'ielts-academic-reading-full.json', title: 'IELTS Academic Reading — Full-Length Original Practice', type: 'IELTS', questionCount: 40, durationSeconds: 3600, passageCount: 3, description: 'Three original passages; exactly 40 questions; 60 minutes.' },
   { file: 'ielts-general-reading-full.json', title: 'IELTS General Training Reading — Full-Length Original Practice', type: 'IELTS', questionCount: 40, durationSeconds: 3600, passageCount: 3, description: 'Three original texts; exactly 40 questions; 60 minutes.' },
@@ -1483,7 +1487,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
       }
 
       if (testToSave.groupCode) {
-        const confirmed = await showConfirmDialog('Publish assessment?', `Publish “${testToSave.title}” to student group “${testToSave.groupCode}” now? Students in that group will be able to see it.`, 'Publish', false);
+        const confirmed = await showConfirmDialog('Publish assessment?', `Publish “${formatAssessmentTitle(testToSave.title)}” to student group “${testToSave.groupCode}” now? Students in that group will be able to see it.`, 'Publish', false);
         if (!confirmed) {
           setIsSubmitting(false);
           return;
@@ -1516,8 +1520,8 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
       await showAlertDialog(
         'Assessment saved',
         testToSave.groupCode
-          ? `Published “${testToSave.title}” for group ${testToSave.groupCode} (assessment ID ${testRef.id}). It is visible to that group.`
-          : `Saved “${testToSave.title}” as a draft. Assessment ID: ${testRef.id}`
+          ? `Published “${formatAssessmentTitle(testToSave.title)}” for group ${testToSave.groupCode} (assessment ID ${testRef.id}). It is visible to that group.`
+          : `Saved “${formatAssessmentTitle(testToSave.title)}” as a draft. Assessment ID: ${testRef.id}`
       );
     } catch (err) {
       const firebaseError = err as { code?: string; message?: string };
@@ -1547,18 +1551,19 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
   }
 
   const unpublishTest = async (test: any) => {
-    const confirmed = await showConfirmDialog('Return to draft?', `Return “${test.title}” to draft? Students will no longer see it. Existing submissions and results will be kept.`, 'Return to draft', false);
+    const displayTitle = formatAssessmentTitle(test.title);
+    const confirmed = await showConfirmDialog('Return to draft?', `Return “${displayTitle}” to draft? Students will no longer see it. Existing submissions and results will be kept.`, 'Return to draft', false);
     if (!confirmed) return;
     try {
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tests', test.id), { groupCode: '', published: false, status: 'draft', updatedAt: new Date().toISOString() });
-      await showAlertDialog('Assessment returned to draft', `“${test.title}” is now a draft. Historical submissions remain available.`);
+      await showAlertDialog('Assessment returned to draft', `“${displayTitle}” is now a draft. Historical submissions remain available.`);
     } catch (error) {
       await showAlertDialog('Could not unpublish', error instanceof Error ? error.message : 'Could not return this assessment to draft.');
     }
   };
 
   const restoreArchivedTest = async (test: any) => {
-    const confirmed = await showConfirmDialog('Return archived assessment to drafts?', `Move “${test.title}” back to your active assessments as an unpublished draft? Students will not see it until you publish it again. Historical results will be kept.`, 'Return to drafts', false);
+    const confirmed = await showConfirmDialog('Return archived assessment to drafts?', `Move “${formatAssessmentTitle(test.title)}” back to your active assessments as an unpublished draft? Students will not see it until you publish it again. Historical results will be kept.`, 'Return to drafts', false);
     if (!confirmed) return;
     try {
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tests', test.id), { groupCode: '', published: false, status: 'draft', updatedAt: new Date().toISOString() });
@@ -1569,9 +1574,10 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
 
   const permanentlyDeleteArchivedTest = async (test: any) => {
     if (test.status !== 'archived') return;
+    const displayTitle = formatAssessmentTitle(test.title);
     const confirmed = await showConfirmDialog(
       'Permanently delete archived assessment?',
-      `Permanently delete “${test.title}” and its teacher-only answer key? This cannot be undone. Student submissions and historical results will be preserved.`,
+      `Permanently delete “${displayTitle}” and its teacher-only answer key? This cannot be undone. Student submissions and historical results will be preserved.`,
       'Delete assessment',
       true
     );
@@ -1581,7 +1587,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
       batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'tests', test.id));
       batch.delete(doc(db, 'artifacts', appId, 'teacher', 'data', 'answerKeys', test.id));
       await batch.commit();
-      await showAlertDialog('Assessment deleted', `“${test.title}” and its answer key were deleted. Student submissions and historical results were preserved.`);
+      await showAlertDialog('Assessment deleted', `“${displayTitle}” and its answer key were deleted. Student submissions and historical results were preserved.`);
     } catch (error) {
       console.error('Failed to permanently delete archived assessment:', error);
       await showAlertDialog('Could not delete assessment', error instanceof Error ? error.message : 'The archived assessment could not be deleted. Please try again.');
@@ -1862,29 +1868,29 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                       {test.groupCode && <button onClick={() => unpublishTest(test)} className="text-xs px-2 py-1 rounded border border-amber-300 text-amber-700 dark:text-amber-300" title="Hide from students and preserve all results">Unpublish</button>}
                       {assessmentView === 'archived' ? (
                         <>
-                          <button onClick={() => restoreArchivedTest(test)} className="ml-2 text-slate-400 hover:text-emerald-600 dark:text-slate-500" title="Return assessment to active drafts" aria-label={`Restore ${test.title} to drafts`}>
+                          <button onClick={() => restoreArchivedTest(test)} className="ml-2 text-slate-400 hover:text-emerald-600 dark:text-slate-500" title="Return assessment to active drafts" aria-label={`Restore ${formatAssessmentTitle(test.title)} to drafts`}>
                             <RotateCcw className="w-4 h-4" />
                           </button>
-                          <button onClick={() => permanentlyDeleteArchivedTest(test)} className="ml-2 text-slate-400 hover:text-red-600 dark:text-slate-500 dark:hover:text-red-400" title="Permanently delete assessment; preserve student results" aria-label={`Permanently delete archived assessment ${test.title}`}>
+                          <button onClick={() => permanentlyDeleteArchivedTest(test)} className="ml-2 text-slate-400 hover:text-red-600 dark:text-slate-500 dark:hover:text-red-400" title="Permanently delete assessment; preserve student results" aria-label={`Permanently delete archived assessment ${formatAssessmentTitle(test.title)}`}>
                             <Trash2 className="w-4 h-4" />
                           </button>
                         </>
                       ) : (
                         <>
-                          <button onClick={() => duplicateTest(test)} className="ml-2 text-slate-400 hover:text-purple-500 dark:text-slate-500" title="Duplicate assessment" aria-label={`Duplicate ${test.title}`}>
+                          <button onClick={() => duplicateTest(test)} className="ml-2 text-slate-400 hover:text-purple-500 dark:text-slate-500" title="Duplicate assessment" aria-label={`Duplicate ${formatAssessmentTitle(test.title)}`}>
                             <Copy className="w-4 h-4" />
                           </button>
-                          <button onClick={() => handleEditTest(test)} className="ml-2 text-slate-400 hover:text-blue-500 dark:text-slate-500" title="Edit assessment" aria-label={`Edit ${test.title}`}>
+                          <button onClick={() => handleEditTest(test)} className="ml-2 text-slate-400 hover:text-blue-500 dark:text-slate-500" title="Edit assessment" aria-label={`Edit ${formatAssessmentTitle(test.title)}`}>
                             <Edit3 className="w-4 h-4" />
                           </button>
-                          <button onClick={() => archiveTest(test.id)} className="ml-2 text-slate-400 hover:text-amber-600 dark:text-slate-500" title="Move to archive; preserve results" aria-label={`Archive ${test.title}`}>
+                          <button onClick={() => archiveTest(test.id)} className="ml-2 text-slate-400 hover:text-amber-600 dark:text-slate-500" title="Move to archive; preserve results" aria-label={`Archive ${formatAssessmentTitle(test.title)}`}>
                             <Archive className="w-4 h-4" />
                           </button>
                         </>
                       )}
                     </div>
                   </div>
-                  <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2">{test.title}</h3>
+                  <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2">{formatAssessmentTitle(test.title)}</h3>
                           <p className="text-sm text-slate-600 dark:text-slate-400 mb-4 flex-grow line-clamp-2"><FormattedQuestionText text={test.description || ''} /></p>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">Group: {test.groupCode === 'all' ? 'All students' : test.groupCode || 'Not assigned (hidden from students)'}</p>
                   <div className="flex justify-between items-center text-sm text-slate-500 dark:text-slate-400 border-t border-slate-100 dark:border-slate-700 pt-4 mt-auto">
@@ -2557,7 +2563,7 @@ const WritingPractice = ({ tests, resources, resourceError, userId, onBack }) =>
             <div className="p-5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Prompt
                 <select value={selectedPromptId || selectedPrompt.id} onChange={event => { setSelectedPromptId(event.target.value); setDraft(loadDraft(event.target.value)); setDraftRevision(previous => previous + 1); setAiMessage(''); setAiPhraseOptions([]); setAiInlineSuggestion(''); setAiFigureIncluded(false); setAiError(''); }} className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white">
-                  {prompts.map(prompt => <option key={prompt.id} value={prompt.id}>{prompt.test.title}: {stripQuestionTextFormatting(prompt.question.text || '').slice(0, 90)}</option>)}
+                  {prompts.map(prompt => <option key={prompt.id} value={prompt.id}>{formatAssessmentTitle(prompt.test.title)}: {stripQuestionTextFormatting(prompt.question.text || '').slice(0, 90)}</option>)}
                 </select>
               </label>
               <p className="mt-4 whitespace-pre-wrap text-slate-800 dark:text-slate-100"><FormattedQuestionText text={selectedPrompt.question.text} /></p>
@@ -3513,7 +3519,7 @@ const PracticeHub = ({ tests, resources, resourceError, user, onStartTest }) => 
       <div className="flex items-center justify-between"><div><h2 className="text-xl font-bold text-slate-800 dark:text-white">{subject === 'sat' ? 'SAT Skill Practice' : `IELTS ${subject[0].toUpperCase()}${subject.slice(1)} Practice`}</h2><p className="text-sm text-slate-500 dark:text-slate-400">Choose from published assessments available to your student group.</p></div><button onClick={() => setSubject('')} className="px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200">Back</button></div>
       <label className="block max-w-2xl text-sm font-medium text-slate-700 dark:text-slate-300">Question bank
         <select value={selectedTest?.id || ''} onChange={event => setSourceId(event.target.value)} className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white">
-          {sourceTests.map(test => <option key={test.id} value={test.id}>{test.title}</option>)}
+          {sourceTests.map(test => <option key={test.id} value={test.id}>{formatAssessmentTitle(test.title)}</option>)}
         </select>
       </label>
       {sourceTests.length === 0 ? <p className="p-5 rounded-xl bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-200">No published {subject === 'sat' ? 'SAT' : 'IELTS'} question bank is available for your group yet.</p> : (
@@ -3545,7 +3551,7 @@ const PracticeHub = ({ tests, resources, resourceError, user, onStartTest }) => 
             <label className="block max-w-2xl text-sm font-medium text-slate-700 dark:text-slate-300">Practice mode<select value={satMode} onChange={event => setSatMode(event.target.value)} className="mt-1 w-full p-3 rounded-lg border dark:bg-slate-700 dark:border-slate-600"><option value="skill">Practice by domain and skill</option><option value="full">Full-length section</option></select></label>
             {satMode === 'full' ? <div className="space-y-4">
               {satFullTests.length > 0 ? <>
-                <label className="block max-w-2xl text-sm font-medium">Full-length SAT section<select value={selectedSatFullTest?.id || ''} onChange={event => setSatFullTestId(event.target.value)} className="mt-1 w-full p-3 rounded-lg border dark:bg-slate-700 dark:border-slate-600">{satFullTests.map(test => <option key={test.id} value={test.id}>{test.title} · {test.questions?.length} questions · {Math.floor((test.durationSeconds || 0) / 60)} minutes</option>)}</select></label>
+                <label className="block max-w-2xl text-sm font-medium">Full-length SAT section<select value={selectedSatFullTest?.id || ''} onChange={event => setSatFullTestId(event.target.value)} className="mt-1 w-full p-3 rounded-lg border dark:bg-slate-700 dark:border-slate-600">{satFullTests.map(test => <option key={test.id} value={test.id}>{formatAssessmentTitle(test.title)} · {test.questions?.length} questions · {Math.floor((test.durationSeconds || 0) / 60)} minutes</option>)}</select></label>
                 <p className="text-sm text-amber-700 dark:text-amber-300">Unofficial practice only. The portal does not calculate an official SAT scaled score. Module navigation locks answers from the previous module.</p>
                 <button onClick={startFullSat} disabled={!selectedSatFullTest} className="px-5 py-3 rounded-lg bg-blue-600 text-white font-semibold disabled:opacity-50">Start full-length section</button>
                 {satFullTests.some(test => test.sections?.sat?.section === 'reading-writing') && satFullTests.some(test => test.sections?.sat?.section === 'math') && <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 p-4 space-y-2"><h3 className="font-semibold text-slate-800 dark:text-white">Combined Digital SAT practice</h3><p className="text-sm text-slate-600 dark:text-slate-300">98 questions · 134 minutes of testing · optional 10-minute break after Reading and Writing. This fixed practice sequence does not reproduce adaptive routing or official scaled scoring.</p><button onClick={startCombinedSat} className="px-5 py-3 rounded-lg bg-indigo-600 text-white font-semibold">Start combined SAT practice</button></div>}
@@ -3798,7 +3804,7 @@ const StudentDashboard = ({ user, tests, results, writingResources, writingResou
                   </div>
                   
                   <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2 flex items-center gap-2">
-                      {test.pin && <Lock className="w-4 h-4 text-slate-400 dark:text-slate-500" aria-label="PIN required" />} {test.title}
+                      {test.pin && <Lock className="w-4 h-4 text-slate-400 dark:text-slate-500" aria-label="PIN required" />} {formatAssessmentTitle(test.title)}
                   </h3>
                   <p className="text-sm text-slate-600 dark:text-slate-400 mb-6 flex-grow line-clamp-3"><FormattedQuestionText text={test.description || ''} /></p>
                   

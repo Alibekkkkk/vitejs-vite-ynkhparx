@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { createEmptyWritingResource, parseWritingResource, validateWritingResource, type WritingResource } from './writingResources';
 import { WritingResourceTable } from './WritingResourceTable';
+import { stripQuestionTextFormatting } from './questionTextFormatting';
 
 type Props = {
   resources: WritingResource[];
@@ -12,6 +13,10 @@ type Props = {
 };
 
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+const formatAssessmentTitle = (value: unknown): string => {
+  const plainText = stripQuestionTextFormatting(String(value || '')).replace(/\s+/g, ' ').trim();
+  return plainText || 'Untitled assessment';
+};
 
 export function WritingResourceManager({ resources, resourceError, tests, teacherUid, onSave, onDelete }: Props) {
   const [resource, setResource] = useState<WritingResource | null>(null);
@@ -201,7 +206,7 @@ export function WritingResourceManager({ resources, resourceError, tests, teache
             } : { ...current, linkedAssessmentId: undefined, linkedQuestionId: undefined, figureAsset: undefined });
           }}>
             <option value="">No linked figure</option>
-            {linkableQuestions.map(item => <option key={item.id} value={item.id}>{item.test.title} — {item.question.text?.slice(0, 60) || item.question.id}{item.question.imageAsset ? ' (figure attached)' : ''}</option>)}
+            {linkableQuestions.map(item => <option key={item.id} value={item.id}>{formatAssessmentTitle(item.test.title)} — {item.question.text?.slice(0, 60) || item.question.id}{item.question.imageAsset ? ' (figure attached)' : ''}</option>)}
           </select>
         </label>
       </div>
