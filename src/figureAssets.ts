@@ -26,6 +26,9 @@ const ALLOWED_IMAGE_TYPES = new Map([
   ['image/jpeg', '.jpg'],
   ['image/webp', '.webp'],
 ]);
+const HOSTNAME_CORRECTIONS = new Map([
+  ['i.ibb.co.com', 'i.ibb.co'],
+]);
 
 export function normalizeFigureUrl(input: string): string {
   const value = input.trim();
@@ -35,6 +38,8 @@ export function normalizeFigureUrl(input: string): string {
   try {
     const url = new URL(candidate);
     if (url.protocol !== 'https:' || url.username || url.password) return '';
+    const correctedHostname = HOSTNAME_CORRECTIONS.get(url.hostname.toLowerCase());
+    if (correctedHostname) url.hostname = correctedHostname;
     return url.href;
   } catch {
     return '';

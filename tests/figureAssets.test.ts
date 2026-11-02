@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
-import { fetchFigureForAI, getFigureSource } from '../src/figureAssets.ts';
+import { fetchFigureForAI, getFigureSource, normalizeFigureUrl } from '../src/figureAssets.ts';
 
 const originalFetch = globalThis.fetch;
 after(() => {
@@ -16,6 +16,13 @@ test('figure source prefers a valid uploaded asset URL and falls back to legacy 
     imageAsset: { downloadUrl: 'not-a-url' },
     imageUrl: 'https://legacy.example/figure.jpg',
   }), 'https://legacy.example/figure.jpg');
+});
+
+test('normalizer corrects common imgbb hostname typos', () => {
+  assert.equal(
+    normalizeFigureUrl('https://i.ibb.co.com/YBrTn5cz/doc-2026-10-07-19-15-18.png'),
+    'https://i.ibb.co/YBrTn5cz/doc-2026-10-07-19-15-18.png',
+  );
 });
 
 test('AI figure loader returns bounded image bytes as base64 inline data', async () => {
