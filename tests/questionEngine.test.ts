@@ -80,4 +80,6 @@ test('validates answer keys and shared choices before publishing', () => {
   assert.equal(validateQuestion({ id: 'ok', responseType: 'matching', text: 'Match', sharedChoices: ['A', 'B'], answerSlots: [{ id: 'a', label: '1', correctAnswers: ['A'] }] }).length, 0);
   assert.equal(validateQuestion({ id: 'manual', responseType: 'single-choice', text: 'Pick', options: ['A', 'B'], manualReview: true }).length, 0);
   assert.equal(validateQuestion({ id: 'essay', responseType: 'long-text', text: 'Write', manualReview: true }).length, 0);
+  assert.deepEqual(validateQuestion({ id: 'missing-prompt', responseType: 'single-choice', options: ['A', 'B'], correctAnswer: 'A' }), ['Add the question prompt or attach a task figure.']);
+  assert.equal(validateQuestion({ id: 'figure-only', responseType: 'single-choice', imageUrl: 'https://example.com/task-figure.png', options: ['A', 'B'], correctAnswer: 'A' }).length, 0);
 });

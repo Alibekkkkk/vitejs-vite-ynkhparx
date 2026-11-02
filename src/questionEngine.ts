@@ -235,7 +235,12 @@ export function gradeQuestion(question: EngineQuestion, answer: unknown): GradeR
 export function validateQuestion(question: EngineQuestion): string[] {
   const normalized = normalizeQuestion(question);
   const errors: string[] = [];
-  if (!String(question.text || '').trim()) errors.push('Add the question prompt.');
+  const hasPromptText = Boolean(String(question.text || '').trim());
+  const assetDownloadUrl = typeof question.imageAsset === 'object' && question.imageAsset !== null && 'downloadUrl' in question.imageAsset
+    ? (question.imageAsset as { downloadUrl?: unknown }).downloadUrl
+    : '';
+  const hasFigure = Boolean(String(assetDownloadUrl || question.imageUrl || '').trim());
+  if (!hasPromptText && !hasFigure) errors.push('Add the question prompt or attach a task figure.');
   if (normalized.responseType === 'long-text') return errors;
   const keyOptional = Boolean(normalized.manualReview || normalized.ungraded);
 
