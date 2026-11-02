@@ -8,7 +8,7 @@ import {
 import { initializeApp } from "firebase/app";
 import { getAI, getGenerativeModel, GoogleAIBackend, type Part } from 'firebase/ai';
 import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check';
-import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { getStorage, ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { 
   getAuth, 
   onAuthStateChanged, 
@@ -108,6 +108,22 @@ const formatAssessmentTitle = (value: unknown): string => {
   const plainText = stripQuestionTextFormatting(String(value || '')).replace(/\s+/g, ' ').trim();
   return plainText || 'Untitled assessment';
 };
+const withTimeout = <T,>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string, onTimeout?: () => void): Promise<T> => new Promise((resolve, reject) => {
+  const timeoutId = window.setTimeout(() => {
+    if (onTimeout) onTimeout();
+    reject(new Error(timeoutMessage));
+  }, timeoutMs);
+  promise.then(
+    (value) => {
+      window.clearTimeout(timeoutId);
+      resolve(value);
+    },
+    (error) => {
+      window.clearTimeout(timeoutId);
+      reject(error);
+    },
+  );
+});
 const SAMPLE_BANKS = [
   { file: 'ielts-academic-reading-full.json', title: 'IELTS Academic Reading — Full-Length Original Practice', type: 'IELTS', questionCount: 40, durationSeconds: 3600, passageCount: 3, description: 'Three original passages; exactly 40 questions; 60 minutes.' },
   { file: 'ielts-general-reading-full.json', title: 'IELTS General Training Reading — Full-Length Original Practice', type: 'IELTS', questionCount: 40, durationSeconds: 3600, passageCount: 3, description: 'Three original texts; exactly 40 questions; 60 minutes.' },
@@ -308,13 +324,13 @@ const getStatusColor = (category) => {
   }
 };
 
-const extractImageUrl = (input) => {
+const extractImageUrl = (input, { preserveWhitespace = true }: { preserveWhitespace?: boolean } = {}) => {
   if (!input) return '';
   const bbMatch = input.match(/\[img\](.*?)\[\/img\]/i);
-  if (bbMatch) return bbMatch[1];
+  if (bbMatch) return bbMatch[1].trim();
   const htmlMatch = input.match(/src=["'](.*?)["']/i);
-  if (htmlMatch) return htmlMatch[1];
-  return input.trim();
+  if (htmlMatch) return htmlMatch[1].trim();
+  return preserveWhitespace ? input : input.trim();
 };
 
 const createEmptyTest = () => ({
@@ -896,6 +912,32 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
     });
   };
 
+  const getFigureStateKey = (question: { id?: string } | null | undefined, index: number) => String(question?.id || `draft-question-${index}`);
+  const mapFigureUploadError = (error: unknown): string => {
+    const code = typeof error === 'object' && error && 'code' in error ? String((error as { code?: string }).code || '') : '';
+    const detail = error instanceof Error ? error.message : String(error || 'Unknown upload error.');
+    if (detail.includes('timed out')) {
+      return 'Figure upload timed out. Check your connection and Firebase Storage CORS/App Check settings, then try again.';
+    }
+    if (code === 'storage/unauthorized') {
+      return `Figure upload is blocked by Firebase Storage rules. Sign in with an approved, verified Google teacher account (${auth.currentUser?.email || 'unknown'}) and verify deployed storage.rules match this repository.`;
+    }
+    if (code === 'storage/unauthenticated') {
+      return 'Figure upload requires an active sign-in session. Sign out, sign in again, and retry.';
+    }
+    if (code === 'storage/retry-limit-exceeded') {
+      return 'Figure upload could not complete due to repeated network failures. Check connection stability and Storage CORS settings.';
+    }
+    if (code === 'storage/quota-exceeded') {
+      return 'Firebase Storage quota is exceeded for this project. Increase quota or free space, then retry.';
+    }
+    if (error instanceof TypeError) {
+      return 'Browser network access to Firebase Storage failed (often CORS, ad-blocking, or network filtering). Allow Storage endpoints and configure bucket CORS for this website domain.';
+    }
+    const appCheckHint = appCheckSiteKey ? '' : ' If Firebase App Check enforcement is enabled for Storage, configure VITE_RECAPTCHA_ENTERPRISE_SITE_KEY in deployment.';
+    return `Figure upload failed${code ? ` (${code})` : ''}: ${detail}.${appCheckHint}`;
+  };
+
   const previewLegacyImport = async () => {
     setMigratingLegacy(true);
     setLegacyMigrationMessage('');
@@ -1199,7 +1241,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
       const updated = [...prev.questions];
       updated[index] = { ...updated[index] };
     if (field === 'imageUrl') {
-      updated[index][field] = extractImageUrl(value);
+      updated[index][field] = extractImageUrl(value, { preserveWhitespace: false });
       delete updated[index].imageAsset;
     } else if (field === 'imageAlt' && updated[index].imageAsset) {
       updated[index].imageAlt = value;
@@ -1248,17 +1290,30 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
 
   const uploadQuestionFigure = async (index: number, file?: File) => {
     if (!file) return;
-    const question = newTest.questions[index];
+    let question = newTest.questions[index];
     if (!question) return;
+    if (!question.id) {
+      const generatedId = `q_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      setNewTest(previous => ({
+        ...previous,
+        questions: previous.questions.map((item, itemIndex) => itemIndex === index ? { ...item, id: generatedId } : item),
+      }));
+      question = { ...question, id: generatedId };
+    }
+    const figureStateKey = getFigureStateKey(question, index);
     const fileError = validateFigureFile(file);
     if (fileError) {
-      setFigureStates(previous => ({ ...previous, [question.id]: { status: 'error', message: fileError } }));
+      setFigureStates(previous => ({ ...previous, [figureStateKey]: { status: 'error', message: fileError } }));
       return;
     }
 
-    setFigureStates(previous => ({ ...previous, [question.id]: { status: 'uploading', message: 'Validating and uploading figure…' } }));
+    setFigureStates(previous => ({ ...previous, [figureStateKey]: { status: 'uploading', message: 'Validating and uploading figure…' } }));
     try {
-      const dimensions = await readFigureDimensions(file);
+      const dimensions = await withTimeout(
+        readFigureDimensions(file),
+        12000,
+        'Figure validation timed out while reading the selected file.',
+      );
       const dimensionError = validateFigureDimensions(dimensions.width, dimensions.height);
       if (dimensionError) throw new Error(dimensionError);
       const extension = file.type === 'image/jpeg' ? 'jpg' : file.type.split('/')[1];
@@ -1266,11 +1321,28 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
       const assetId = crypto.randomUUID();
       const path = `assessment-assets/${user.uid}/${assessmentFolder}/${question.id}/${assetId}.${extension}`;
       const reference = storageRef(storage, path);
-      await uploadBytes(reference, file, {
+      const uploadTask = uploadBytesResumable(reference, file, {
         contentType: file.type,
         customMetadata: { uploadedBy: user.uid, assetVersion: String((question.imageAsset?.assetVersion || 0) + 1) },
       });
-      const downloadUrl = await getDownloadURL(reference);
+      await withTimeout(
+        new Promise<void>((resolve, reject) => {
+          uploadTask.on('state_changed', (snapshot) => {
+            const progress = snapshot.totalBytes > 0
+              ? Math.max(1, Math.min(99, Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100)))
+              : 0;
+            setFigureStates(previous => ({ ...previous, [figureStateKey]: { status: 'uploading', message: `Uploading figure… ${progress}%` } }));
+          }, reject, () => resolve());
+        }),
+        30000,
+        'Figure upload timed out before Firebase Storage confirmed completion.',
+        () => uploadTask.cancel(),
+      );
+      const downloadUrl = await withTimeout(
+        getDownloadURL(reference),
+        10000,
+        'Figure upload succeeded but the download URL request timed out.',
+      );
       const asset: FigureAsset = {
         storagePath: path,
         downloadUrl,
@@ -1290,36 +1362,39 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
           ? { ...item, imageUrl: downloadUrl, imageAsset: asset }
           : item),
       }));
-      setFigureStates(previous => ({ ...previous, [question.id]: { status: 'available', message: 'Figure uploaded successfully. Its asset URL will be saved with this assessment.' } }));
+      setFigureStates(previous => ({ ...previous, [figureStateKey]: { status: 'available', message: 'Figure uploaded successfully. Its asset URL will be saved with this assessment.' } }));
     } catch (error) {
       console.error('Figure upload failed:', error);
       setFigureStates(previous => ({
         ...previous,
-        [question.id]: {
+        [figureStateKey]: {
           status: 'error',
-          message: error instanceof Error
-            ? `Figure upload failed: ${error.message}`
-            : 'Figure upload failed. Confirm Firebase Storage is enabled and its rules are deployed.',
+          message: mapFigureUploadError(error),
         },
       }));
     }
   };
 
-  const testQuestionFigureUrl = async (question: AssessmentQuestion) => {
+  const testQuestionFigureUrl = async (question: AssessmentQuestion, index: number) => {
+    const figureStateKey = getFigureStateKey(question, index);
     const normalizedUrl = normalizeFigureUrl(question.imageUrl || question.imageAsset?.downloadUrl || '');
     if (!normalizedUrl) {
-      setFigureStates(previous => ({ ...previous, [question.id]: { status: 'error', message: 'Enter a valid HTTPS image URL first.' } }));
+      setFigureStates(previous => ({ ...previous, [figureStateKey]: { status: 'error', message: 'Enter a valid HTTPS image URL first.' } }));
       return;
     }
-    setFigureStates(previous => ({ ...previous, [question.id]: { status: 'uploading', message: 'Testing whether this browser can render the image…' } }));
+    setFigureStates(previous => ({ ...previous, [figureStateKey]: { status: 'uploading', message: 'Testing whether this browser can render the image…' } }));
     try {
-      await verifyFigureUrl(normalizedUrl);
-      setFigureStates(previous => ({ ...previous, [question.id]: { status: 'available', message: 'The URL loaded as an image in this browser.' } }));
-      setFigureTestRevision(previous => ({ ...previous, [question.id]: (previous[question.id] || 0) + 1 }));
+      await withTimeout(
+        verifyFigureUrl(normalizedUrl),
+        10000,
+        'Image URL test timed out. Check the host and try again.',
+      );
+      setFigureStates(previous => ({ ...previous, [figureStateKey]: { status: 'available', message: 'The URL loaded as an image in this browser.' } }));
+      setFigureTestRevision(previous => ({ ...previous, [figureStateKey]: (previous[figureStateKey] || 0) + 1 }));
     } catch (error) {
       setFigureStates(previous => ({
         ...previous,
-        [question.id]: { status: 'error', message: error instanceof Error ? error.message : 'The image URL could not be rendered.' },
+        [figureStateKey]: { status: 'error', message: error instanceof Error ? error.message : 'The image URL could not be rendered.' },
       }));
     }
   };
@@ -2210,11 +2285,11 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                              <input value={q.figureCaption || q.imageAsset?.caption || ''} onChange={event => handleUpdateQuestion(qIndex, 'figureCaption', event.target.value)} className="mt-1 w-full rounded border p-2 dark:border-slate-600 dark:bg-slate-800" />
                            </label>
                          </div>
-                         <button type="button" onClick={() => void testQuestionFigureUrl(q)} disabled={figureStates[q.id]?.status === 'uploading'} className="rounded border border-blue-400 px-3 py-1.5 text-sm font-medium text-blue-800 disabled:opacity-50 dark:border-blue-700 dark:text-blue-300">
-                           {figureStates[q.id]?.status === 'uploading' ? 'Checking…' : 'Test image URL'}
+                         <button type="button" onClick={() => void testQuestionFigureUrl(q, qIndex)} disabled={figureStates[getFigureStateKey(q, qIndex)]?.status === 'uploading'} className="rounded border border-blue-400 px-3 py-1.5 text-sm font-medium text-blue-800 disabled:opacity-50 dark:border-blue-700 dark:text-blue-300">
+                           {figureStates[getFigureStateKey(q, qIndex)]?.status === 'uploading' ? 'Working…' : 'Test image URL'}
                          </button>
-                         {figureStates[q.id] && <p className={`text-sm ${figureStates[q.id].status === 'error' ? 'text-red-700 dark:text-red-300' : 'text-slate-700 dark:text-slate-200'}`} role={figureStates[q.id].status === 'error' ? 'alert' : 'status'}>{figureStates[q.id].message}</p>}
-                         <PromptFigure key={`${q.id}-${figureTestRevision[q.id] || 0}`} question={q} assessmentId={editingId || newTest.id || 'draft'} teacherFacing />
+                         {figureStates[getFigureStateKey(q, qIndex)] && <p className={`text-sm ${figureStates[getFigureStateKey(q, qIndex)].status === 'error' ? 'text-red-700 dark:text-red-300' : 'text-slate-700 dark:text-slate-200'}`} role={figureStates[getFigureStateKey(q, qIndex)].status === 'error' ? 'alert' : 'status'}>{figureStates[getFigureStateKey(q, qIndex)].message}</p>}
+                         <PromptFigure key={`${getFigureStateKey(q, qIndex)}-${figureTestRevision[getFigureStateKey(q, qIndex)] || 0}`} question={q} assessmentId={editingId || newTest.id || 'draft'} teacherFacing />
                          {q.section === 'writing' && Number(q.writingTaskType || 2) === 1 && (
                            <label className="flex items-start gap-2 text-sm text-slate-700 dark:text-slate-200">
                              <input type="checkbox" checked={q.figureMode === 'text-only'} onChange={event => handleUpdateQuestion(qIndex, 'figureMode', event.target.checked ? 'text-only' : 'visual')} />
