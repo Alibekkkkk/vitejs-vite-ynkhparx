@@ -90,7 +90,7 @@ test('teacher review supports phrase comments and publishes them with student re
   assert.match(app, /renderTeacherAnnotatedAnswer\(review\.studentAnswer, review\.teacherReview\?\.annotations\)/);
   assert.match(app, /student-feedback-layout/);
   assert.match(app, /Teacher feedback notes/);
-  assert.match(app, /count \? ` · \$\{count\} teacher note/);
+  assert.match(app, /count \? `, \$\{count\} teacher note/);
   assert.match(globalStyles, /\.student-feedback-notes \{[\s\S]*?min-width: 0/);
   assert.match(app, /onReplyTeacherComment/);
   assert.match(app, /arrayUnion\(reply\)/);
@@ -172,7 +172,7 @@ test('teacher question formats configure matching answer controls and candidate 
   assert.match(app, /return <QuestionResponse[\s\S]*?disabled=\{timeExpired \|\| isSubmitting\}/);
   assert.match(app, /question\.responseType === 'matching' \? <select/);
   assert.match(app, /question\.responseType === 'ordering'/);
-  assert.match(app, /words\{wordCount > answerWordLimit \? ' · over the suggested limit' : ''\}/);
+  assert.match(app, /words\{wordCount > answerWordLimit \? ', over the suggested limit' : ''\}/);
   assert.match(app, /insertions=\{resolveResponseType\(q\) === 'multi-blank'/);
   assert.match(app, /token: `\{\{\$\{index \+ 1\}\}\}`/);
   assert.match(app, /<QuestionPrompt question=\{currentQuestion\} value=\{currentValue\}/);

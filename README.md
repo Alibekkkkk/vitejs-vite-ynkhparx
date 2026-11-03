@@ -4,9 +4,14 @@ EduPortal is a React, TypeScript, Vite, Firebase Authentication, and Firestore a
 
 ## Free deployment and secure grading
 
-This repository does not require Firebase Cloud Functions, a Firebase Blaze plan, a Vercel API, a service-account key, or a paid AI fallback. `firebase.json` deploys only Firestore rules and indexes. Do not put service-account credentials or API secrets in Git.
+This repository does not require Firebase Cloud Functions, a Firebase Blaze plan, a Vercel API, a service-account key, or a paid AI fallback for grading. `firebase.json` deploys Firestore rules and indexes and Storage rules (uploads need a Storage bucket). The `functions/` folder is an optional, undeployed server-side alternative for grading. Do not put service-account credentials or API secrets in Git.
 
-The no-billing version deliberately does not save scores calculated in a student's browser: browser code and answer data can be edited. Answers are submitted privately with **Pending teacher review**. In **Results & submissions**, the teacher can save objective grading from the protected assessment key; essays and other subjective responses remain pending until the teacher assigns points and feedback. The app then updates the student's private result. The student's Past Results view shows the teacher-verified raw correct-answer count for Reading and Listening below the result when those sections have been reviewed. Student submissions cannot set scores, percentages, answer keys, or correct-response counts in Firestore rules.
+Scoring works in two layers so no browser can award itself a trusted score:
+
+1. **Immediate result for the student.** After submitting (or when time runs out) the student sees a results page right away. The browser reads the teacher-only answer key for that assessment, which Firestore releases only to a student who already has an attempt (see `completedAssessments` in the rules), grades the answers and stores the outcome as `selfGrade` on the student's own private result. It is shown as "Scored automatically".
+2. **Trusted score for teachers.** When an authorized teacher has the portal open, every submission without a stored score is graded automatically from the protected key and the trusted `score`, `questionReviews` and counts are written to the central submission and the student's result. **Regrade all submissions** in **Results & submissions** recalculates everything, keeping marks already given to writing responses. Essays and other manual questions stay "pending review" until a teacher marks them; mixed tests show a partial score plus the number of pending questions.
+
+Student submissions still cannot set `score`, percentages, answer keys or correct counts on the central submission. The student's Past Results view can reopen the full review with **Review**, and teachers have **Open full review** per submission.
 
 Timed exam attempts save the attempt ID, start time, answers, and current question in this browser, so refreshing restores the same attempt and the original countdown. Leaving or closing the exam records an exit time; returning within five minutes resumes the saved attempt, while a later return closes it and requires the student to contact the teacher. The countdown continues while the page is closed. This browser-side recovery is for continuity and does not replace server-side enforcement against a modified client.
 
@@ -38,9 +43,20 @@ Register the local debug token in Firebase App Check. Never set the debug-token 
 
 ## Student groups and answer-key privacy
 
-The Firestore rules authorize the four verified Google teacher accounts listed in `firestore.rules`. Students can read only published tests assigned to their saved group or `all`; approved teachers may also submit their own practice attempts for published, secured assessments. Students cannot read teacher-only answer-key documents. Exam attempts are saved to the account's private result path and to the teacher's submissions collection; the rules reject client-provided score summaries. After changing Firestore rules, publish them with `firebase deploy --project exam-portal-71a9b --only firestore:rules`.
+The Firestore rules authorize the four verified Google teacher accounts listed in `firestore.rules` (and `storage.rules`). An assessment can be assigned to several groups: the editor stores `groupCodes` (a list, or `["all"]`) and keeps `groupCode` equal to the first group so older readers keep working. Existing assessments get `groupCodes` automatically the first time an approved teacher opens the dashboard. Groups can be added or removed on a published assessment without touching existing results. Students can read only published tests assigned to their saved group or `all`; approved teachers may also submit their own practice attempts for published, secured assessments. Students cannot list or read answer-key documents until they have submitted an attempt for that assessment. Exam attempts are saved to the account's private result path and to the teacher's submissions collection; the rules reject client-provided score summaries. After changing Firestore rules, publish them with `firebase deploy --project exam-portal-71a9b --only firestore:rules`.
 
 Teacher answer keys and explanations are stored under `artifacts/{appId}/teacher/data/answerKeys/{assessmentId}`. Student-readable assessment documents omit keys and explanations. The migration button copies old keys to the protected collection and removes them from the public assessment document without deleting the assessment.
+
+## Task figure uploads (Firebase Storage)
+
+Teachers can upload a PNG, JPEG or WebP (up to 5 MB) or paste a direct HTTPS image link. Uploads need Firebase Storage to exist for the project: in the Firebase Console open **Build → Storage → Get started** (new projects may require the Blaze plan), then run `firebase deploy --project exam-portal-71a9b --only storage` to publish [`storage.rules`](storage.rules). The upload form checks the bucket first and explains the exact problem (missing bucket, permission denied, signed out, no connection) instead of waiting for a timeout; it shows progress, can be cancelled, and can be retried. Files are stored at `assessment-assets/{teacherUid}/{assessmentId or draft}/{questionId}/{file}`, so uploading before the first save works. If cross-origin reads are ever blocked, apply [`cors.json`](cors.json) with `gsutil cors set cors.json gs://exam-portal-71a9b.firebasestorage.app`.
+
+## Deploy checklist
+
+1. `npm ci`, then `npm run lint`, `npm run build`, `npm run test:question-engine`, `npm run test:features` (CI runs the same on every push).
+2. `firebase deploy --project exam-portal-71a9b --only firestore:rules,firestore:indexes,storage`.
+3. Deploy the app (Vercel builds it from Git; `dist/` is not committed). Set `VITE_RECAPTCHA_ENTERPRISE_SITE_KEY` if App Check or the AI coach is enabled.
+4. Sign in as an approved teacher and open the dashboard once so existing assessments receive `groupCodes` and existing submissions are graded.
 
 ## Question engine and practice
 
@@ -78,9 +94,10 @@ Run the bank-content validator locally with `npm run validate:banks` before impo
 ## Checks
 
 ```sh
+npm run lint
+npm run build
 npm run test:question-engine
 npm run test:features
-npm run build
-npm run lint
+npm run test:rules      # Firestore rules against the emulator (needs Java 11+; not part of CI)
 npm run validate:banks
 ```

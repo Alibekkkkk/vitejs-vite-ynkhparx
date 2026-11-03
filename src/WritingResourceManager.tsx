@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { createEmptyWritingResource, parseWritingResource, validateWritingResource, type WritingResource } from './writingResources';
 import { WritingResourceTable } from './WritingResourceTable';
-import { stripQuestionTextFormatting } from './questionTextFormatting';
+import { formatAssessmentTitle } from './assessmentTitle';
 
 type Props = {
   resources: WritingResource[];
@@ -13,10 +13,6 @@ type Props = {
 };
 
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
-const formatAssessmentTitle = (value: unknown): string => {
-  const plainText = stripQuestionTextFormatting(String(value || '')).replace(/\s+/g, ' ').trim();
-  return plainText || 'Untitled assessment';
-};
 
 export function WritingResourceManager({ resources, resourceError, tests, teacherUid, onSave, onDelete }: Props) {
   const [resource, setResource] = useState<WritingResource | null>(null);
@@ -152,7 +148,7 @@ export function WritingResourceManager({ resources, resourceError, tests, teache
         {status && <p role="status">{status}</p>}
         {!resources.length && <p className="rounded-xl border border-dashed p-6">No writing resources have been created yet.</p>}
         {resources.map(item => <article key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-white p-4 dark:bg-slate-800">
-          <div><h2 className="font-bold">{item.title || 'Untitled resource'}</h2><p>{item.status === 'published' ? 'Published · visible to matching Writing Practice tasks' : 'Draft · not visible to students until published'} · {item.sections.length} section(s)</p></div>
+          <div><h2 className="font-bold">{item.title || 'Untitled resource'}</h2><p>{item.status === 'published' ? 'Published: visible to matching Writing Practice tasks' : 'Draft: not visible to students until published'}, {item.sections.length} section(s)</p></div>
           <div className="flex gap-2">
             <button type="button" onClick={() => { setResource(clone(item)); setSavedSnapshot(JSON.stringify(item)); }} className="rounded border px-3 py-2">Edit</button>
             <button type="button" onClick={() => { setResource({ ...clone(item), id: crypto.randomUUID(), title: `${item.title} (Copy)`, createdBy: teacherUid, status: 'draft', sections: item.sections.map(section => ({ ...section, id: crypto.randomUUID() })) }); setSavedSnapshot(''); }} className="rounded border px-3 py-2">Duplicate</button>

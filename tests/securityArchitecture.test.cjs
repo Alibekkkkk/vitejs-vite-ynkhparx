@@ -143,3 +143,72 @@ test('combined SAT records both source assessments and checks student access to 
   assert.match(rules, /request\.resource\.data\.get\('secondaryAssessmentId', ''\) == '' \|\| accountCanSubmit/);
   assert.match(rules, /function validSubmissionAssessmentIds\(\)[\s\S]*?ids\.size\(\) <= 2[\s\S]*?ids\[1\] == secondaryId/);
 });
+
+test('assessments can be assigned to several groups while the single groupCode keeps working', () => {
+  assert.match(rules, /function canReadTestForStudent\(appId\)[\s\S]*?'all' in testGroups[\s\S]*?studentGroup in testGroups/);
+  assert.match(rules, /function accountCanSubmit[\s\S]*?assignedGroups[\s\S]*?group in assignedGroups/);
+  assert.match(appSource, /where\('groupCodes', 'array-contains', ALL_GROUPS\)/);
+  assert.match(appSource, /where\('groupCodes', 'array-contains', studentGroup\)/);
+  assert.match(appSource, /planGroupCodeMigration\(testsData\)/);
+  assert.match(appSource, /\.\.\.toGroupFields\(assignedGroups\)/);
+  assert.match(appSource, /<GroupCodeInput /);
+  const functions = readFileSync(join(root, 'functions', 'index.js'), 'utf8');
+  assert.match(functions, /Array\.isArray\(assessment\.groupCodes\)/);
+});
+
+test('objective answers are graded automatically instead of waiting for a teacher to open each submission', () => {
+  assert.match(appSource, /gradeSubmissionsAutomatically/);
+  assert.match(appSource, /needsAutoGrading\(submission\)/);
+  assert.match(appSource, /Regrade all submissions/);
+  assert.doesNotMatch(appSource, /A teacher must review them before a score is available/);
+  assert.match(rules, /'unansweredCount', 'reviewedAt', 'autoGradedAt'/);
+});
+
+test('answer keys are released only to a student who already has an attempt for that assessment', () => {
+  assert.match(rules, /function hasCompletedAssessment\(appId, assessmentId\)[\s\S]*?completedAssessments\/\$\(assessmentId\)[\s\S]*?completedMarkerHasEligibleResult/);
+  assert.match(rules, /function completedMarkerHasEligibleResult[\s\S]*?results\/\$\(attemptId\)[\s\S]*?isPractice[\s\S]*?assessmentId in get\(/);
+  assert.match(rules, /match \/artifacts\/\{appId\}\/teacher\/data\/answerKeys\/\{testId\}[\s\S]*?allow get: if signedIn\(\)[\s\S]*?hasCompletedAssessment\(appId, testId\)/);
+  assert.match(rules, /match \/artifacts\/\{appId\}\/users\/\{userId\}\/completedAssessments\/\{assessmentId\}[\s\S]*?existsAfter\([\s\S]*?results[\s\S]*?isPractice[\s\S]*?assessmentIds/);
+  assert.match(rules, /allow list: if isAuthorizedTeacher\(\)/);
+  assert.doesNotMatch(rules, /answerKeys\/\{testId\}[\s\S]{0,200}allow list: if signedIn\(\)/);
+});
+
+test('a student can attach one provisional grade to their own result but cannot change trusted scores', () => {
+  assert.match(rules, /function validStudentSelfGradeUpdate\(userId\)[\s\S]*?resource\.data\.get\('selfGrade', null\) == null[\s\S]*?hasOnly\(\['selfGrade'\]\)/);
+  assert.match(rules, /validStudentSelfGradeUpdate\(userId\)\s*\|\|\s*validStudentFeedbackReplyUpdate\(userId\)/);
+  assert.doesNotMatch(rules, /submissions\/\{submissionId\}[\s\S]*?validStudentSelfGradeUpdate/);
+});
+
+test('an approved teacher can move a student to another group but cannot change anything else on the profile', () => {
+  assert.match(rules, /isAuthorizedTeacher\(\)\s*&& profileId == 'info'\s*&& resource\.data\.get\('role', 'student'\) == 'student'\s*&& request\.resource\.data\.get\('role', 'student'\) == 'student'\s*&& request\.resource\.data\.diff\(resource\.data\)\.affectedKeys\(\)\.hasOnly\(\['groupCode'\]\)/);
+  assert.match(appSource, /changeStudentGroup/);
+  assert.match(appSource, /<StudentGroupControl /);
+});
+
+test('exam attempts warn before leaving, flag questions and report connection problems', () => {
+  assert.match(appSource, /useLeaveWarning\(!isSubmitting\)/);
+  assert.match(appSource, /<QuestionNavigator /);
+  assert.match(appSource, /<ExamNotices /);
+  const modalSource = appSource.match(/const Modal = [\s\S]*?\n};/)[0];
+  assert.match(modalSource, /useFocusTrap\(/);
+});
+
+test('the interface never uses bullet or middle-dot characters as separators', () => {
+  const { readdirSync } = require('node:fs');
+  const sourceFiles = readdirSync(join(root, 'src')).filter(name => /\.(tsx|ts)$/.test(name));
+  const offenders = [];
+  for (const name of sourceFiles) {
+    const lines = readFileSync(join(root, 'src', name), 'utf8').split(/\r?\n/);
+    lines.forEach((line, index) => {
+      const stripped = line.replace(/placeholder="•+"/g, '').replace(/\[-\*•\]/g, '');
+      if (/[•·]/.test(stripped)) offenders.push(`${name}:${index + 1}`);
+    });
+  }
+  assert.deepEqual(offenders, []);
+});
+
+test('dates, titles and results never expose raw formatting markers', () => {
+  assert.match(appSource, /formatAssessmentTitle\(test\?\.title, 'this exam'\)/);
+  assert.doesNotMatch(appSource, />\{test\.title\}</);
+  assert.doesNotMatch(appSource, />\{attempt\.assessmentTitle\}</);
+});

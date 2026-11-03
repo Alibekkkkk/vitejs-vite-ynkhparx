@@ -85,10 +85,12 @@ exports.submitExamAttempt = onCall({ maxInstances: 10 }, async (request) => {
   const profile = profileSnapshot.data();
   const assessment = testSnapshot.data();
   if (assessment.answerKeysSecured !== true) throw new HttpsError('failed-precondition', 'This assessment needs a teacher to secure its answer keys before it can be started.');
-  const assignedGroup = String(assessment.groupCode || '').trim().toLowerCase();
+  const assignedGroups = Array.isArray(assessment.groupCodes)
+    ? assessment.groupCodes.map(code => String(code || '').trim().toLowerCase()).filter(Boolean)
+    : [String(assessment.groupCode || '').trim().toLowerCase()].filter(Boolean);
   const studentGroup = String(profile.groupCode || '').trim().toLowerCase();
-  if (assessment.published === false || assessment.status === 'draft' || !assignedGroup
-      || (assignedGroup !== 'all' && assignedGroup !== studentGroup)) {
+  const assignedToStudent = assignedGroups.includes('all') || (studentGroup !== '' && assignedGroups.includes(studentGroup));
+  if (assessment.published === false || assessment.status === 'draft' || !assignedToStudent) {
     throw new HttpsError('permission-denied', 'This assessment is not assigned to your student group.');
   }
   const keySnapshot = await db.doc(`artifacts/${APP_ID}/teacher/data/answerKeys/${testId}`).get();

@@ -380,8 +380,8 @@ export function ReadingAnnotations({ text, storageKey, fontScale = 1 }: { text: 
         </article>)}
       </div>
       <div className="reading-annotations__counts" aria-live="polite">
-        {validMarks.length} marks · {notes.length} notes
-        {selection && <span> · {selection.quote.length} characters selected</span>}
+        {validMarks.length} marks, {notes.length} notes
+        {selection && <span>, {selection.quote.length} characters selected</span>}
       </div>
     </section>
   );

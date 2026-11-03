@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { getQuestionTextFormattingRuns, parseQuestionTextFormatting, stripQuestionTextFormatting } from '../src/questionTextFormatting.ts';
+import { formatAssessmentTitle } from '../src/assessmentTitle.ts';
 
 test('question formatting parser handles bold, italic, underline, and normal text', () => {
   assert.deepEqual(parseQuestionTextFormatting('Use **bold**, *italic*, and ++underline++.'), [
@@ -42,8 +43,9 @@ test('question formatting supports safe alignment and bounded font sizes, includ
     { start: 16, end: 21, style: 'plain', align: 'center', fontSize: 24 },
     { start: 21, end: 27, style: 'plain', align: undefined, fontSize: undefined },
   ]);
-  assert.equal(stripQuestionTextFormatting('[[align:justify]]not a supported tag[[/align]]'), '[[align:justify]]not a supported tag[[/align]]');
-  assert.equal(stripQuestionTextFormatting('[[size:100]]not a supported size[[/size]]'), '[[size:100]]not a supported size[[/size]]');
+  // An unsupported opening marker stays literal; a closing marker without a partner is never shown.
+  assert.equal(stripQuestionTextFormatting('[[align:justify]]not a supported tag[[/align]]'), '[[align:justify]]not a supported tag');
+  assert.equal(stripQuestionTextFormatting('[[size:100]]not a supported size[[/size]]'), '[[size:100]]not a supported size');
 });
 
 test('question formatting renders alignment and emphasis nested inside size and bold wrappers', () => {
@@ -59,6 +61,24 @@ test('question formatting renders alignment and emphasis nested inside size and 
   assert.deepEqual(getQuestionTextFormattingRuns(formatted).map(({ start, end, style, align, fontSize }) => ({ start, end, style, align, fontSize })), [
     { start: 0, end: 34, style: 'bold', align: 'center', fontSize: 24 },
   ]);
+});
+
+test('legacy title with bold wrapped around alignment becomes plain text', () => {
+  assert.equal(formatAssessmentTitle('**[[align:center]]NUET Critical Thinking Mock Exam #2[[/align]]**'), 'NUET Critical Thinking Mock Exam #2');
+});
+
+test('markers that cross each other never leak into plain text', () => {
+  assert.equal(stripQuestionTextFormatting('**[[align:center]]Crossed title**[[/align]]'), 'Crossed title');
+  assert.equal(stripQuestionTextFormatting('[[size:24]]Only opening marker'), 'Only opening marker');
+  assert.equal(stripQuestionTextFormatting('Only closing marker[[/size]]'), 'Only closing marker');
+  assert.equal(stripQuestionTextFormatting('*[[align:right]]italic*[[/align]] tail'), 'italic tail');
+});
+
+test('partially styled titles keep unstyled words and drop every marker', () => {
+  assert.equal(formatAssessmentTitle('Mock **Exam** [[size:20]]#[[/size]]3'), 'Mock Exam #3');
+  assert.equal(formatAssessmentTitle('++Part++ [align:center]one[/align]'), 'Part one');
+  assert.equal(formatAssessmentTitle('   '), 'Untitled assessment');
+  assert.equal(formatAssessmentTitle(null, 'Assessment'), 'Assessment');
 });
 
 test('question formatting supports legacy single-bracket align and size tags', () => {

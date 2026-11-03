@@ -16,6 +16,11 @@ export type FormattedTextRun = {
 
 const FORMAT_TOKEN = /\[\[align:(left|center|right)\]\]([\s\S]+?)\[\[\/align\]\]|\[\[size:(10|12|14|16|18|20|24|28|32|36|40|48)\]\]([\s\S]+?)\[\[\/size\]\]|\*\*([\s\S]+?)\*\*|\+\+([\s\S]+?)\+\+|(?<!\*)\*([^*\n]+?)\*(?!\*)/g;
 const LEGACY_FORMAT_SIZE_PATTERN = '10|12|14|16|18|20|24|28|32|36|40|48';
+// Valid alignment/size markers that never found their partner (for example when bold
+// markers cross them). They carry no meaning on their own and must never be shown.
+const ORPHAN_FORMAT_TOKEN = new RegExp(`\\[\\[(?:align:(?:left|center|right)|size:(?:${LEGACY_FORMAT_SIZE_PATTERN})|/align|/size)\\]\\]`, 'g');
+
+const withoutOrphanTokens = (text: string) => text.replace(ORPHAN_FORMAT_TOKEN, '');
 
 function normalizeLegacyFormattingTags(value: string): string {
   return value
@@ -32,7 +37,7 @@ export function parseQuestionTextFormatting(value: string): FormattedTextPart[] 
 
   for (const match of normalizedValue.matchAll(FORMAT_TOKEN)) {
     const index = match.index ?? 0;
-    if (index > cursor) parts.push({ style: 'plain', text: normalizedValue.slice(cursor, index) });
+    if (index > cursor) parts.push({ style: 'plain', text: withoutOrphanTokens(normalizedValue.slice(cursor, index)) });
     if (match[1] !== undefined) {
       parts.push({ style: 'align', align: match[1] as 'left' | 'center' | 'right', text: match[2], children: parseQuestionTextFormatting(match[2]) });
     } else if (match[3] !== undefined) {
@@ -41,9 +46,10 @@ export function parseQuestionTextFormatting(value: string): FormattedTextPart[] 
       const bold = match[5];
       const underline = match[6];
       const italic = match[7];
-      const text = bold ?? underline ?? italic ?? '';
-      const nestedParts = parseQuestionTextFormatting(text);
+      const rawText = bold ?? underline ?? italic ?? '';
+      const nestedParts = parseQuestionTextFormatting(rawText);
       const children = nestedParts.some(part => part.style !== 'plain') ? nestedParts : undefined;
+      const text = children ? rawText : nestedParts.map(part => part.text).join('');
       parts.push({
         style: bold !== undefined ? 'bold' : underline !== undefined ? 'underline' : 'italic',
         text,
@@ -53,7 +59,7 @@ export function parseQuestionTextFormatting(value: string): FormattedTextPart[] 
     cursor = index + match[0].length;
   }
 
-  if (cursor < normalizedValue.length) parts.push({ style: 'plain', text: normalizedValue.slice(cursor) });
+  if (cursor < normalizedValue.length) parts.push({ style: 'plain', text: withoutOrphanTokens(normalizedValue.slice(cursor)) });
   return parts;
 }
 

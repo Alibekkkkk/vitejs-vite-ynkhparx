@@ -1,0 +1,8 @@
+[
+  {
+    "origin": ["https://accomplish-exams.vercel.app", "http://localhost:5173", "http://localhost:4173"],
+    "method": ["GET", "HEAD", "PUT", "POST", "OPTIONS"],
+    "responseHeader": ["Content-Type", "Content-Length", "Content-Range", "x-goog-resumable", "Authorization", "x-goog-meta-uploadedby", "x-goog-meta-assetversion"],
+    "maxAgeSeconds": 3600
+  }
+]

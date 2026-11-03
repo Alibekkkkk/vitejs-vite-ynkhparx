@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Clock, BookOpen, FileText, CheckCircle, LogOut, User, Play,
-  ArrowRight, LayoutDashboard, History, Check, Plus, Edit3, Users,
-  Lock, Image as ImageIcon, Sun, Moon, X, Copy, Archive, RotateCcw, Trash2
+  ArrowRight, LayoutDashboard, History, Plus, Users,
+  Lock, Image as ImageIcon, Sun, Moon, X, Archive, Trash2
 } from 'lucide-react';
 
 import { initializeApp } from "firebase/app";
 import { getAI, getGenerativeModel, GoogleAIBackend, type Part } from 'firebase/ai';
 import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check';
-import { getStorage, ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import { getStorage, ref as storageRef, uploadBytesResumable, getDownloadURL, type UploadTask } from 'firebase/storage';
 import { 
   getAuth, 
   onAuthStateChanged, 
@@ -38,6 +38,17 @@ import { FormattedQuestionText } from './FormattedQuestionText';
 import { QuestionTextEditor } from './QuestionTextEditor';
 import { hasInlineAnswerSlots, QuestionPrompt } from './QuestionPrompt';
 import { stripQuestionTextFormatting } from './questionTextFormatting';
+import { formatAssessmentTitle } from './assessmentTitle';
+import { ALL_GROUPS, getAssessmentGroupCodes, isAssessmentAssignedToGroup, mergeAssessmentsById, normalizeGroupCode, planGroupCodeMigration, toGroupFields } from './groupCodes';
+import { GroupCodeInput } from './GroupCodeInput';
+import { StudentAssessmentCard, TeacherAssessmentCard } from './AssessmentCards';
+import { createReviewRows, gradeAttempt, needsAutoGrading, resolveReviewData, summarizeReviews } from './grading';
+import { ResultReview } from './ResultReview';
+import { bucketProblemMessage, createStallWatchdog, describeUploadFailure, probeStorageBucket } from './figureUpload';
+import { ExamNotices, QuestionNavigator, useFlaggedQuestions, useLeaveWarning, useOnlineStatus } from './ExamSafetyNets';
+import { useFocusTrap } from './useFocusTrap';
+import { StudentGroupControl } from './StudentGroupControl';
+import { AnalyticsPanel } from './AnalyticsPanel';
 import { PromptFigure } from './PromptFigure';
 import { ResizableSplitPane } from './ResizableSplitPane';
 import { WritingResourceTable } from './WritingResourceTable';
@@ -104,11 +115,8 @@ const removeUndefinedValues = <T,>(value: T): T => {
   }
   return value;
 };
-const formatAssessmentTitle = (value: unknown): string => {
-  const plainText = stripQuestionTextFormatting(String(value || '')).replace(/\s+/g, ' ').trim();
-  return plainText || 'Untitled assessment';
-};
-const withTimeout = <T,>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string, onTimeout?: () => void): Promise<T> => new Promise((resolve, reject) => {
+const formatScoreNumber = (value: number) => String(Math.round(Number(value || 0) * 100) / 100);
+const withTimeout =  <T,>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string, onTimeout?: () => void): Promise<T> => new Promise((resolve, reject) => {
   const timeoutId = window.setTimeout(() => {
     if (onTimeout) onTimeout();
     reject(new Error(timeoutMessage));
@@ -179,10 +187,11 @@ const resolveAccountRole = async (profileRef, firebaseUser, storedRole, requeste
 };
 
 const Modal = ({ isOpen, title, children, onClose, actions = [] }) => {
+  const dialogRef = useFocusTrap(Boolean(isOpen), onClose);
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" role="presentation">
-      <div role="dialog" aria-modal="true" aria-labelledby="modal-title" className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl max-w-lg w-full p-6 animate-in fade-in zoom-in duration-200 max-h-[90vh] overflow-y-auto border border-slate-200 dark:border-slate-700">
+      <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="modal-title" className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl max-w-lg w-full p-6 animate-in fade-in zoom-in duration-200 max-h-[90vh] overflow-y-auto border border-slate-200 dark:border-slate-700 outline-none">
         <h3 id="modal-title" className="text-xl font-bold text-gray-800 dark:text-white mb-4 text-left">{title}</h3>
         <div className="text-slate-600 dark:text-slate-300 text-left">{children}</div>
         {actions.length > 0 ? (
@@ -220,7 +229,7 @@ const QuestionResponse = ({ question: rawQuestion, value, onChange, preview = fa
   const responseControl = (control: React.ReactNode) => <div className="space-y-2">
     {question.answerInstruction && <p className="rounded-lg bg-blue-50 px-3 py-2 text-sm font-medium text-blue-900 dark:bg-blue-950/40 dark:text-blue-200"><FormattedQuestionText text={question.answerInstruction} /></p>}
     {control}
-    {question.responseType === 'long-text' && answerWordLimit > 0 && <p className={`text-right text-xs ${wordCount > answerWordLimit ? 'font-semibold text-red-700 dark:text-red-300' : 'text-slate-500 dark:text-slate-400'}`} aria-live="polite">{wordCount} / {answerWordLimit} words{wordCount > answerWordLimit ? ' · over the suggested limit' : ''}</p>}
+    {question.responseType === 'long-text' && answerWordLimit > 0 && <p className={`text-right text-xs ${wordCount > answerWordLimit ? 'font-semibold text-red-700 dark:text-red-300' : 'text-slate-500 dark:text-slate-400'}`} aria-live="polite">{wordCount} / {answerWordLimit} words{wordCount > answerWordLimit ? ', over the suggested limit' : ''}</p>}
   </div>;
 
   if (question.responseType === 'single-choice') return (
@@ -316,14 +325,6 @@ const renderTeacherAnnotatedAnswer = (answer: unknown, annotations: unknown) => 
   return rendered.length ? rendered : text;
 };
 
-const getStatusColor = (category) => {
-  switch (category) {
-    case 'Exam': return 'bg-purple-100 text-purple-700 border-purple-200 dark:bg-purple-900/40 dark:text-purple-300 dark:border-purple-800';
-    case 'Homework': return 'bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-900/40 dark:text-orange-300 dark:border-orange-800';
-    default: return 'bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/40 dark:text-blue-300 dark:border-blue-800';
-  }
-};
-
 const extractImageUrl = (input, { preserveWhitespace = true }: { preserveWhitespace?: boolean } = {}) => {
   if (!input) return '';
   const bbMatch = input.match(/\[img\](.*?)\[\/img\]/i);
@@ -342,6 +343,7 @@ const createEmptyTest = () => ({
   questions: [],
   pin: '',
   groupCode: '',
+  groupCodes: [] as string[],
   sections: {
     listening: {
       instructions: '',
@@ -551,30 +553,6 @@ const mergeQuestionKeys = (questions: any[], keys: any[]) => {
     return { ...question, ...key, answerSlots: (question.answerSlots || []).map((slot: any) => ({ ...slot, ...(key.answerSlots || []).find((keySlot: any) => keySlot.id === slot.id) })) };
   });
 };
-
-const createTeacherReviewRows = (questions: any[], answers: Record<string, unknown>) => questions.map((question: any) => {
-  const studentAnswer = answers?.[question.id] ?? null;
-  const grade = gradeQuestion(question, studentAnswer);
-  return {
-    questionId: question.id,
-    questionText: question.text || '',
-    section: question.section || '',
-    passageNumber: question.passageNumber || null,
-    listeningSectionNumber: question.listeningSectionNumber || null,
-    writingTaskType: question.writingTaskType || null,
-    satDomain: question.satDomain || '',
-    satSkill: question.satSkill || '',
-    responseType: resolveResponseType(question),
-    studentAnswer,
-    points: Math.max(0, Number(question.points ?? 1) || 0),
-    status: grade.status,
-    isCorrect: grade.isCorrect,
-    earnedPoints: grade.status === 'graded' ? grade.earnedPoints : null,
-    answerKey: { responseType: resolveResponseType(question), correctAnswer: question.correctAnswer ?? null, acceptedAnswers: question.acceptedAnswers || [], answerSlots: question.answerSlots || [], correctOrder: question.correctOrder || [] },
-    acceptedAnswers: question.acceptedAnswers || [],
-    explanation: question.explanation || '',
-  };
-});
 
 const getReadingPassage = (test: AssessmentRecord, passageNumber: number) => {
   const reading = test?.sections?.reading;
@@ -854,7 +832,10 @@ const TeacherReviewFields = ({ attempt, review, onSaveReview }) => {
   </>;
 };
 
-const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResource, onDeleteResource, submissions, submissionsLoading, submissionsError, onSaveReview, onBackfillLegacy, onSecureAnswerKeys, onLogout }) => {
+const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResource, onDeleteResource, submissions, submissionsLoading, submissionsError, onSaveReview, onBackfillLegacy, onSecureAnswerKeys, onRegradeAll, onChangeStudentGroup, autoGradingNotice, onLogout }) => {
+  const [regrading, setRegrading] = useState(false);
+  const [regradeMessage, setRegradeMessage] = useState('');
+  const [reviewSubmission, setReviewSubmission] = useState<any>(null);
   const [teacherArea, setTeacherArea] = useState<'assessments' | 'results' | 'samples' | 'resources'>('assessments');
   const [assessmentView, setAssessmentView] = useState<'active' | 'archived'>('active');
   const [resultSearch, setResultSearch] = useState('');
@@ -888,7 +869,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
   const [validationErrors, setValidationErrors] = useState<Record<string, string[]>>({});
   const [previewQuestionId, setPreviewQuestionId] = useState<string | null>(null);
   const [questionBankError, setQuestionBankError] = useState('');
-  const [figureStates, setFigureStates] = useState<Record<string, { status: 'uploading' | 'available' | 'error'; message: string }>>({});
+  const [figureStates, setFigureStates] = useState<Record<string, { status: 'uploading' | 'available' | 'error'; message: string; progress?: number; canRetry?: boolean; fileName?: string }>>({});
   const [figureTestRevision, setFigureTestRevision] = useState<Record<string, number>>({});
   const [confirmPrompt, setConfirmPrompt] = useState<null | { title: string; message: string; confirmLabel: string; destructive?: boolean; onConfirm: () => void; onCancel: () => void; }>(null);
   const [alertPrompt, setAlertPrompt] = useState<null | { title: string; message: string; onClose: () => void; }>(null);
@@ -913,29 +894,12 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
   };
 
   const getFigureStateKey = (question: { id?: string } | null | undefined, index: number) => String(question?.id || `draft-question-${index}`);
-  const mapFigureUploadError = (error: unknown): string => {
-    const code = typeof error === 'object' && error && 'code' in error ? String((error as { code?: string }).code || '') : '';
-    const detail = error instanceof Error ? error.message : String(error || 'Unknown upload error.');
-    if (detail.includes('timed out')) {
-      return 'Figure upload timed out. Check your connection and Firebase Storage CORS/App Check settings, then try again.';
-    }
-    if (code === 'storage/unauthorized') {
-      return `Figure upload is blocked by Firebase Storage rules. Sign in with an approved, verified Google teacher account (${auth.currentUser?.email || 'unknown'}) and verify deployed storage.rules match this repository.`;
-    }
-    if (code === 'storage/unauthenticated') {
-      return 'Figure upload requires an active sign-in session. Sign out, sign in again, and retry.';
-    }
-    if (code === 'storage/retry-limit-exceeded') {
-      return 'Figure upload could not complete due to repeated network failures. Check connection stability and Storage CORS settings.';
-    }
-    if (code === 'storage/quota-exceeded') {
-      return 'Firebase Storage quota is exceeded for this project. Increase quota or free space, then retry.';
-    }
-    if (error instanceof TypeError) {
-      return 'Browser network access to Firebase Storage failed (often CORS, ad-blocking, or network filtering). Allow Storage endpoints and configure bucket CORS for this website domain.';
-    }
-    const appCheckHint = appCheckSiteKey ? '' : ' If Firebase App Check enforcement is enabled for Storage, configure VITE_RECAPTCHA_ENTERPRISE_SITE_KEY in deployment.';
-    return `Figure upload failed${code ? ` (${code})` : ''}: ${detail}.${appCheckHint}`;
+  const figureUploadTasks = useRef(new Map<string, UploadTask>());
+  const figureRetryFiles = useRef(new Map<string, { index: number; file: File }>());
+  const cancelFigureUpload = (key: string) => figureUploadTasks.current.get(key)?.cancel();
+  const retryFigureUpload = (key: string) => {
+    const pending = figureRetryFiles.current.get(key);
+    if (pending) void uploadQuestionFigure(pending.index, pending.file);
   };
 
   const previewLegacyImport = async () => {
@@ -1008,7 +972,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
   const importSampleAsDraft = async (bank: any, file: string) => {
     const existingCopies = tests.filter((item: any) => item.sourceBank === file);
     if (existingCopies.length) {
-      const confirmed = await showConfirmDialog('Duplicate sample?', `This sample bank was already imported as ${existingCopies.map((item: any) => item.title).join(', ')}. Create another separate draft with fresh question IDs?`, 'Create draft', false);
+      const confirmed = await showConfirmDialog('Duplicate sample?', `This sample bank was already imported as ${existingCopies.map((item: any) => formatAssessmentTitle(item.title)).join(', ')}. Create another separate draft with fresh question IDs?`, 'Create draft', false);
       if (!confirmed) return;
     }
     bank = parseQuestionBank(bank);
@@ -1017,7 +981,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
     const questions = sourceQuestions.map((question: any) => ({ ...question, id: idMap.get(question.id),
       answerSlots: question.answerSlots?.map((slot: any, index: number) => ({ ...slot, id: `${idMap.get(question.id)}_slot_${index + 1}` })) }));
     const minutes = Math.max(1, Math.round(Number(bank.durationSeconds || 1800) / 60));
-    setNewTest({ ...createEmptyTest(), ...bank, id: undefined, sourceBank: file, title: `${bank.title || 'Sample bank'} (draft)`, category: 'Practice', durationMinutes: minutes, groupCode: '', published: false, status: 'draft', questions });
+    setNewTest({ ...createEmptyTest(), ...bank, id: undefined, sourceBank: file, title: `${bank.title || 'Sample bank'} (draft)`, category: 'Practice', durationMinutes: minutes, groupCode: '', groupCodes: [], published: false, status: 'draft', questions });
     setEditingId(null);
     setActiveQuestionSection(bank.type === 'IELTS' ? 'listening' : 'general');
     setTeacherArea('assessments');
@@ -1042,9 +1006,14 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
     }
   };
 
+  const knownGroupCodes = [...new Set([
+    ...tests.flatMap((assessment: any) => getAssessmentGroupCodes(assessment)),
+    ...submissions.map((submission: any) => normalizeGroupCode(submission.groupCode)),
+  ].filter(code => code && code !== ALL_GROUPS))].sort();
+
   const visibleSubmissions = submissions.filter((submission: any) => {
     const queryText = resultSearch.trim().toLowerCase();
-    const haystack = [submission.studentName, submission.studentEmail, submission.studentUid, submission.groupCode, submission.assessmentTitle, submission.assessmentId, submission.examType].join(' ').toLowerCase();
+    const haystack = [submission.studentName, submission.studentEmail, submission.studentUid, submission.groupCode, formatAssessmentTitle(submission.assessmentTitle, ''), submission.assessmentId, submission.examType].join(' ').toLowerCase();
     const at = new Date(submission.submittedAtMs || submission.submittedAt || 0).getTime();
     const day = Number.isFinite(at) ? new Date(at).toISOString().slice(0, 10) : '';
     return (!queryText || haystack.includes(queryText))
@@ -1060,7 +1029,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
     const questionsById = new Map(sourceQuestions.map((question: any) => [question.id, question]));
     return {
       ...submission,
-      questionReviews: (submission.questionReviews?.length ? submission.questionReviews : createTeacherReviewRows(sourceQuestions, submission.answers || {})).map((review: any) => {
+      questionReviews: (submission.questionReviews?.length ? submission.questionReviews : createReviewRows(sourceQuestions, submission.answers || {})).map((review: any) => {
         const question: any = questionsById.get(review.questionId);
         return question ? {
           ...review,
@@ -1072,10 +1041,25 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
     };
   });
 
+  const regradeAllSubmissions = async () => {
+    const confirmed = await showConfirmDialog('Regrade all submissions?', `Recalculate scores for ${submissions.filter((item: any) => item.gradingMode !== 'legacy-unverified').length} submission(s) from the current answer keys. Marks you already gave to writing responses are kept. Legacy imported results are not changed.`, 'Regrade all', false);
+    if (!confirmed) return;
+    setRegrading(true);
+    setRegradeMessage('');
+    try {
+      const result = await onRegradeAll();
+      setRegradeMessage(`Regraded ${result.graded} submission(s).${result.skipped ? ` ${result.skipped} legacy or skipped.` : ''}${result.failed ? ` ${result.failed} could not be graded because their assessment or answer key is unavailable.` : ''}`);
+    } catch (error) {
+      setRegradeMessage(error instanceof Error ? error.message : 'Regrading failed.');
+    } finally {
+      setRegrading(false);
+    }
+  };
+
   const exportSubmissionsCsv = () => {
     const columns = ['studentName','studentEmail','studentUid','groupCode','assessmentTitle','examType','assessmentId','submittedAt','score','maxAutoScore','percentage','durationSeconds','isAutoSubmitted','answeredCount','unansweredCount','correctCount','incorrectCount','pendingReviewCount','reviewStatus'];
     const quote = (value: unknown) => `"${String(value ?? '').replaceAll('"', '""')}"`;
-    const csv = [columns.join(','), ...visibleSubmissions.map((item: any) => columns.map(key => quote(item[key])).join(','))].join('\r\n');
+    const csv = [columns.join(','), ...visibleSubmissions.map((item: any) => columns.map(key => quote(key === 'assessmentTitle' ? formatAssessmentTitle(item.assessmentTitle, '') : item[key])).join(','))].join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     const link = document.createElement('a'); link.href = url; link.download = 'exam-submissions.csv'; link.click(); URL.revokeObjectURL(url);
   };
@@ -1203,6 +1187,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
         title: `${test.title} (Copy)`,
         answerKeysSecured: false,
         groupCode: '',
+        groupCodes: [],
         pin: '',
         status: 'draft',
         published: false,
@@ -1301,21 +1286,48 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
       question = { ...question, id: generatedId };
     }
     const figureStateKey = getFigureStateKey(question, index);
+    const uploadContext = { email: auth.currentUser?.email, bucket: firebaseConfig.storageBucket, hasAppCheck: Boolean(appCheckSiteKey) };
+    const failUpload = (message: string, canRetry: boolean) => setFigureStates(previous => ({
+      ...previous,
+      [figureStateKey]: { status: 'error', message, canRetry, fileName: file.name },
+    }));
     const fileError = validateFigureFile(file);
     if (fileError) {
-      setFigureStates(previous => ({ ...previous, [figureStateKey]: { status: 'error', message: fileError } }));
+      figureRetryFiles.current.delete(figureStateKey);
+      failUpload(fileError, false);
+      return;
+    }
+    if (!user || !isClientAuthorizedTeacher(auth.currentUser)) {
+      failUpload('Sign in with an approved, verified Google teacher account to upload figures. You can still paste a direct HTTPS image link below.', false);
       return;
     }
 
-    setFigureStates(previous => ({ ...previous, [figureStateKey]: { status: 'uploading', message: 'Validating and uploading figure…' } }));
+    figureRetryFiles.current.set(figureStateKey, { index, file });
+    setFigureStates(previous => ({ ...previous, [figureStateKey]: { status: 'uploading', message: 'Checking Firebase Storage…', progress: 0, fileName: file.name } }));
+    const bucket = await probeStorageBucket(firebaseConfig.storageBucket);
+    const bucketProblem = bucketProblemMessage(bucket.state, firebaseConfig.storageBucket);
+    if (bucketProblem) {
+      failUpload(bucketProblem, false);
+      return;
+    }
+    if (bucket.state === 'unreachable') {
+      failUpload(describeUploadFailure(new TypeError('Failed to fetch'), uploadContext).message, true);
+      return;
+    }
+
     try {
+      setFigureStates(previous => ({ ...previous, [figureStateKey]: { status: 'uploading', message: 'Validating image…', progress: 0, fileName: file.name } }));
       const dimensions = await withTimeout(
         readFigureDimensions(file),
         12000,
         'Figure validation timed out while reading the selected file.',
       );
       const dimensionError = validateFigureDimensions(dimensions.width, dimensions.height);
-      if (dimensionError) throw new Error(dimensionError);
+      if (dimensionError) {
+        figureRetryFiles.current.delete(figureStateKey);
+        failUpload(dimensionError, false);
+        return;
+      }
       const extension = file.type === 'image/jpeg' ? 'jpg' : file.type.split('/')[1];
       const assessmentFolder = editingId || 'draft';
       const assetId = crypto.randomUUID();
@@ -1325,22 +1337,26 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
         contentType: file.type,
         customMetadata: { uploadedBy: user.uid, assetVersion: String((question.imageAsset?.assetVersion || 0) + 1) },
       });
-      await withTimeout(
-        new Promise<void>((resolve, reject) => {
-          uploadTask.on('state_changed', (snapshot) => {
-            const progress = snapshot.totalBytes > 0
-              ? Math.max(1, Math.min(99, Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100)))
-              : 0;
-            setFigureStates(previous => ({ ...previous, [figureStateKey]: { status: 'uploading', message: `Uploading figure… ${progress}%` } }));
-          }, reject, () => resolve());
-        }),
-        30000,
-        'Figure upload timed out before Firebase Storage confirmed completion.',
-        () => uploadTask.cancel(),
-      );
+      figureUploadTasks.current.set(figureStateKey, uploadTask);
+      await new Promise<void>((resolve, reject) => {
+        let stalled = false;
+        const watchdog = createStallWatchdog(45000, () => { stalled = true; uploadTask.cancel(); });
+        watchdog.poke();
+        uploadTask.on('state_changed', snapshot => {
+          watchdog.poke();
+          const progress = snapshot.totalBytes > 0 ? Math.max(1, Math.min(99, Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100))) : 0;
+          setFigureStates(previous => ({ ...previous, [figureStateKey]: { status: 'uploading', message: `Uploading ${file.name}…`, progress, fileName: file.name } }));
+        }, error => {
+          watchdog.stop();
+          reject(stalled ? new Error('Upload stalled: no progress for 45 seconds') : error);
+        }, () => {
+          watchdog.stop();
+          resolve();
+        });
+      });
       const downloadUrl = await withTimeout(
         getDownloadURL(reference),
-        10000,
+        15000,
         'Figure upload succeeded but the download URL request timed out.',
       );
       const asset: FigureAsset = {
@@ -1362,16 +1378,14 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
           ? { ...item, imageUrl: downloadUrl, imageAsset: asset }
           : item),
       }));
-      setFigureStates(previous => ({ ...previous, [figureStateKey]: { status: 'available', message: 'Figure uploaded successfully. Its asset URL will be saved with this assessment.' } }));
+      figureRetryFiles.current.delete(figureStateKey);
+      setFigureStates(previous => ({ ...previous, [figureStateKey]: { status: 'available', message: 'Figure uploaded. Its asset URL will be saved with this assessment.', fileName: file.name } }));
     } catch (error) {
       console.error('Figure upload failed:', error);
-      setFigureStates(previous => ({
-        ...previous,
-        [figureStateKey]: {
-          status: 'error',
-          message: mapFigureUploadError(error),
-        },
-      }));
+      const failure = describeUploadFailure(error, uploadContext);
+      failUpload(failure.message, failure.retryable);
+    } finally {
+      figureUploadTasks.current.delete(figureStateKey);
     }
   };
 
@@ -1484,7 +1498,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
       const idMap = new Map(bank.questions.map((question: any, index) => [question.id, `q_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 6)}`]));
       const questions = bank.questions.map((question: any) => ({ ...question, sourceId: question.id, id: idMap.get(question.id), answerSlots: question.answerSlots?.map((slot: any, index: number) => ({ ...slot, id: `${idMap.get(question.id)}_slot_${index + 1}` })) }));
       setEditingId(null);
-      setNewTest({ ...createEmptyTest(), ...bank, id: undefined, durationMinutes: Math.max(1, Math.round(Number(bank.durationSeconds || 1800) / 60)), groupCode: '', status: 'draft', published: false, questions });
+      setNewTest({ ...createEmptyTest(), ...bank, id: undefined, durationMinutes: Math.max(1, Math.round(Number(bank.durationSeconds || 1800) / 60)), groupCode: '', groupCodes: [], status: 'draft', published: false, questions });
     } catch (error) {
       setQuestionBankError(error instanceof Error ? error.message : 'Could not import this question bank.');
     } finally {
@@ -1497,7 +1511,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${String(newTest.title || 'question-bank').toLowerCase().replace(/[^a-z0-9]+/g, '-')}.json`;
+    link.download = `${formatAssessmentTitle(newTest.title, 'question-bank').toLowerCase().replace(/[^a-z0-9]+/g, '-')}.json`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -1511,6 +1525,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
       await showAlertDialog('Assessment incomplete', 'Title and at least 1 question required.');
       return;
     }
+    const assignedGroups = getAssessmentGroupCodes(newTest);
     const errors = Object.fromEntries(newTest.questions.map((question, index) => {
       const messages = validateQuestion(question);
       if (newTest.type === 'IELTS' && question.section === 'reading') {
@@ -1521,7 +1536,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
       if (newTest.type === 'IELTS' && question.section === 'writing' && ![1, 2].includes(Number(question.writingTaskType || 0))) messages.push('Choose IELTS Writing Task 1 or Task 2.');
       const figureInput = question.imageUrl || question.imageAsset?.downloadUrl || '';
       if (figureInput && !normalizeFigureUrl(figureInput)) messages.push('Task figure URLs must use HTTPS and be a direct image URL.');
-      if (newTest.groupCode.trim() && requiresTaskFigure(question) && !normalizeFigureUrl(figureInput)) {
+      if (assignedGroups.length && requiresTaskFigure(question) && !normalizeFigureUrl(figureInput)) {
         messages.push('Add and test a Task 1 figure, or explicitly mark this prompt as text-only before publishing.');
       }
       return [question.id || String(index), messages];
@@ -1542,16 +1557,16 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
               return (order[a.section || 'general'] ?? 3) - (order[b.section || 'general'] ?? 3);
             })
           : newTest.questions.map(question => ({ ...question, responseType: resolveResponseType(question) })),
-        groupCode: newTest.groupCode.trim().toLowerCase(),
-        status: newTest.groupCode.trim() ? 'published' : 'draft',
-        published: Boolean(newTest.groupCode.trim()),
+        ...toGroupFields(assignedGroups),
+        status: assignedGroups.length ? 'published' : 'draft',
+        published: assignedGroups.length > 0,
         durationSeconds: newTest.durationMinutes * 60,
         authorId: user.uid,
         authorName: user.name
       };
       delete testToSave.durationMinutes;
 
-      if (testToSave.groupCode && testToSave.type === 'IELTS') {
+      if (assignedGroups.length && testToSave.type === 'IELTS') {
         const listeningQuestions = testToSave.questions.filter((question: any) => question.section === 'listening');
         const sectionsMissingAudio = [...new Set<number>(listeningQuestions.map((question: any) => Number(question.listeningSectionNumber || 1)))].filter(sectionNumber => !getListeningAudioUrl(testToSave, sectionNumber));
         if (sectionsMissingAudio.length) {
@@ -1561,8 +1576,9 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
         }
       }
 
-      if (testToSave.groupCode) {
-        const confirmed = await showConfirmDialog('Publish assessment?', `Publish “${formatAssessmentTitle(testToSave.title)}” to student group “${testToSave.groupCode}” now? Students in that group will be able to see it.`, 'Publish', false);
+      const groupSummary = assignedGroups.includes(ALL_GROUPS) ? 'all students' : assignedGroups.length === 1 ? `student group “${assignedGroups[0]}”` : `student groups ${assignedGroups.map(group => `“${group}”`).join(', ')}`;
+      if (assignedGroups.length) {
+        const confirmed = await showConfirmDialog('Publish assessment?', `Publish “${formatAssessmentTitle(testToSave.title)}” to ${groupSummary} now? Students in ${assignedGroups.length === 1 ? 'that group' : 'those groups'} will be able to see it.`, 'Publish', false);
         if (!confirmed) {
           setIsSubmitting(false);
           return;
@@ -1594,8 +1610,8 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
       setActiveQuestionSection('listening');
       await showAlertDialog(
         'Assessment saved',
-        testToSave.groupCode
-          ? `Published “${formatAssessmentTitle(testToSave.title)}” for group ${testToSave.groupCode} (assessment ID ${testRef.id}). It is visible to that group.`
+        assignedGroups.length
+          ? `Published “${formatAssessmentTitle(testToSave.title)}” for ${groupSummary} (assessment ID ${testRef.id}). It is visible to ${assignedGroups.length === 1 ? 'that group' : 'those groups'}.`
           : `Saved “${formatAssessmentTitle(testToSave.title)}” as a draft. Assessment ID: ${testRef.id}`
       );
     } catch (err) {
@@ -1618,7 +1634,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
     const confirmed = await showConfirmDialog('Archive assessment?', 'Archive this assessment? It will be hidden from students, while the answer key and historical results are preserved.', 'Archive', true);
     if (!confirmed) return;
     try {
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tests', testId), { status: 'archived', published: false, groupCode: '', archivedAt: new Date().toISOString() });
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tests', testId), { status: 'archived', published: false, groupCode: '', groupCodes: [], archivedAt: new Date().toISOString() });
     } catch(err) {
       console.error(err);
       await showAlertDialog('Archive failed', 'Could not archive this assessment. Please check your connection and try again.');
@@ -1630,7 +1646,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
     const confirmed = await showConfirmDialog('Return to draft?', `Return “${displayTitle}” to draft? Students will no longer see it. Existing submissions and results will be kept.`, 'Return to draft', false);
     if (!confirmed) return;
     try {
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tests', test.id), { groupCode: '', published: false, status: 'draft', updatedAt: new Date().toISOString() });
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tests', test.id),       { groupCode: '', groupCodes: [], published: false, status: 'draft', updatedAt: new Date().toISOString() });
       await showAlertDialog('Assessment returned to draft', `“${displayTitle}” is now a draft. Historical submissions remain available.`);
     } catch (error) {
       await showAlertDialog('Could not unpublish', error instanceof Error ? error.message : 'Could not return this assessment to draft.');
@@ -1641,7 +1657,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
     const confirmed = await showConfirmDialog('Return archived assessment to drafts?', `Move “${formatAssessmentTitle(test.title)}” back to your active assessments as an unpublished draft? Students will not see it until you publish it again. Historical results will be kept.`, 'Return to drafts', false);
     if (!confirmed) return;
     try {
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tests', test.id), { groupCode: '', published: false, status: 'draft', updatedAt: new Date().toISOString() });
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tests', test.id),       { groupCode: '', groupCodes: [], published: false, status: 'draft', updatedAt: new Date().toISOString() });
     } catch (error) {
       await showAlertDialog('Could not restore assessment', error instanceof Error ? error.message : 'Could not return this assessment to drafts.');
     }
@@ -1693,7 +1709,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
         writing: { ...defaults.sections.writing, ...test.sections?.writing }
       },
       questions: (test.questions || []).map(question => normalizeQuestion(question)),
-      groupCode: test.groupCode || '',
+      ...toGroupFields(getAssessmentGroupCodes(test)),
       durationMinutes: Math.floor(test.durationSeconds / 60)
     });
     const firstTaggedSection = test.questions?.find(question => question.section)?.section;
@@ -1710,6 +1726,17 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
     setNewTest(createEmptyTest());
     setActiveQuestionSection('listening');
   };
+
+  if (reviewSubmission) {
+    const reviewedAssessment = tests.find((item: any) => item.id === (reviewSubmission.assessmentIds?.[0] || reviewSubmission.assessmentId));
+    const reviewQuestions = (reviewSubmission.assessmentIds?.length ? reviewSubmission.assessmentIds : [reviewSubmission.assessmentId])
+      .flatMap((id: string) => tests.find((item: any) => item.id === id)?.questions || []);
+    return (
+      <main className="min-h-screen w-full bg-slate-50 p-4 transition-colors duration-300 dark:bg-slate-900 sm:p-8">
+        <ResultReview record={reviewSubmission} test={reviewedAssessment} questions={reviewQuestions} teacherView backLabel="Back to results" onBack={() => setReviewSubmission(null)} />
+      </main>
+    );
+  }
 
   return (
     <>
@@ -1788,9 +1815,11 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                 {legacyCursor && <button onClick={() => { setLegacyCursor(''); setLegacyDryRun(null); try { sessionStorage.removeItem(`legacy-result-cursor:${user?.uid}`); } catch (error) { console.warn('Could not clear the legacy import cursor:', error); } }} className="rounded-lg border px-4 py-2 dark:border-slate-600">Restart import cursor</button>}
                 <button onClick={() => setAnswerKeyInfoOpen(true)} className="rounded-lg border px-4 py-2 dark:border-slate-600">Answer keys — Learn more</button>
                 <button onClick={() => void previewAnswerKeyMigration()} disabled={securingAnswerKeys} className="rounded-lg border border-amber-400 px-4 py-2 text-amber-800 dark:text-amber-200 disabled:opacity-50">{securingAnswerKeys ? 'Checking…' : 'Preview answer-key migration'}</button>
+                <button onClick={() => void regradeAllSubmissions()} disabled={regrading || !submissions.length} className="rounded-lg border border-emerald-500 px-4 py-2 text-emerald-800 dark:text-emerald-200 disabled:opacity-50">{regrading ? 'Regrading…' : 'Regrade all submissions'}</button>
                 <button onClick={exportSubmissionsCsv} disabled={!visibleSubmissions.length} className="rounded-lg bg-purple-600 px-4 py-2 text-white disabled:opacity-50">Export filtered CSV</button>
               </div>
             </div>
+            {(regradeMessage || autoGradingNotice) && <p className="rounded-lg border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-900 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-100" role="status">{regradeMessage || autoGradingNotice}</p>}
             {legacyDryRun && <div className="rounded-lg border border-blue-300 bg-blue-50 p-4 text-blue-900 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-100">
               <p className="font-semibold">Read-only batch preview</p>
               <p>Read {legacyDryRun.recordsRead} record(s); {legacyDryRun.candidates} matched the expected historical path; {legacyDryRun.alreadyImported} already exist; {Math.max(0, legacyDryRun.candidates - legacyDryRun.alreadyImported)} would be imported.</p>
@@ -1807,15 +1836,16 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-4">
               <input aria-label="Search submissions" value={resultSearch} onChange={e => setResultSearch(e.target.value)} placeholder="Search student / test" className="lg:col-span-2 p-2 rounded border dark:bg-slate-700 dark:border-slate-600" />
               <select aria-label="Filter group" value={resultGroup} onChange={e => setResultGroup(e.target.value)} className="p-2 rounded border dark:bg-slate-700 dark:border-slate-600"><option value="">All groups</option>{[...new Set<string>(submissions.map((item: any) => String(item.groupCode || '')).filter(Boolean))].map(group => <option key={group} value={group}>{group}</option>)}</select>
-              <select aria-label="Filter assessment" value={resultAssessment} onChange={e => setResultAssessment(e.target.value)} className="p-2 rounded border dark:bg-slate-700 dark:border-slate-600"><option value="">All assessments</option>{[...new Map<string, string>(submissions.map((item: any) => [String(item.assessmentId || ''), String(item.assessmentTitle || item.assessmentId || '')] as [string, string])).entries()].filter(([id]) => id).map(([id, title]) => <option key={id} value={id}>{title}</option>)}</select>
+              <select aria-label="Filter assessment" value={resultAssessment} onChange={e => setResultAssessment(e.target.value)} className="p-2 rounded border dark:bg-slate-700 dark:border-slate-600"><option value="">All assessments</option>{[...new Map<string, string>(submissions.map((item: any) => [String(item.assessmentId || ''), formatAssessmentTitle(item.assessmentTitle || item.assessmentId || '')] as [string, string])).entries()].filter(([id]) => id).map(([id, title]) => <option key={id} value={id}>{title}</option>)}</select>
               <select aria-label="Filter exam type" value={resultType} onChange={e => setResultType(e.target.value)} className="p-2 rounded border dark:bg-slate-700 dark:border-slate-600"><option value="">All types</option>{['IELTS','SAT','NUET','General'].map(type => <option key={type}>{type}</option>)}</select>
               <select aria-label="Filter review status" value={resultStatus} onChange={e => setResultStatus(e.target.value)} className="p-2 rounded border dark:bg-slate-700 dark:border-slate-600"><option value="">All statuses</option>{['pending-review','reviewed','auto-submitted','submitted'].map(status => <option key={status}>{status}</option>)}</select>
               <div className="flex gap-1"><input aria-label="Submitted from" type="date" value={resultFrom} onChange={e => setResultFrom(e.target.value)} className="min-w-0 w-1/2 p-2 rounded border dark:bg-slate-700 dark:border-slate-600"/><input aria-label="Submitted to" type="date" value={resultTo} onChange={e => setResultTo(e.target.value)} className="min-w-0 w-1/2 p-2 rounded border dark:bg-slate-700 dark:border-slate-600"/></div>
             </div>
             {submissionsLoading && <p role="status" className="p-4">Loading submissions…</p>}{submissionsError && <p role="alert" className="p-4 rounded bg-red-50 text-red-700">Could not load submissions: {submissionsError}</p>}
+            <AnalyticsPanel submissions={visibleSubmissions} assessmentId={resultAssessment} assessmentTitle={formatAssessmentTitle(tests.find((item: any) => item.id === resultAssessment)?.title, 'this assessment')} />
             {!submissionsLoading && !submissionsError && visibleSubmissions.length === 0 && <p className="p-8 text-center rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300">No submissions match these filters yet.</p>}
             <div className="space-y-3">{visibleSubmissions.map((attempt: any) => <details key={attempt.id} className="rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-4">
-              <summary className="cursor-pointer list-none"><div className="grid grid-cols-1 md:grid-cols-4 gap-2 items-center"><div><strong>{attempt.studentName || 'Student'}</strong><div className="text-xs text-slate-500">{attempt.studentEmail || 'Email unavailable'} · UID {attempt.studentUid}</div></div><div><strong>{attempt.assessmentTitle}</strong><div className="text-xs text-slate-500">{attempt.examType} · {attempt.assessmentId}{attempt.sectionOrSkill ? ` · ${attempt.sectionOrSkill}` : ''}</div></div><div className="text-sm">{new Date(attempt.submittedAtMs || attempt.legacyHistoricalData?.submittedAtMs || attempt.legacyHistoricalData?.submittedAt || attempt.submittedAt || 0).toLocaleString()} · Group: {attempt.groupCode || '—'}</div><div className="text-sm">{attempt.gradingMode === 'legacy-unverified' ? `Legacy — unverified${attempt.legacyHistoricalData?.score == null ? '' : ` · historical score ${attempt.legacyHistoricalData.score}`}` : `${attempt.score == null ? 'Pending' : `${attempt.score} / ${attempt.maxPossibleScore ?? attempt.maxAutoScore ?? '—'}`} · ${attempt.reviewStatus || 'submitted'}`}</div></div><div className="mt-2 text-xs text-slate-500">{attempt.gradingMode === 'legacy-unverified' ? 'Historical grading has not been recalculated or verified.' : `Answered ${attempt.answeredCount ?? 0} · unanswered ${attempt.unansweredCount ?? 0} · correct ${attempt.correctCount ?? 0} · incorrect ${attempt.incorrectCount ?? 0} · pending review ${attempt.pendingReviewCount ?? 0} · ${attempt.isAutoSubmitted ? 'auto-submitted' : 'submitted'}${attempt.durationSeconds ? ` · ${Math.round(attempt.durationSeconds / 60)} min` : ''}`}</div></summary>
+              <summary className="cursor-pointer list-none"><div className="grid grid-cols-1 md:grid-cols-4 gap-2 items-center"><div><strong>{attempt.studentName || 'Student'}</strong><div className="text-xs text-slate-500">{attempt.studentEmail || 'Email unavailable'}, UID {attempt.studentUid}</div></div><div><strong>{formatAssessmentTitle(attempt.assessmentTitle)}</strong><div className="text-xs text-slate-500">{attempt.examType}, {attempt.assessmentId}{attempt.sectionOrSkill ? `, ${attempt.sectionOrSkill}` : ''}</div></div><div className="text-sm">{new Date(attempt.submittedAtMs || attempt.legacyHistoricalData?.submittedAtMs || attempt.legacyHistoricalData?.submittedAt || attempt.submittedAt || 0).toLocaleString()}, Group: {attempt.groupCode || '—'}</div><div className="text-sm">{attempt.gradingMode === 'legacy-unverified' ? `Legacy — unverified${attempt.legacyHistoricalData?.score == null ? '' : `, historical score ${attempt.legacyHistoricalData.score}`}` : `${attempt.score == null ? 'Pending' : `${attempt.score} / ${attempt.maxPossibleScore ?? attempt.maxAutoScore ?? '—'}`}, ${attempt.reviewStatus || 'submitted'}`}</div></div><div className="mt-2 text-xs text-slate-500">{attempt.gradingMode === 'legacy-unverified' ? 'Historical grading has not been recalculated or verified.' : `Answered ${attempt.answeredCount ?? 0}, unanswered ${attempt.unansweredCount ?? 0}, correct ${attempt.correctCount ?? 0}, incorrect ${attempt.incorrectCount ?? 0}, pending review ${attempt.pendingReviewCount ?? 0}, ${attempt.isAutoSubmitted ? 'auto-submitted' : 'submitted'}${attempt.durationSeconds ? `, ${Math.round(attempt.durationSeconds / 60)} min` : ''}`}</div></summary>
               <div className="mt-4 border-t dark:border-slate-700 pt-3 space-y-4">
                 {attempt.gradingMode === 'legacy-unverified' ? <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-100">
                   <p className="font-semibold">Legacy — unverified</p>
@@ -1823,8 +1853,10 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                   <p className="mt-2">Original source: {attempt.legacySourcePath}</p>
                   <details className="mt-2"><summary>Historical display data</summary><pre className="mt-2 whitespace-pre-wrap break-words text-xs">{JSON.stringify(attempt.legacyHistoricalData || {}, null, 2)}</pre></details>
                 </div> : <>
-                  <button onClick={async () => { try { await onSaveReview(attempt.id, '__finalize__', { feedback: '', points: null }); } catch (error) { await showAlertDialog('Could not save grading', error instanceof Error ? error.message : 'Could not save grading. Try again.'); } }} className="px-3 py-2 rounded bg-blue-600 text-white text-sm font-semibold">Save objective grading and results</button>
-                  <p className="text-xs text-slate-500">Uses the saved teacher-only answer key. Written responses remain pending until you review them.</p>
+                  <button onClick={async () => { try { await onSaveReview(attempt.id, '__finalize__', { feedback: '', points: null }); } catch (error) { await showAlertDialog('Could not save grading', error instanceof Error ? error.message : 'Could not save grading. Try again.'); } }} className="px-3 py-2 rounded bg-blue-600 text-white text-sm font-semibold">Recalculate this submission</button>
+                  <button type="button" onClick={() => setReviewSubmission(attempt)} className="ml-2 px-3 py-2 rounded border border-purple-500 text-purple-800 dark:text-purple-200 text-sm font-semibold">Open full review</button>
+                  <p className="text-xs text-slate-500">Objective questions are scored automatically from the teacher-only answer key. Written responses stay pending until you review them.</p>
+                  <StudentGroupControl studentUid={attempt.studentUid} studentName={attempt.studentName} submittedGroup={attempt.groupCode} onChange={onChangeStudentGroup} />
                 </>}
                 {(attempt.questionReviews || []).map((review: any, index: number) => <article key={review.questionId || index} className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
                   <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-900/70">
@@ -1843,7 +1875,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                       <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Student response</h4>
                       <p className="mt-1 whitespace-pre-wrap rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-800 dark:bg-slate-900 dark:text-slate-100">{formatAnswerForReview(review.studentAnswer)}</p>
                     </section>}
-                    <p className="text-sm text-slate-600 dark:text-slate-300">Status: {review.status}{review.earnedPoints != null ? ` · ${review.earnedPoints}/${review.points} points` : ''}</p>
+                    <p className="text-sm text-slate-600 dark:text-slate-300">Status: {review.status}{review.earnedPoints != null ? `, ${review.earnedPoints}/${review.points} points` : ''}</p>
                     {(review.answerKey || review.acceptedAnswers?.length || review.explanation) && <details className="rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-700">
                       <summary className="cursor-pointer font-medium text-slate-700 dark:text-slate-200">Marking guide</summary>
                       <div className="mt-2 space-y-1 text-slate-600 dark:text-slate-300">
@@ -1877,13 +1909,13 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
               const duration = Math.round(Number(durationSeconds || bank?.durationSeconds || 0) / 60);
               return <article key={file} className="rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5">
                 <h2 className="font-bold text-lg">{title}</h2>
-                <p className="text-sm text-slate-500 mt-1">{type} · {questionCount} questions · {duration ? `${duration} min` : 'untimed'} · JSON v1</p>
+                <p className="text-sm text-slate-500 mt-1">{type}, {questionCount} questions, {duration ? `${duration} min` : 'untimed'}, JSON v1</p>
                 <p className="text-sm my-3">{description}</p>
-                <p className="text-sm text-slate-600 dark:text-slate-300">{passages ? `${passages} reading passages · ` : ''}{listeningSections ? `${listeningSections} listening sections · ` : ''}{listeningSections ? missingAudio.length || !bank ? 'Draft only · local audio files must be supplied and verified.' : 'Audio metadata loaded; verify each recording before publishing.' : bank ? 'File loaded and validated; ready for teacher review.' : 'Choose the matching local JSON file to inspect this bank.'}</p>
+                <p className="text-sm text-slate-600 dark:text-slate-300">{passages ? `${passages} reading passages, ` : ''}{listeningSections ? `${listeningSections} listening sections, ` : ''}{listeningSections ? missingAudio.length || !bank ? 'Draft only: local audio files must be supplied and verified.' : 'Audio metadata loaded; verify each recording before publishing.' : bank ? 'File loaded and validated; ready for teacher review.' : 'Choose the matching local JSON file to inspect this bank.'}</p>
                 {imported.length > 0 && <p className="mt-2 text-xs text-blue-700 dark:text-blue-300">Already imported: {imported.map((item: any) => item.title).join(', ')}</p>}
                 <input id={`sample-bank-${file}`} type="file" accept="application/json,.json" className="hidden" onChange={event => loadSampleBankFile(event, file)} />
                 <div className="flex flex-wrap gap-2 mt-3"><button onClick={() => document.getElementById(`sample-bank-${file}`)?.click()} className="px-3 py-2 rounded border dark:border-slate-600">{bank ? 'Choose another file' : 'Choose JSON and preview'}</button><button disabled={!bank} onClick={() => bank && importSampleAsDraft(bank, file)} className="px-3 py-2 rounded bg-purple-600 text-white disabled:opacity-50">Import as draft</button></div>
-                {bank && selectedSample?.file === file && <div className="mt-4 space-y-3 max-h-[36rem] overflow-y-auto"><h3 className="font-semibold">Preview: {bank.title}</h3>{(bank.questions || []).map((question: any, index: number) => <div key={question.id || index} className="p-3 rounded-lg border dark:border-slate-600"><p className="font-medium">{index + 1}. <FormattedQuestionText text={question.text || ''} /></p><QuestionResponse question={question} value={undefined} onChange={() => {}} preview /><p className="text-xs text-slate-500 mt-2">{question.section || question.satDomain || 'Practice'} · {resolveResponseType(question)}</p></div>)}</div>}
+                {bank && selectedSample?.file === file && <div className="mt-4 space-y-3 max-h-[36rem] overflow-y-auto"><h3 className="font-semibold">Preview: {bank.title}</h3>{(bank.questions || []).map((question: any, index: number) => <div key={question.id || index} className="p-3 rounded-lg border dark:border-slate-600"><p className="font-medium">{index + 1}. <FormattedQuestionText text={question.text || ''} /></p><QuestionResponse question={question} value={undefined} onChange={() => {}} preview /><p className="text-xs text-slate-500 mt-2">{question.section || question.satDomain || 'Practice'}, {resolveResponseType(question)}</p></div>)}</div>}
               </article>;
             })}</div>
           </section>
@@ -1919,60 +1951,22 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
             {(() => {
               const shownTests = tests.filter(test => assessmentView === 'archived' ? test.status === 'archived' : test.status !== 'archived');
               return shownTests.length ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 text-left">
+            <div className="grid grid-cols-1 items-stretch gap-5 text-left md:grid-cols-2 xl:grid-cols-3">
               {shownTests.map(test => (
-                <div key={test.id} className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 flex flex-col transition-colors">
-                  {(() => {
-                    const failed = answerKeyReport?.details?.some((item: any) => item.assessmentId === test.id && item.status === 'failed');
-                    const securityStatus = test.status === 'draft' || test.published !== true
-                      ? 'Draft/not applicable'
-                      : failed ? 'Migration failed'
-                        : test.answerKeysSecured && test.teacherKeyComplete ? 'Secure'
-                          : test.answerKeysSecured ? 'Missing teacher key' : 'Needs security migration';
-                    const style = securityStatus === 'Secure' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200'
-                      : securityStatus === 'Draft/not applicable' ? 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200'
-                        : 'bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200';
-                    return <p className={`mb-3 w-fit rounded-full px-3 py-1 text-xs font-semibold ${style}`} aria-label={`Answer-key status: ${securityStatus}`}>{securityStatus}</p>;
-                  })()}
-                  <div className="flex justify-between items-start mb-4">
-                    <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${getStatusColor(test.category)}`}>
-                      {test.category} • {test.type} • {test.status || (test.groupCode ? 'Published' : 'Draft')}
-                    </span>
-                    <div className="flex items-center gap-2">
-                      {test.pin && <Lock className="w-4 h-4 text-amber-500" aria-label="PIN protected" />}
-                      {test.groupCode && <button onClick={() => unpublishTest(test)} className="text-xs px-2 py-1 rounded border border-amber-300 text-amber-700 dark:text-amber-300" title="Hide from students and preserve all results">Unpublish</button>}
-                      {assessmentView === 'archived' ? (
-                        <>
-                          <button onClick={() => restoreArchivedTest(test)} className="ml-2 text-slate-400 hover:text-emerald-600 dark:text-slate-500" title="Return assessment to active drafts" aria-label={`Restore ${formatAssessmentTitle(test.title)} to drafts`}>
-                            <RotateCcw className="w-4 h-4" />
-                          </button>
-                          <button onClick={() => permanentlyDeleteArchivedTest(test)} className="ml-2 text-slate-400 hover:text-red-600 dark:text-slate-500 dark:hover:text-red-400" title="Permanently delete assessment; preserve student results" aria-label={`Permanently delete archived assessment ${formatAssessmentTitle(test.title)}`}>
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button onClick={() => duplicateTest(test)} className="ml-2 text-slate-400 hover:text-purple-500 dark:text-slate-500" title="Duplicate assessment" aria-label={`Duplicate ${formatAssessmentTitle(test.title)}`}>
-                            <Copy className="w-4 h-4" />
-                          </button>
-                          <button onClick={() => handleEditTest(test)} className="ml-2 text-slate-400 hover:text-blue-500 dark:text-slate-500" title="Edit assessment" aria-label={`Edit ${formatAssessmentTitle(test.title)}`}>
-                            <Edit3 className="w-4 h-4" />
-                          </button>
-                          <button onClick={() => archiveTest(test.id)} className="ml-2 text-slate-400 hover:text-amber-600 dark:text-slate-500" title="Move to archive; preserve results" aria-label={`Archive ${formatAssessmentTitle(test.title)}`}>
-                            <Archive className="w-4 h-4" />
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                  <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2">{formatAssessmentTitle(test.title)}</h3>
-                          <p className="text-sm text-slate-600 dark:text-slate-400 mb-4 flex-grow line-clamp-2"><FormattedQuestionText text={test.description || ''} /></p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">Group: {test.groupCode === 'all' ? 'All students' : test.groupCode || 'Not assigned (hidden from students)'}</p>
-                  <div className="flex justify-between items-center text-sm text-slate-500 dark:text-slate-400 border-t border-slate-100 dark:border-slate-700 pt-4 mt-auto">
-                    <span className="flex items-center gap-1"><Clock className="w-4 h-4" /> {Math.floor(test.durationSeconds / 60)} mins</span>
-                    <span className="flex items-center gap-1"><FileText className="w-4 h-4" /> {test.questions?.length || 0} Qs</span>
-                  </div>
-                </div>
+                <TeacherAssessmentCard
+                  key={test.id}
+                  test={test}
+                  archived={assessmentView === 'archived'}
+                  migrationFailed={Boolean(answerKeyReport?.details?.some((item: any) => item.assessmentId === test.id && item.status === 'failed'))}
+                  actions={{
+                    onEdit: () => handleEditTest(test),
+                    onDuplicate: () => duplicateTest(test),
+                    onArchive: () => archiveTest(test.id),
+                    onUnpublish: () => unpublishTest(test),
+                    onRestore: () => restoreArchivedTest(test),
+                    onDelete: () => permanentlyDeleteArchivedTest(test),
+                  }}
+                />
               ))}
             </div>
               ) : (
@@ -2029,9 +2023,9 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                     <input type="text" value={newTest.pin || ''} onChange={e => setNewTest({...newTest, pin: e.target.value})} placeholder="e.g. NUET2026" className="w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:ring-2 focus:ring-purple-500 outline-none" />
                   </div>
                   <div className="col-span-2">
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Student group code</label>
-                    <input type="text" value={newTest.groupCode || ''} onChange={e => setNewTest({...newTest, groupCode: e.target.value})} placeholder="Example: group-a-october" className="w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:ring-2 focus:ring-purple-500 outline-none" />
-                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Enter the exact code used by the assigned students. Leave blank to keep this exam hidden. Enter <strong>all</strong> to show it to every student. Codes are not case-sensitive.</p>
+                    <p className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" id="assessment-groups-label">Student groups</p>
+                    <GroupCodeInput value={getAssessmentGroupCodes(newTest)} onChange={groupCodes => setNewTest({ ...newTest, ...toGroupFields(groupCodes) })} suggestions={knownGroupCodes} />
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Add every group that should see this exam. Codes are not case-sensitive. You can add or remove groups after publishing without affecting existing results.</p>
                   </div>
                 </div>
 
@@ -2208,7 +2202,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                        )}
                         {(resolveResponseType(q) === 'short-text' || resolveResponseType(q) === 'numeric') && (
                          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">Accepted answer alternatives (one per line)
-                           <QuestionTextEditor value={(q.acceptedAnswers || []).join('\n')} onChange={value => handleUpdateQuestion(qIndex, 'acceptedAnswers', value.split('\n').map(answer => answer.trim()).filter(Boolean))} rows={2} ariaLabel="Accepted answer alternatives, one per line" className="mt-1" />
+                           <QuestionTextEditor value={(q.acceptedAnswers || []).join('\n')} onChange={value => handleUpdateQuestion(qIndex, 'acceptedAnswers', value.split('\n').map(answer => answer.trim()).filter(Boolean))} rows={2} placeholder="One accepted answer per line" ariaLabel="Accepted answer alternatives, one per line" className="mt-1" />
                          </label>
                        )}
                         {(q.responseType === 'multi-blank' || q.responseType === 'matching') && (
@@ -2219,7 +2213,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                               <label className="text-sm">Prompt / target<input className="mt-1 w-full rounded border p-2 dark:bg-slate-700" value={slot.prompt || ''} onChange={event => updateAnswerSlot(qIndex, slotIndex, 'prompt', event.target.value)} /></label>
                               <label className="text-sm sm:col-span-2">{q.responseType === 'matching' ? 'Correct shared choice' : 'Accepted answers, one per line'}
                                 {q.responseType === 'matching' ? <select className="mt-1 w-full rounded border p-2 dark:bg-slate-700" value={slot.correctAnswers?.[0] || ''} onChange={event => updateAnswerSlot(qIndex, slotIndex, 'correctAnswers', event.target.value ? [event.target.value] : [])}><option value="">Choose the key…</option>{(q.sharedChoices || []).filter(Boolean).map((choice, choiceIndex) => <option key={`${slot.id}-key-${choiceIndex}`}>{choice}</option>)}</select>
-                                  : <QuestionTextEditor className="mt-1" ariaLabel={`Accepted answers for ${slot.label || `Answer ${slotIndex + 1}`}`} rows={2} value={(slot.correctAnswers || []).join('\n')} onChange={value => updateSlotAnswers(qIndex, slotIndex, value)} />}
+                                  : <QuestionTextEditor className="mt-1" ariaLabel={`Accepted answers for ${slot.label || `Answer ${slotIndex + 1}`}`} rows={2} placeholder="One accepted answer per line" value={(slot.correctAnswers || []).join('\n')} onChange={value => updateSlotAnswers(qIndex, slotIndex, value)} />}
                               </label>
                               {(q.answerSlots || []).length > 1 && <button type="button" className="text-left text-red-500" onClick={() => handleUpdateQuestion(qIndex, 'answerSlots', q.answerSlots.filter((_, index) => index !== slotIndex))}>Remove answer part</button>}
                             </div>)}
@@ -2245,26 +2239,45 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                         {q.responseType === 'long-text' && <div className="mb-3 space-y-2 text-sm"><p className="text-slate-600 dark:text-slate-300">Written responses are excluded from automatic scoring and flagged for teacher review.</p><label className="flex gap-2"><input type="checkbox" checked={Boolean(q.ungraded)} onChange={event => handleUpdateQuestion(qIndex, 'ungraded', event.target.checked)} />Treat as ungraded practice</label></div>}
                         {q.responseType !== 'long-text' && <label className="mb-3 flex gap-2 text-sm text-slate-700 dark:text-slate-200"><input type="checkbox" checked={Boolean(q.manualReview)} onChange={event => handleUpdateQuestion(qIndex, 'manualReview', event.target.checked)} />Mark for manual teacher review (exclude from automatic score)</label>}
                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">Answer explanation (optional)
-                         <QuestionTextEditor value={q.explanation || ''} onChange={value => handleUpdateQuestion(qIndex, 'explanation', value)} rows={2} ariaLabel="Answer explanation" className="mt-1" />
+                         <QuestionTextEditor value={q.explanation || ''} onChange={value => handleUpdateQuestion(qIndex, 'explanation', value)} rows={2} placeholder="Explain why the correct answer is right. Students see this after they submit." ariaLabel="Answer explanation" className="mt-1" />
                        </label>
 
                        <div className="mb-4 space-y-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-left dark:border-blue-800 dark:bg-blue-900/20">
                          <h4 className="flex items-center gap-2 text-sm font-semibold text-blue-800 dark:text-blue-300">
                            <ImageIcon className="h-4 w-4" /> Task figure
                          </h4>
-                         <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">
-                           Upload from this device (PNG, JPEG, or WebP; maximum 5 MB)
-                           <input
-                             type="file"
-                             accept="image/png,image/jpeg,image/webp"
-                             onChange={event => {
-                               const file = event.target.files?.[0];
-                               void uploadQuestionFigure(qIndex, file);
-                               event.target.value = '';
-                             }}
-                             className="mt-1 block w-full text-sm"
-                           />
-                         </label>
+                         <div className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                           <span id={`figure-upload-label-${qIndex}`}>Upload from this device (PNG, JPEG, or WebP; maximum 5 MB)</span>
+                           <div className="mt-1 flex flex-wrap items-center gap-3">
+                             <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-blue-400 bg-white px-4 py-2 text-sm font-semibold text-blue-800 focus-within:outline focus-within:outline-2 focus-within:outline-blue-600 hover:bg-blue-50 dark:border-blue-600 dark:bg-slate-800 dark:text-blue-200 dark:hover:bg-slate-700">
+                               <ImageIcon className="h-4 w-4" aria-hidden="true" />Choose image
+                               <input
+                                 type="file"
+                                 accept="image/png,image/jpeg,image/webp"
+                                 aria-labelledby={`figure-upload-label-${qIndex}`}
+                                 disabled={figureStates[getFigureStateKey(q, qIndex)]?.status === 'uploading'}
+                                 onChange={event => {
+                                   const file = event.target.files?.[0];
+                                   void uploadQuestionFigure(qIndex, file);
+                                   event.target.value = '';
+                                 }}
+                                 className="sr-only"
+                               />
+                             </label>
+                             <span className="min-w-0 break-all text-sm font-normal text-slate-600 dark:text-slate-300">{figureStates[getFigureStateKey(q, qIndex)]?.fileName || (q.imageAsset ? 'Uploaded figure attached' : 'No file chosen')}</span>
+                           </div>
+                         </div>
+                         {figureStates[getFigureStateKey(q, qIndex)]?.status === 'uploading' && typeof figureStates[getFigureStateKey(q, qIndex)]?.progress === 'number' && (
+                           <div className="space-y-1" role="status">
+                             <div className="h-2.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700" role="progressbar" aria-label="Figure upload progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={figureStates[getFigureStateKey(q, qIndex)].progress}>
+                               <div className="h-full rounded-full bg-blue-600 transition-all" style={{ width: `${figureStates[getFigureStateKey(q, qIndex)].progress}%` }} />
+                             </div>
+                             <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600 dark:text-slate-300">
+                               <span>{figureStates[getFigureStateKey(q, qIndex)].message} {figureStates[getFigureStateKey(q, qIndex)].progress ? `${figureStates[getFigureStateKey(q, qIndex)].progress}%` : ''}</span>
+                               <button type="button" onClick={() => cancelFigureUpload(getFigureStateKey(q, qIndex))} className="rounded border border-slate-300 px-2 py-1 font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-100 dark:hover:bg-slate-700">Cancel upload</button>
+                             </div>
+                           </div>
+                         )}
                          <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">
                            Or use a trusted direct HTTPS image URL
                            <input
@@ -2288,7 +2301,12 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                          <button type="button" onClick={() => void testQuestionFigureUrl(q, qIndex)} disabled={figureStates[getFigureStateKey(q, qIndex)]?.status === 'uploading'} className="rounded border border-blue-400 px-3 py-1.5 text-sm font-medium text-blue-800 disabled:opacity-50 dark:border-blue-700 dark:text-blue-300">
                            {figureStates[getFigureStateKey(q, qIndex)]?.status === 'uploading' ? 'Working…' : 'Test image URL'}
                          </button>
-                         {figureStates[getFigureStateKey(q, qIndex)] && <p className={`text-sm ${figureStates[getFigureStateKey(q, qIndex)].status === 'error' ? 'text-red-700 dark:text-red-300' : 'text-slate-700 dark:text-slate-200'}`} role={figureStates[getFigureStateKey(q, qIndex)].status === 'error' ? 'alert' : 'status'}>{figureStates[getFigureStateKey(q, qIndex)].message}</p>}
+                         {figureStates[getFigureStateKey(q, qIndex)] && figureStates[getFigureStateKey(q, qIndex)].status !== 'uploading' && <div className="flex flex-wrap items-start gap-2">
+                           <p className={`min-w-0 flex-1 text-sm ${figureStates[getFigureStateKey(q, qIndex)].status === 'error' ? 'text-red-700 dark:text-red-300' : 'text-slate-700 dark:text-slate-200'}`} role={figureStates[getFigureStateKey(q, qIndex)].status === 'error' ? 'alert' : 'status'}>{figureStates[getFigureStateKey(q, qIndex)].message}</p>
+                           {figureStates[getFigureStateKey(q, qIndex)].status === 'error' && figureStates[getFigureStateKey(q, qIndex)].canRetry && figureRetryFiles.current.has(getFigureStateKey(q, qIndex)) && (
+                             <button type="button" onClick={() => retryFigureUpload(getFigureStateKey(q, qIndex))} className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700">Retry upload</button>
+                           )}
+                         </div>}
                          <PromptFigure key={`${getFigureStateKey(q, qIndex)}-${figureTestRevision[getFigureStateKey(q, qIndex)] || 0}`} question={q} assessmentId={editingId || newTest.id || 'draft'} teacherFacing />
                          {q.section === 'writing' && Number(q.writingTaskType || 2) === 1 && (
                            <label className="flex items-start gap-2 text-sm text-slate-700 dark:text-slate-200">
@@ -2699,7 +2717,7 @@ const WritingPractice = ({ tests, resources, resourceError, userId, onBack }) =>
                 {aiInlineSuggestion && (
                   <div className="mt-2 rounded-lg border border-indigo-200 bg-indigo-50 p-3 dark:border-indigo-800 dark:bg-indigo-900/30" role="status" aria-live="polite">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-xs font-semibold text-indigo-800 dark:text-indigo-200">AI next-sentence suggestion{aiFigureIncluded ? ' · figure-aware' : ''}</p>
+                      <p className="text-xs font-semibold text-indigo-800 dark:text-indigo-200">AI next-sentence suggestion{aiFigureIncluded ? ', figure-aware' : ''}</p>
                       <button type="button" onClick={() => insertPhrase(aiInlineSuggestion)} className="rounded bg-indigo-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-800">Insert at cursor</button>
                     </div>
                     <p className="mt-1 text-sm text-slate-800 dark:text-slate-100">{aiInlineSuggestion}</p>
@@ -2878,7 +2896,7 @@ const ReadingPracticeWorkspace = ({ test, userId, questions, answers, setCurrent
         right={<div className="space-y-4">
           <div className="rounded-lg border bg-white p-3 dark:border-slate-600 dark:bg-slate-800">
             <h3 className="font-bold text-slate-800 dark:text-white">Questions for Passage {activePassageNumber}</h3>
-            <p className="text-sm text-slate-600 dark:text-slate-300">{passageQuestions.length} question(s) · {questions.length} total</p>
+            <p className="text-sm text-slate-600 dark:text-slate-300">{passageQuestions.length} question(s), {questions.length} total</p>
             <div className="reading-question-nav mt-2 grid grid-cols-5 gap-2 sm:grid-cols-8" aria-label="Question navigator">
               {questionIdsByPassage[String(activePassageNumber)]?.map(questionId => {
                 const index = questions.findIndex((question: any) => String(question.id) === questionId);
@@ -2957,7 +2975,7 @@ const ReadingPracticeWorkspace = ({ test, userId, questions, answers, setCurrent
         </div>}
       />
       <p className="mt-3 text-sm text-slate-600 dark:text-slate-300" aria-live="polite">
-        {readingQuestions.filter((question: any) => isAnswerPresent(answers[question.id])).length} of {readingQuestions.length} reading questions answered · {visitedQuestionIds.length} visited
+        {readingQuestions.filter((question: any) => isAnswerPresent(answers[question.id])).length} of {readingQuestions.length} reading questions answered, {visitedQuestionIds.length} visited
       </p>
     </div>
   );
@@ -3013,6 +3031,10 @@ const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, wr
   };
 
   attemptSnapshotRef.current = { ...attemptSnapshotRef.current, answers, currentIndex, startedAtMs };
+
+  const online = useOnlineStatus();
+  const { flagged, toggle: toggleFlag } = useFlaggedQuestions(`examFlags:${userId}:${test?.id}`);
+  useLeaveWarning(!isSubmitting);
 
   useEffect(() => {
     try {
@@ -3146,7 +3168,7 @@ const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, wr
       ]}
     >
       <p>
-        Are you sure you want to finish <strong>{test?.title || 'this exam'}</strong>? You will not be able to change your answers after submitting.
+        Are you sure you want to finish <strong>{formatAssessmentTitle(test?.title, 'this exam')}</strong>? You will not be able to change your answers after submitting.
       </p>
       {unansweredCount > 0 && (
         <p className="mt-3 font-medium text-amber-700 dark:text-amber-300" role="status">
@@ -3190,6 +3212,7 @@ const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, wr
           {submissionError ? `Time expired, but submission could not be completed: ${submissionError}` : 'Time is up. Your answers are being submitted.'}
         </p>
       )}
+      <ExamNotices online={online} secondsRemaining={timeExpired ? 0 : secondsRemaining} />
 
       {isReadingWorkspace ? (
         <ReadingPracticeWorkspace
@@ -3236,6 +3259,8 @@ const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, wr
 
         {renderAnswerInput()}
       </div>}
+
+      {!isReadingWorkspace && <QuestionNavigator questions={questions} answers={answers} currentIndex={currentIndex} flagged={flagged} disabled={timeExpired || isSubmitting} onGo={setCurrentIndex} onToggleFlag={toggleFlag} />}
 
       <div className="exam-interface__footer mt-6 flex items-center justify-between gap-3 border-t border-slate-200 pt-4 dark:border-slate-700">
         {isReadingWorkspace ? timeExpired ? (
@@ -3391,7 +3416,7 @@ const SpeakingPractice = ({ bank, userId, onBack }) => {
       </select>
     </label>
     <div className="rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5 space-y-4">
-      <p className="font-semibold whitespace-pre-wrap">Part {part} · {selected.text}</p>
+      <p className="font-semibold whitespace-pre-wrap">Part {part}: {selected.text}</p>
       <div className="flex items-center gap-3"><button onClick={begin} disabled={phase === 'preparation' || phase === 'speaking'} className="px-4 py-2 rounded bg-blue-600 text-white disabled:opacity-50">{phase === 'ready' ? (preparationSeconds ? `Start ${preparationSeconds}s preparation` : 'Start response timer') : phase === 'finished' ? 'Start again' : phase === 'preparation' ? 'Preparing…' : 'Speaking…'}</button><span className="font-mono text-lg" role="timer">{['preparation', 'speaking'].includes(phase) ? `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}` : '—'}</span>{phase === 'preparation' && <span className="text-sm text-slate-500">Preparation time</span>}{phase === 'speaking' && <span className="text-sm text-slate-500">Response time</span>}</div>
       <label className="block text-sm font-medium">Speaking notes / reflection
         <textarea value={drafts[selected.id] || ''} onChange={event => setDrafts(previous => ({ ...previous, [selected.id]: event.target.value }))} rows={5} placeholder="After speaking, note what went well and what you want to improve." className="mt-1 w-full p-3 rounded-lg border dark:bg-slate-700 dark:border-slate-600" />
@@ -3518,7 +3543,7 @@ const PracticeHub = ({ tests, resources, resourceError, user, onStartTest }) => 
   const startReading = () => {
     const allQuestions = readingQuestions(selectedTest);
     let matching = allQuestions;
-    let title = `${selectedTest?.title || 'IELTS Reading'} — Practice`;
+    let title = `${formatAssessmentTitle(selectedTest?.title, 'IELTS Reading')} — Practice`;
     let duration = selectedTest?.durationSeconds || 20 * 60;
     if (readingMode === 'question-type') {
       matching = allQuestions.filter(question => question.questionType === readingType);
@@ -3541,13 +3566,13 @@ const PracticeHub = ({ tests, resources, resourceError, user, onStartTest }) => 
     const duration = listeningSection === 'all'
       ? (selectedTest?.durationSeconds || 30 * 60)
       : Math.ceil((selectedTest?.durationSeconds || 30 * 60) / 4);
-    launchPractice(selectedTest, matching, duration, `${selectedTest?.title || 'IELTS Listening'} — ${listeningSection === 'all' ? 'All Sections' : `Section ${listeningSection}`}`, { kind: 'listening', section: listeningSection });
+    launchPractice(selectedTest, matching, duration, `${formatAssessmentTitle(selectedTest?.title, 'IELTS Listening')} — ${listeningSection === 'all' ? 'All Sections' : `Section ${listeningSection}`}`, { kind: 'listening', section: listeningSection });
   };
 
   const startSat = () => {
     const available = satMatchingQuestions;
     const matching = satQuestionCount === 'all' ? available : available.slice(0, Number(satQuestionCount));
-    launchPractice(selectedTest, matching, selectedTest?.durationSeconds || 15 * 60, `${selectedTest?.title || 'SAT'} — ${satSkill}`, { kind: 'sat', domain: satDomain, skill: satSkill });
+    launchPractice(selectedTest, matching, selectedTest?.durationSeconds || 15 * 60, `${formatAssessmentTitle(selectedTest?.title, 'SAT')} — ${satSkill}`, { kind: 'sat', domain: satDomain, skill: satSkill });
   };
 
   const startFullSat = () => {
@@ -3626,10 +3651,10 @@ const PracticeHub = ({ tests, resources, resourceError, user, onStartTest }) => 
             <label className="block max-w-2xl text-sm font-medium text-slate-700 dark:text-slate-300">Practice mode<select value={satMode} onChange={event => setSatMode(event.target.value)} className="mt-1 w-full p-3 rounded-lg border dark:bg-slate-700 dark:border-slate-600"><option value="skill">Practice by domain and skill</option><option value="full">Full-length section</option></select></label>
             {satMode === 'full' ? <div className="space-y-4">
               {satFullTests.length > 0 ? <>
-                <label className="block max-w-2xl text-sm font-medium">Full-length SAT section<select value={selectedSatFullTest?.id || ''} onChange={event => setSatFullTestId(event.target.value)} className="mt-1 w-full p-3 rounded-lg border dark:bg-slate-700 dark:border-slate-600">{satFullTests.map(test => <option key={test.id} value={test.id}>{formatAssessmentTitle(test.title)} · {test.questions?.length} questions · {Math.floor((test.durationSeconds || 0) / 60)} minutes</option>)}</select></label>
+                <label className="block max-w-2xl text-sm font-medium">Full-length SAT section<select value={selectedSatFullTest?.id || ''} onChange={event => setSatFullTestId(event.target.value)} className="mt-1 w-full p-3 rounded-lg border dark:bg-slate-700 dark:border-slate-600">{satFullTests.map(test => <option key={test.id} value={test.id}>{formatAssessmentTitle(test.title)}, {test.questions?.length} questions, {Math.floor((test.durationSeconds || 0) / 60)} minutes</option>)}</select></label>
                 <p className="text-sm text-amber-700 dark:text-amber-300">Unofficial practice only. The portal does not calculate an official SAT scaled score. Module navigation locks answers from the previous module.</p>
                 <button onClick={startFullSat} disabled={!selectedSatFullTest} className="px-5 py-3 rounded-lg bg-blue-600 text-white font-semibold disabled:opacity-50">Start full-length section</button>
-                {satFullTests.some(test => test.sections?.sat?.section === 'reading-writing') && satFullTests.some(test => test.sections?.sat?.section === 'math') && <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 p-4 space-y-2"><h3 className="font-semibold text-slate-800 dark:text-white">Combined Digital SAT practice</h3><p className="text-sm text-slate-600 dark:text-slate-300">98 questions · 134 minutes of testing · optional 10-minute break after Reading and Writing. This fixed practice sequence does not reproduce adaptive routing or official scaled scoring.</p><button onClick={startCombinedSat} className="px-5 py-3 rounded-lg bg-indigo-600 text-white font-semibold">Start combined SAT practice</button></div>}
+                {satFullTests.some(test => test.sections?.sat?.section === 'reading-writing') && satFullTests.some(test => test.sections?.sat?.section === 'math') && <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 p-4 space-y-2"><h3 className="font-semibold text-slate-800 dark:text-white">Combined Digital SAT practice</h3><p className="text-sm text-slate-600 dark:text-slate-300">98 questions, 134 minutes of testing, optional 10-minute break after Reading and Writing. This fixed practice sequence does not reproduce adaptive routing or official scaled scoring.</p><button onClick={startCombinedSat} className="px-5 py-3 rounded-lg bg-indigo-600 text-white font-semibold">Start combined SAT practice</button></div>}
               </> : <p className="p-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-200">No complete full-length SAT section is published for your group. The teacher must publish a 54-question Reading and Writing bank or a 44-question Math bank with 27/27 or 22/22 module tags.</p>}
             </div> : <div className="space-y-4">
             <label className="block max-w-2xl text-sm font-medium text-slate-700 dark:text-slate-300">Domain<select value={satDomain} onChange={event => { setSatDomain(event.target.value); setSatSkill(''); }} className="mt-1 w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white"><option value="">Choose a domain</option>{Object.keys(SAT_SKILLS).map(domain => <option key={domain} value={domain}>{domain}</option>)}</select></label>
@@ -3710,7 +3735,7 @@ const StudentTeacherFeedbackNotes = ({ result, review, onReply }) => {
   </aside>;
 };
 
-const StudentDashboard = ({ user, tests, results, writingResources, writingResourcesError, onStartTest, onSaveGroupCode, onReplyTeacherComment, onDeleteResults, onLogout }) => {
+const StudentDashboard = ({ user, tests, results, writingResources, writingResourcesError, onStartTest, onSaveGroupCode, onReplyTeacherComment, onDeleteResults, onReviewResult, onLogout }) => {
   const [activeTab, setActiveTab] = useState('tests');
   const [selectedResultIds, setSelectedResultIds] = useState<string[]>([]);
   const [deleteResultsConfirm, setDeleteResultsConfirm] = useState<string[] | null>(null);
@@ -3727,11 +3752,7 @@ const StudentDashboard = ({ user, tests, results, writingResources, writingResou
     });
   };
 
-  const normalizedGroupCode = (user?.groupCode || '').trim().toLowerCase();
-  const visibleTests = tests.filter((test) => {
-    const testGroupCode = (test.groupCode || '').trim().toLowerCase();
-    return testGroupCode === 'all' || (!!normalizedGroupCode && testGroupCode === normalizedGroupCode);
-  });
+  const visibleTests = tests.filter((test) => isAssessmentAssignedToGroup(test, user?.groupCode));
 
   const saveGroupCode = async () => {
     if (user?.groupCode) return;
@@ -3825,7 +3846,7 @@ const StudentDashboard = ({ user, tests, results, writingResources, writingResou
             </div>
             <button onClick={saveGroupCode} disabled={isSavingGroupCode || Boolean(user?.groupCode)} className="px-4 py-2.5 bg-slate-700 hover:bg-slate-800 text-white rounded-lg font-medium disabled:opacity-60">{isSavingGroupCode ? 'Saving...' : user?.groupCode ? 'Group saved' : 'Save group'}</button>
           </div>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Ask your teacher for the exact code. Group assignment can only be set once from your account.</p>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Ask your teacher for the exact code. You can set it once from your account; if you need a different group, ask your teacher to change it.</p>
         </div>
 
       {studentAlert && (
@@ -3865,38 +3886,9 @@ const StudentDashboard = ({ user, tests, results, writingResources, writingResou
                  No exams are available for your group yet. Check that you entered the correct group code.
                </div>
             )}
-            {visibleTests.map((test) => {
-              const completed = hasCompletedTest(test.id);
-              return (
-                <div key={test.id} className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 flex flex-col transition-shadow hover:shadow-md">
-                  <div className="flex justify-between items-start mb-4">
-                    <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${getStatusColor(test.category)}`}>
-                      {test.category} • {test.type}
-                    </span>
-                    <span className="flex items-center text-slate-500 dark:text-slate-400 text-sm gap-1">
-                      <Clock className="w-4 h-4" /> {formatTime(test.durationSeconds)}
-                    </span>
-                  </div>
-                  
-                  <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2 flex items-center gap-2">
-                      {test.pin && <Lock className="w-4 h-4 text-slate-400 dark:text-slate-500" aria-label="PIN required" />} {formatAssessmentTitle(test.title)}
-                  </h3>
-                  <p className="text-sm text-slate-600 dark:text-slate-400 mb-6 flex-grow line-clamp-3"><FormattedQuestionText text={test.description || ''} /></p>
-                  
-                  <div className="mt-auto">
-                    {completed ? (
-                      <button disabled className="w-full bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 font-medium py-2.5 rounded-lg flex items-center justify-center gap-2 cursor-not-allowed border border-slate-200 dark:border-slate-600">
-                        <Check className="w-5 h-5" /> Completed
-                      </button>
-                    ) : (
-                      <button onClick={() => handleStartClick(test)} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2 shadow-sm">
-                        <Play className="w-5 h-5" /> Start Task
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+            {visibleTests.map((test) => (
+              <StudentAssessmentCard key={test.id} test={test} completed={hasCompletedTest(test.id)} onStart={() => handleStartClick(test)} />
+            ))}
           </div>
           </>
         )}
@@ -3926,8 +3918,10 @@ const StudentDashboard = ({ user, tests, results, writingResources, writingResou
               <div className="divide-y divide-slate-200 dark:divide-slate-700">
                 {results.map((result, idx) => {
                    const testInfo = tests.find(t => t.id === result.testId) || { title: result.displayTitle || 'Practice Session', type: result.practiceMetadata?.kind || 'Unknown' };
+                   const reviewData = resolveReviewData(result);
+                   const reviewRows: any[] = reviewData.questionReviews;
                    const reviewedReadingListeningScores = ['reading', 'listening'].map(section => {
-                     const sectionReviews = (result.questionReviews || []).filter((review: any) => String(review.section || '').toLowerCase() === section);
+                     const sectionReviews = reviewRows.filter((review: any) => String(review.section || '').toLowerCase() === section);
                      const sectionQuestionCount = Array.isArray(testInfo.questions)
                        ? testInfo.questions.filter((question: any) => String(question.section || '').toLowerCase() === section).length
                        : 0;
@@ -3944,11 +3938,11 @@ const StudentDashboard = ({ user, tests, results, writingResources, writingResou
                    }).filter(section => section.total > 0);
                    return (
                      <div key={result.id || result.attemptId || idx} className="p-6 flex gap-3 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
-                       <input type="checkbox" checked={selectedResultIds.includes(result.id)} onChange={() => toggleResultSelection(result.id)} aria-label={`Select result for ${result.displayTitle || testInfo.title}`} className="mt-1 shrink-0" />
+                       <input type="checkbox" checked={selectedResultIds.includes(result.id)} onChange={() => toggleResultSelection(result.id)} aria-label={`Select result for ${formatAssessmentTitle(result.displayTitle || testInfo.title)}`} className="mt-1 shrink-0" />
                        <div className="flex min-w-0 flex-1 flex-col justify-between gap-4 sm:flex-row sm:items-center">
                        <div className="min-w-0 text-left">
                          <div className="flex items-center gap-3 mb-1">
-                           <h4 className="font-semibold text-slate-800 dark:text-white">{result.displayTitle || testInfo.title}</h4>
+                           <h4 className="font-semibold text-slate-800 dark:text-white">{formatAssessmentTitle(result.displayTitle || testInfo.title)}</h4>
                            <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-600">
                              {testInfo.type}
                            </span>
@@ -3956,16 +3950,16 @@ const StudentDashboard = ({ user, tests, results, writingResources, writingResou
                          <p className="text-sm text-slate-500 dark:text-slate-400">
                            Submitted on: {new Date(result.submittedAt).toLocaleDateString()} at {new Date(result.submittedAt).toLocaleTimeString()}
                          </p>
-                         {result.practiceMetadata && <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">Practice: {[result.practiceMetadata.domain, result.practiceMetadata.skill, result.practiceMetadata.mode, result.practiceMetadata.questionType].filter(Boolean).join(' • ') || result.practiceMetadata.kind}</p>}
-                         {result.questionReviews?.length > 0 && <details className="mt-3 text-sm text-slate-700 dark:text-slate-300">
-                           <summary className="cursor-pointer font-medium">Review answers and explanations{(() => { const count = (result.questionReviews || []).reduce((total, item) => total + (item.teacherReview?.annotations?.length || 0) + (item.teacherReview?.feedback?.trim() ? 1 : 0), 0); return count ? ` · ${count} teacher note${count === 1 ? '' : 's'}` : ''; })()}</summary>
-                           <div className="mt-3 space-y-3">{result.questionReviews.map((review, reviewIndex) => <div key={review.questionId || reviewIndex} className="rounded-lg bg-slate-50 p-3 dark:bg-slate-900">
+                         {result.practiceMetadata && <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">Practice: {[result.practiceMetadata.domain, result.practiceMetadata.skill, result.practiceMetadata.mode, result.practiceMetadata.questionType].filter(Boolean).join(', ') || result.practiceMetadata.kind}</p>}
+                         {reviewRows.length > 0 && <details className="mt-3 text-sm text-slate-700 dark:text-slate-300">
+                           <summary className="cursor-pointer font-medium">Review answers and explanations{(() => { const count = reviewRows.reduce((total, item) => total + (item.teacherReview?.annotations?.length || 0) + (item.teacherReview?.feedback?.trim() ? 1 : 0), 0); return count ? `, ${count} teacher note${count === 1 ? '' : 's'}` : ''; })()}</summary>
+                           <div className="mt-3 space-y-3">{reviewRows.map((review, reviewIndex) => <div key={review.questionId || reviewIndex} className="rounded-lg bg-slate-50 p-3 dark:bg-slate-900">
                              <p className="font-medium">{reviewIndex + 1}. {review.questionText}</p>
                              <div className={review.teacherReview?.annotations?.length || review.teacherReview?.feedback?.trim() ? 'student-feedback-layout mt-2' : 'mt-2'}>
                                <div className="min-w-0">
                                  <p className="whitespace-pre-wrap">Your answer: {renderTeacherAnnotatedAnswer(review.studentAnswer, review.teacherReview?.annotations)}</p>
                                  {review.status === 'graded' ? <p className={review.isCorrect ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'}>{review.isCorrect ? 'Correct' : `Incorrect. Answer key: ${formatAnswerForReview(review.answerKey)}`}{review.earnedPoints > 0 && !review.isCorrect ? ` — ${review.earnedPoints} / ${review.points} points` : ''}{review.acceptedAnswers?.length ? ` (also accepted: ${review.acceptedAnswers.join(', ')})` : ''}</p>
-                                   : review.status === 'manual-review' ? <div className="text-amber-700 dark:text-amber-300">{review.teacherReview?.reviewedAt ? <p>Teacher reviewed this response{review.teacherReview.points != null ? ` · awarded ${review.teacherReview.points}/${review.points} points` : ''}.</p> : <p>Awaiting teacher review; excluded from the automatic score.</p>}</div>
+                                   : review.status === 'manual-review' ? <div className="text-amber-700 dark:text-amber-300">{review.teacherReview?.reviewedAt ? <p>Teacher reviewed this response{review.teacherReview.points != null ? `, awarded ${review.teacherReview.points}/${review.points} points` : ''}.</p> : <p>Awaiting teacher review; excluded from the automatic score.</p>}</div>
                                      : review.status === 'ungraded' ? <p>This response is ungraded practice.</p>
                                        : <p>Unanswered.</p>}
                                  {review.explanation && <p className="mt-1"><FormattedQuestionText text={review.explanation} /></p>}
@@ -3979,9 +3973,12 @@ const StudentDashboard = ({ user, tests, results, writingResources, writingResou
                          <div className="text-center">
                            <div className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1">Your Results</div>
                            <div className="font-bold text-xl text-blue-600 dark:text-blue-400">
-                           {result.score == null ? '—' : result.score} <span className="text-sm text-slate-400 dark:text-slate-500 font-normal">/ {result.maxPossibleScore == null ? '—' : result.maxPossibleScore}</span>
+                           {reviewData.summary ? formatScoreNumber(reviewData.summary.score) : '—'} <span className="text-sm text-slate-400 dark:text-slate-500 font-normal">/ {reviewData.summary ? formatScoreNumber(reviewData.summary.scoredMaximum) : '—'}</span>
                            </div>
-                           {(result.manualReviewCount > 0 || result.ungradedCount > 0) && <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{result.manualReviewCount ? `${result.manualReviewCount} awaiting review` : ''}{result.manualReviewCount && result.ungradedCount ? ' · ' : ''}{result.ungradedCount ? `${result.ungradedCount} ungraded` : ''}</p>}
+                           {reviewData.percentage != null && <p className="mt-1 text-sm font-semibold text-slate-700 dark:text-slate-200">{reviewData.percentage}%</p>}
+                           {reviewData.summary && reviewData.summary.pendingReviewCount > 0 && <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{reviewData.summary.pendingReviewCount} awaiting review</p>}
+                           {!reviewData.summary && <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Scoring in progress</p>}
+                           <button type="button" onClick={() => onReviewResult(result)} className="mt-3 w-full rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700">Review</button>
                            {reviewedReadingListeningScores.length > 0 && <table className="mt-3 w-full border-collapse text-left text-xs" aria-label="Reading and listening score table">
                              <caption className="mb-1 text-left font-semibold">Reading and Listening score summary</caption>
                              <thead><tr className="border-b border-slate-200 text-slate-500 dark:border-slate-700 dark:text-slate-400"><th className="py-1 pr-3 font-semibold">Section</th><th className="py-1 pr-3 font-semibold">Correct</th><th className="py-1 font-semibold">Status</th></tr></thead>
@@ -4049,6 +4046,7 @@ export default function App() {
   const [submissionsError, setSubmissionsError] = useState('');
   const [currentView, setCurrentView] = useState('loading');
   const [activeTest, setActiveTest] = useState<any>(null);
+  const [reviewTarget, setReviewTarget] = useState<null | { record: any; test: any; returnTo: string }>(null);
   const [modalInfo, setModalInfo] = useState({ isOpen: false, title: '', message: '' });
   
   const [isDark, setIsDark] = useState(false);
@@ -4138,18 +4136,22 @@ export default function App() {
       return;
     }
     const testsRef = collection(db, 'artifacts', appId, 'public', 'data', 'tests');
-    const testsQuery = user.role === 'teacher'
-      ? testsRef
-          : query(
-              testsRef,
-              where('answerKeysSecured', '==', true),
-              where('published', '==', true),
-              where('groupCode', 'in', user.groupCode
-                ? [...new Set([user.groupCode.trim().toLowerCase(), 'all'])]
-                : ['all'])
-            );
-    const unsubTests = onSnapshot(testsQuery, async (snapshot) => {
-      let testsData: any[] = snapshot.docs.map(item => ({ id: item.id, ...item.data() }));
+    const studentGroup = normalizeGroupCode(user.groupCode);
+    const publishedFilters = [where('answerKeysSecured', '==', true), where('published', '==', true)];
+    // Rules must be provable from each query, so students use one query per way an
+    // assessment can reach them: the legacy single field, "all", and their own group.
+    const testQueries = user.role === 'teacher'
+      ? [testsRef]
+      : [
+          query(testsRef, ...publishedFilters, where('groupCode', 'in', studentGroup ? [...new Set([studentGroup, ALL_GROUPS])] : [ALL_GROUPS])),
+          query(testsRef, ...publishedFilters, where('groupCodes', 'array-contains', ALL_GROUPS)),
+          ...(studentGroup ? [query(testsRef, ...publishedFilters, where('groupCodes', 'array-contains', studentGroup))] : []),
+        ];
+    const testSnapshots = new Map<number, any[]>();
+    let groupMigrationAttempted = false;
+    const publishTests = async () => {
+      let testsData: any[] = mergeAssessmentsById(...testSnapshots.values())
+        .filter(test => user.role === 'teacher' || isAssessmentAssignedToGroup(test, studentGroup));
       if (user.role === 'teacher') {
         testsData = await Promise.all(testsData.map(async test => {
           const keySnapshot = await getDoc(doc(db, 'artifacts', appId, 'teacher', 'data', 'answerKeys', test.id));
@@ -4163,7 +4165,26 @@ export default function App() {
       }
       testsData.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       setTests(testsData);
-    }, err => console.error(err));
+      if (user.role === 'teacher' && !groupMigrationAttempted) {
+        groupMigrationAttempted = true;
+        const migrations = planGroupCodeMigration(testsData);
+        if (migrations.length) {
+          try {
+            for (let index = 0; index < migrations.length; index += 400) {
+              const batch = writeBatch(db);
+              migrations.slice(index, index + 400).forEach(({ id, ...fields }) => batch.update(doc(testsRef, id), fields));
+              await batch.commit();
+            }
+          } catch (error) {
+            console.error('Could not add groupCodes to existing assessments:', error);
+          }
+        }
+      }
+    };
+    const unsubTests = testQueries.map((testsQuery, queryIndex) => onSnapshot(testsQuery, snapshot => {
+      testSnapshots.set(queryIndex, snapshot.docs.map(item => ({ id: item.id, ...item.data() })));
+      void publishTests();
+    }, err => console.error(err)));
 
     const resourcesRef = collection(db, 'artifacts', appId, 'public', 'data', 'writingResources');
     const resourcesQuery = user.role === 'teacher' ? resourcesRef : query(resourcesRef, where('status', '==', 'published'));
@@ -4199,7 +4220,7 @@ export default function App() {
       setSubmissions([]);
     }
 
-    return () => { unsubTests(); unsubResults(); unsubSubmissions(); unsubWritingResources(); };
+    return () => { unsubTests.forEach(unsubscribe => unsubscribe()); unsubResults(); unsubSubmissions(); unsubWritingResources(); };
   }, [user]);
 
   const handleAuthAction = async (action, data) => {
@@ -4274,9 +4295,7 @@ export default function App() {
   };
 
   const startTest = (test) => {
-    const testGroupCode = (test.groupCode || '').trim().toLowerCase();
-    const studentGroupCode = (user?.groupCode || '').trim().toLowerCase();
-    if (user?.role === 'student' && (!testGroupCode || (testGroupCode !== 'all' && testGroupCode !== studentGroupCode))) {
+    if (user?.role === 'student' && !isAssessmentAssignedToGroup(test, user?.groupCode)) {
       setModalInfo({ isOpen: true, title: 'Exam not available', message: 'This exam is assigned to a different student group.' });
       return;
     }
@@ -4331,7 +4350,7 @@ export default function App() {
         testId: assessment.practiceSourceTestId || assessment.id,
         attemptId,
         answers: resultData.answers || {},
-        displayTitle: assessment.title || 'Assessment',
+        displayTitle: formatAssessmentTitle(assessment.title, 'Assessment'),
         submittedAt,
         submittedAtMs,
         isAutoSubmitted: Boolean(resultData.isAutoSubmitted),
@@ -4346,46 +4365,74 @@ export default function App() {
         gradingMode: 'teacher-review-required',
         assessmentIds: assessment.practiceSourceTestIds || [assessment.practiceSourceTestId || assessment.id],
         secondaryAssessmentId: (assessment.practiceSourceTestIds || [])[1] || '',
+        questionIds: questions.map((question: any) => question.id),
+        isPractice: Boolean(assessment.isPractice),
+        ...(assessment.practiceMetadata ? { practiceMetadata: assessment.practiceMetadata } : {}),
       };
+      const resultRef = doc(db, 'artifacts', appId, 'users', user.uid, 'results', attemptId);
       const centralId = `${user.uid}_${attemptId}`;
       const submissionRef = doc(db, 'artifacts', appId, 'public', 'data', 'submissions', centralId);
-      const resultRef = doc(db, 'artifacts', appId, 'users', user.uid, 'results', attemptId);
-      const existingSubmission = await getDoc(submissionRef);
-      if (!existingSubmission.exists()) {
-        const batch = writeBatch(db);
-        batch.set(submissionRef, {
-          ...result,
-          id: centralId,
-          studentUid: user.uid,
-          studentName: user.name || 'Student',
-          studentEmail: user.email || '',
-          groupCode: user.groupCode || '',
-          assessmentId: assessment.practiceSourceTestId || assessment.id,
-          assessmentIds: assessment.practiceSourceTestIds || [assessment.practiceSourceTestId || assessment.id],
-          secondaryAssessmentId: (assessment.practiceSourceTestIds || [])[1] || '',
-          assessmentTitle: assessment.title || 'Assessment',
-          examType: assessment.type || 'General',
-        });
+      const existingSubmission = assessment.isPractice ? null : await getDoc(submissionRef);
+      const batch = writeBatch(db);
+      if (!existingSubmission?.exists()) {
+        if (!assessment.isPractice) {
+          batch.set(submissionRef, {
+            ...result,
+            id: centralId,
+            studentUid: user.uid,
+            studentName: user.name || 'Student',
+            studentEmail: user.email || '',
+            groupCode: user.groupCode || '',
+            assessmentId: assessment.practiceSourceTestId || assessment.id,
+            assessmentIds: assessment.practiceSourceTestIds || [assessment.practiceSourceTestId || assessment.id],
+            secondaryAssessmentId: (assessment.practiceSourceTestIds || [])[1] || '',
+            assessmentTitle: formatAssessmentTitle(assessment.title, 'Assessment'),
+            examType: assessment.type || 'General',
+          });
+        }
         batch.set(resultRef, result);
-        await batch.commit();
+      }
+      if (!assessment.isPractice) {
+        result.assessmentIds.forEach((assessmentId: string) => {
+          batch.set(doc(db, 'artifacts', appId, 'users', user.uid, 'completedAssessments', assessmentId), { assessmentId, attemptId, completedAt: submittedAt });
+        });
+      }
+      await batch.commit();
+
+      let selfGrade: any = null;
+      if (!assessment.isPractice) {
+        try {
+          const keySnapshots = await Promise.all(result.assessmentIds.map((assessmentId: string) => getDoc(doc(db, 'artifacts', appId, 'teacher', 'data', 'answerKeys', assessmentId))));
+          const keyQuestions = keySnapshots.flatMap(snapshot => snapshot.exists() ? snapshot.data().questions || [] : []);
+          if (keySnapshots.every(snapshot => snapshot.exists()) && hasCompleteAnswerKey(questions, keyQuestions)) {
+            selfGrade = removeUndefinedValues({ ...gradeAttempt(mergeQuestionKeys(questions, keyQuestions), result.answers), gradedAt: submittedAt });
+            await updateDoc(resultRef, { selfGrade });
+          }
+        } catch (error) {
+          console.warn('The answer review could not be prepared yet:', error);
+          selfGrade = null;
+        }
       }
       try {
         localStorage.removeItem(`examAttempt:${user.uid}:${activeTest?.id}`);
+        localStorage.removeItem(`examFlags:${user.uid}:${activeTest?.id}`);
         localStorage.removeItem(`activeExam:${user.uid}`);
       } catch (error) {
         console.warn('Could not clear the completed exam attempt:', error);
       }
       setActiveTest(null);
-      setCurrentView('student_dashboard');
-      setModalInfo({ 
-        isOpen: true, 
-        title: 'Answers submitted',
-        message: `Your ${resultData.isAutoSubmitted ? 'time ran out and your ' : ''}answers have been saved privately. A teacher must review them before a score is available.`
-      });
+      setReviewTarget({ record: { ...result, id: attemptId, selfGrade }, test: assessment, returnTo: 'student_dashboard' });
+      setCurrentView('result_review');
     } catch (err) {
       console.error(err);
       throw new Error('Failed to save results. Your saved answers are still available to retry.', { cause: err });
     }
+  };
+
+  const openResultReview = (record: any) => {
+    const reviewedTest = tests.find((item: any) => item.id === record.testId) || null;
+    setReviewTarget({ record, test: reviewedTest, returnTo: 'student_dashboard' });
+    setCurrentView('result_review');
   };
 
   const saveTeacherFeedbackReply = async (result: any, review: any, annotation: any, body: string) => {
@@ -4456,11 +4503,7 @@ export default function App() {
     const sourceAssessments = sourceAssessmentIds.map((id: string) => tests.find((item: any) => item.id === id)).filter(Boolean);
     const trustedQuestions = sourceAssessments.flatMap((assessment: any) => assessment.questions || []);
     if (!trustedQuestions.length) throw new Error('The saved assessment is unavailable; grading was not saved.');
-    const previousReviews = new Map<string, any>((submission.questionReviews || []).map((item: any) => [item.questionId, item]));
-    const questionReviews = createTeacherReviewRows(trustedQuestions, submission.answers || {}).map((item: any) => ({
-      ...item,
-      teacherReview: previousReviews.get(item.questionId)?.teacherReview,
-    }));
+    const questionReviews: any[] = gradeAttempt(trustedQuestions, submission.answers || {}, submission.questionReviews || []).questionReviews;
     if (questionId !== '__finalize__') {
       const question = questionReviews.find((item: any) => item.questionId === questionId);
       if (!question || question.status !== 'manual-review') throw new Error('This response is not awaiting review.');
@@ -4488,26 +4531,76 @@ export default function App() {
         reviewedAt: new Date().toISOString()
       };
     }
-    const pendingReviewCount = questionReviews.filter((item: any) => item.status === 'manual-review' && !item.teacherReview?.reviewedAt).length;
-    const maxPossibleScore = trustedQuestions.filter((item: any) => !item.ungraded).reduce((total: number, item: any) => total + Math.max(0, Number(item.points ?? 1) || 0), 0);
-    const score = questionReviews.reduce((total: number, item: any) => {
-      if (item.status === 'graded') return total + Math.max(0, Math.min(item.points, Number(item.earnedPoints || 0)));
-      if (item.status === 'manual-review' && item.teacherReview?.reviewedAt) return total + Math.max(0, Math.min(item.points, Number(item.teacherReview.points || 0)));
-      return total;
-    }, 0);
-    const scoredRows = questionReviews.filter((item: any) => item.status === 'graded' || (item.status === 'manual-review' && item.teacherReview?.reviewedAt));
-    const correctCount = scoredRows.filter((item: any) => item.status === 'graded' ? item.isCorrect === true : Number(item.teacherReview.points) >= item.points).length;
-    const incorrectCount = scoredRows.length - correctCount;
-    const answeredCount = questionReviews.filter((item: any) => item.status !== 'unanswered').length;
-    const unansweredCount = questionReviews.length - answeredCount;
-    const reviewedAt = new Date().toISOString();
-    const ungradedCount = questionReviews.filter((item: any) => item.status === 'ungraded').length;
-    const reviewSummary = { questionReviews: questionReviews, pendingReviewCount, manualReviewCount: pendingReviewCount, ungradedCount, reviewStatus: pendingReviewCount ? 'pending-review' : 'reviewed', score, maxPossibleScore, maxAutoScore: maxPossibleScore, correctCount, incorrectCount, answeredCount, unansweredCount, reviewedAt };
+    const { scoredMaximum: _scoredMaximum, ...storedSummary } = summarizeReviews(questionReviews, trustedQuestions);
+    const reviewSummary = removeUndefinedValues({ questionReviews, ...storedSummary, reviewedAt: new Date().toISOString() });
     await updateDoc(submissionRef, reviewSummary);
     const studentResultRef = doc(db, 'artifacts', appId, 'users', submission.studentUid, 'results', submission.attemptId);
     const studentResult = await getDoc(studentResultRef);
     if (studentResult.exists()) await updateDoc(studentResultRef, reviewSummary);
   };
+
+  const changeStudentGroup = async (studentUid: string, groupCode: string) => {
+    if (user?.role !== 'teacher' || !isClientAuthorizedTeacher(auth.currentUser)) {
+      throw new Error('Only an authorized, verified Google teacher can change a student group.');
+    }
+    if (!studentUid) throw new Error('This submission does not identify a student account.');
+    await updateDoc(doc(db, 'artifacts', appId, 'users', studentUid, 'profile', 'info'), { groupCode: normalizeGroupCode(groupCode) });
+  };
+
+  // Scoring needs the teacher-only answer keys, so an authorized teacher client performs it
+  // and stores the trusted result on both the central submission and the student's result.
+  const gradeSubmissionsAutomatically = async (candidates: any[], options: { force?: boolean } = {}) => {
+    if (user?.role !== 'teacher' || !isClientAuthorizedTeacher(auth.currentUser)) {
+      throw new Error('Automatic grading is restricted to an authorized, verified Google teacher.');
+    }
+    const summary = { graded: 0, skipped: 0, failed: 0 };
+    for (const submission of candidates) {
+      if (submission.isPractice || submission.gradingMode === 'legacy-unverified' || (!options.force && !needsAutoGrading(submission))) {
+        summary.skipped++;
+        continue;
+      }
+      const sourceAssessmentIds: string[] = submission.assessmentIds?.length ? submission.assessmentIds : [submission.assessmentId];
+      const sourceAssessments = sourceAssessmentIds.map(id => tests.find((item: any) => item.id === id));
+      if (!sourceAssessments.length || sourceAssessments.some(assessment => !assessment?.teacherKeyComplete)) {
+        summary.failed++;
+        continue;
+      }
+      const sourceQuestions = sourceAssessments.flatMap((assessment: any) => assessment.questions || []);
+      if (!sourceQuestions.length) {
+        summary.failed++;
+        continue;
+      }
+      try {
+        const { scoredMaximum: _scoredMaximum, ...stored } = gradeAttempt(sourceQuestions, submission.answers || {}, submission.questionReviews || []);
+        const payload = removeUndefinedValues({ ...stored, autoGradedAt: new Date().toISOString() });
+        const submissionRef = doc(db, 'artifacts', appId, 'public', 'data', 'submissions', submission.id);
+        const resultRef = doc(db, 'artifacts', appId, 'users', submission.studentUid, 'results', submission.attemptId);
+        const resultSnapshot = await getDoc(resultRef);
+        const batch = writeBatch(db);
+        batch.update(submissionRef, payload);
+        if (resultSnapshot.exists()) batch.update(resultRef, payload);
+        await batch.commit();
+        summary.graded++;
+      } catch (error) {
+        console.error('Automatic grading failed for submission', submission.id, error);
+        summary.failed++;
+      }
+    }
+    return summary;
+  };
+
+  const autoGradingAttempted = useRef(new Set<string>());
+  const [autoGradingNotice, setAutoGradingNotice] = useState('');
+  useEffect(() => {
+    if (user?.role !== 'teacher' || !submissions.length || !tests.length) return;
+    const pending = submissions.filter((submission: any) => needsAutoGrading(submission) && !autoGradingAttempted.current.has(submission.id));
+    if (!pending.length) return;
+    pending.forEach((submission: any) => autoGradingAttempted.current.add(submission.id));
+    void gradeSubmissionsAutomatically(pending).then(result => {
+      if (result.graded) setAutoGradingNotice(`Automatically graded ${result.graded} new submission${result.graded === 1 ? '' : 's'}.`);
+      if (result.failed) console.warn(`${result.failed} submission(s) could not be graded automatically (missing assessment or incomplete answer key).`);
+    }).catch(error => console.error('Automatic grading stopped:', error));
+  }, [user, submissions, tests]);
 
   const backfillLegacySubmissions = async (cursorPath: string, dryRun = false) => {
     const firebaseUser = auth.currentUser;
@@ -4733,8 +4826,13 @@ export default function App() {
       )}
 
       {currentView === 'login' && <LoginScreen onAuthAction={handleAuthAction} />}
-      {currentView === 'teacher_dashboard' && <TeacherDashboard user={user} tests={tests} resources={writingResources} resourceError={writingResourcesError} onSaveResource={saveWritingResource} onDeleteResource={deleteWritingResource} submissions={submissions} submissionsLoading={submissionsLoading} submissionsError={submissionsError} onSaveReview={saveTeacherReview} onBackfillLegacy={backfillLegacySubmissions} onSecureAnswerKeys={secureExistingAnswerKeys} onLogout={handleLogout} />}
-      {currentView === 'student_dashboard' && <StudentDashboard user={user} tests={tests} results={results} writingResources={writingResources} writingResourcesError={writingResourcesError} onStartTest={startTest} onSaveGroupCode={saveStudentGroupCode} onReplyTeacherComment={saveTeacherFeedbackReply} onDeleteResults={deleteStudentResults} onLogout={handleLogout} />}
+      {currentView === 'teacher_dashboard' && <TeacherDashboard user={user} tests={tests} resources={writingResources} resourceError={writingResourcesError} onSaveResource={saveWritingResource} onDeleteResource={deleteWritingResource} submissions={submissions} submissionsLoading={submissionsLoading} submissionsError={submissionsError} onSaveReview={saveTeacherReview} onBackfillLegacy={backfillLegacySubmissions} onSecureAnswerKeys={secureExistingAnswerKeys} onRegradeAll={() => gradeSubmissionsAutomatically(submissions, { force: true })} onChangeStudentGroup={changeStudentGroup} autoGradingNotice={autoGradingNotice} onLogout={handleLogout} />}
+      {currentView === 'student_dashboard' && <StudentDashboard user={user} tests={tests} results={results} writingResources={writingResources} writingResourcesError={writingResourcesError} onStartTest={startTest} onSaveGroupCode={saveStudentGroupCode} onReplyTeacherComment={saveTeacherFeedbackReply} onDeleteResults={deleteStudentResults} onReviewResult={openResultReview} onLogout={handleLogout} />}
+      {currentView === 'result_review' && reviewTarget && (
+        <main className="min-h-screen w-full bg-slate-50 p-4 transition-colors duration-300 dark:bg-slate-900 sm:p-8">
+          <ResultReview record={reviewTarget.record} test={reviewTarget.test} backLabel="Back to dashboard" onBack={() => { setReviewTarget(null); setCurrentView(reviewTarget.returnTo); }} />
+        </main>
+      )}
       {currentView === 'exam' && activeTest && user && <ExamInterface key={`${user.uid}:${activeTest.id}`} test={activeTest} userId={user.uid} writingResources={writingResources} writingResourcesError={writingResourcesError} isDark={isDark} onToggleTheme={() => setIsDark(previous => !previous)} onComplete={completeTest} onAbort={abortActiveExam} />}
 
       <Modal isOpen={modalInfo.isOpen} title={modalInfo.title} onClose={() => setModalInfo(prev => ({ ...prev, isOpen: false }))}>

@@ -8,6 +8,15 @@
         { "fieldPath": "published", "order": "ASCENDING" },
         { "fieldPath": "groupCode", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "tests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "answerKeysSecured", "order": "ASCENDING" },
+        { "fieldPath": "published", "order": "ASCENDING" },
+        { "fieldPath": "groupCodes", "arrayConfig": "CONTAINS" }
+      ]
     }
   ],
   "fieldOverrides": []
