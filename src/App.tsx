@@ -3120,11 +3120,7 @@ const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, wr
 
   const updateAnswer = (value: unknown) => {
     if (!currentQuestion) return;
-    setAnswers(previous => ({ ...previous, [currentQuestion.id]: value }));
-    // NUET Training: picking an option is the final answer for a single-choice question.
-    // Every other format stays open until its countdown ends.
-    if (perQuestionTimer && resolveResponseType(currentQuestion) === 'single-choice' && isAnswerPresent(value)) revealCurrentQuestion();
-  };
+    setAnswers(previous => ({ ...previous, [currentQuestion.id]: value }));  };
 
   attemptSnapshotRef.current = { ...attemptSnapshotRef.current, answers, currentIndex, questionStartedAtMs, startedAtMs };
 
@@ -3451,7 +3447,7 @@ const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, wr
         </div>
       )}
       {perQuestionTimer && !timeExpired && (
-        <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">Timed training: each question has its own countdown. When you pick an option (or time runs out), the correct answer is shown and you choose when to go to the next question. You cannot return to earlier questions.</p>
+        <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">Timed training: each question has its own countdown. Make your choice, then press Check answer (it stays disabled until you have answered) or wait for the timer. The correct answer is then shown and you choose when to go to the next question. You cannot return to earlier questions.</p>
       )}
       <ExamNotices online={online} secondsRemaining={perQuestionTimer ? null : timeExpired ? 0 : secondsRemaining} />
 
@@ -3518,9 +3514,15 @@ const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, wr
           <>
             <span className="text-sm text-slate-500 dark:text-slate-400">Question {currentIndex + 1} of {questions.length}</span>
             {!isRevealed ? (
-              <span className="text-sm font-medium text-slate-600 dark:text-slate-300">
-                {resolveResponseType(currentQuestion) === 'single-choice' ? 'Choose an answer, or wait for the timer.' : 'Answer before the timer ends.'}
-              </span>
+              <button
+                type="button"
+                onClick={revealCurrentQuestion}
+                disabled={isSubmitting || !isAnswerPresent(answers[currentQuestion.id])}
+                title={isAnswerPresent(answers[currentQuestion.id]) ? undefined : 'Make your choice first'}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Check answer
+              </button>
             ) : currentIndex < questions.length - 1 ? (
               <button
                 type="button"
