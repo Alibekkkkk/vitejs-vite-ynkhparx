@@ -50,7 +50,7 @@ import { ExamNotices, QuestionNavigator, useFlaggedQuestions, useLeaveWarning, u
 import { useFocusTrap } from './useFocusTrap';
 import { StudentGroupControl } from './StudentGroupControl';
 import { AnalyticsPanel } from './AnalyticsPanel';
-import { PromptFigure } from './PromptFigure';
+import { explanationFigureQuestion, PromptFigure } from './PromptFigure';
 import { ResizableSplitPane } from './ResizableSplitPane';
 import { WritingResourceTable } from './WritingResourceTable';
 import { WritingResourceManager } from './WritingResourceManager';
@@ -432,6 +432,9 @@ type AssessmentQuestion = EngineQuestion & {
   figureCaption?: string;
   figureMode?: 'visual' | 'text-only';
   imageAsset?: FigureAsset;
+  explanationImageUrl?: string;
+  explanationImageAlt?: string;
+  explanationImageAsset?: FigureAsset;
 };
 
 type AssessmentRecord = {
@@ -489,7 +492,7 @@ const getListeningAudioUrl = (test: AssessmentRecord, sectionNumber: number) => 
   return sectionNumber === 1 && section?.audioUrl && section.audioVerified === true ? section.audioUrl : '';
 };
 
-const PRIVATE_QUESTION_FIELDS = ['correctAnswer', 'acceptedAnswers', 'correctOrder', 'explanation', 'answerKey', 'solution', 'teacherNotes', 'teacherOnlyNotes'];
+const PRIVATE_QUESTION_FIELDS = ['correctAnswer', 'acceptedAnswers', 'correctOrder', 'explanation', 'explanationImageUrl', 'explanationImageAsset', 'explanationImageAlt', 'answerKey', 'solution', 'teacherNotes', 'teacherOnlyNotes'];
 const PRIVATE_SECTION_FIELDS = ['recordingScript', 'recordingNotes', 'transcript', 'teacherInstructions'];
 
 const cloneData = (value: any) => value == null ? {} : JSON.parse(JSON.stringify(value));
@@ -918,11 +921,11 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
 
   const getFigureStateKey = (question: { id?: string } | null | undefined, index: number) => String(question?.id || `draft-question-${index}`);
   const figureUploadTasks = useRef(new Map<string, UploadTask>());
-  const figureRetryFiles = useRef(new Map<string, { index: number; file: File }>());
+  const figureRetryFiles = useRef(new Map<string, { index: number; file: File; target: 'question' | 'explanation' }>());
   const cancelFigureUpload = (key: string) => figureUploadTasks.current.get(key)?.cancel();
   const retryFigureUpload = (key: string) => {
     const pending = figureRetryFiles.current.get(key);
-    if (pending) void uploadQuestionFigure(pending.index, pending.file);
+    if (pending) void uploadQuestionFigure(pending.index, pending.file, pending.target);
   };
 
   const previewLegacyImport = async () => {
@@ -1238,10 +1241,11 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
 
   const handleUpdateQuestion = (index, field, value) => {
     const questionId = newTest.questions[index]?.id;
-    if (field === 'imageUrl' && questionId) {
+    if ((field === 'imageUrl' || field === 'explanationImageUrl') && questionId) {
+      const stateKey = field === 'imageUrl' ? questionId : `${questionId}:explanation`;
       setFigureStates(previous => {
         const next = { ...previous };
-        delete next[questionId];
+        delete next[stateKey];
         return next;
       });
     }
@@ -1251,6 +1255,9 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
     if (field === 'imageUrl') {
       updated[index][field] = extractImageUrl(value, { preserveWhitespace: false });
       delete updated[index].imageAsset;
+    } else if (field === 'explanationImageUrl') {
+      updated[index].explanationImageUrl = extractImageUrl(value, { preserveWhitespace: false });
+      delete updated[index].explanationImageAsset;
     } else if (field === 'imageAlt' && updated[index].imageAsset) {
       updated[index].imageAlt = value;
       updated[index].imageAsset = { ...updated[index].imageAsset, alt: value };
@@ -1296,7 +1303,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
     });
   };
 
-  const uploadQuestionFigure = async (index: number, file?: File) => {
+  const uploadQuestionFigure = async (index: number, file?: File, target: 'question' | 'explanation' = 'question') => {
     if (!file) return;
     let question = newTest.questions[index];
     if (!question) return;
@@ -1308,7 +1315,9 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
       }));
       question = { ...question, id: generatedId };
     }
-    const figureStateKey = getFigureStateKey(question, index);
+    const isExplanation = target === 'explanation';
+    const figureStateKey = getFigureStateKey(question, index) + (isExplanation ? ':explanation' : '');
+    const currentAsset = isExplanation ? question.explanationImageAsset : question.imageAsset;
     const uploadContext = { email: auth.currentUser?.email, bucket: firebaseConfig.storageBucket, hasAppCheck: Boolean(appCheckSiteKey) };
     const failUpload = (message: string, canRetry: boolean) => setFigureStates(previous => ({
       ...previous,
@@ -1325,7 +1334,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
       return;
     }
 
-    figureRetryFiles.current.set(figureStateKey, { index, file });
+    figureRetryFiles.current.set(figureStateKey, { index, file, target });
     setFigureStates(previous => ({ ...previous, [figureStateKey]: { status: 'uploading', message: 'Checking Firebase Storage…', progress: 0, fileName: file.name } }));
     const bucket = await probeStorageBucket(firebaseConfig.storageBucket);
     const bucketProblem = bucketProblemMessage(bucket.state, firebaseConfig.storageBucket);
@@ -1354,11 +1363,11 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
       const extension = file.type === 'image/jpeg' ? 'jpg' : file.type.split('/')[1];
       const assessmentFolder = editingId || 'draft';
       const assetId = crypto.randomUUID();
-      const path = `assessment-assets/${user.uid}/${assessmentFolder}/${question.id}/${assetId}.${extension}`;
+      const path = `assessment-assets/${user.uid}/${assessmentFolder}/${question.id}${isExplanation ? '-explanation' : ''}/${assetId}.${extension}`;
       const reference = storageRef(storage, path);
       const uploadTask = uploadBytesResumable(reference, file, {
         contentType: file.type,
-        customMetadata: { uploadedBy: user.uid, assetVersion: String((question.imageAsset?.assetVersion || 0) + 1) },
+        customMetadata: { uploadedBy: user.uid, assetVersion: String((currentAsset?.assetVersion || 0) + 1) },
       });
       figureUploadTasks.current.set(figureStateKey, uploadTask);
       await new Promise<void>((resolve, reject) => {
@@ -1389,16 +1398,16 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
         byteSize: file.size,
         width: dimensions.width,
         height: dimensions.height,
-        alt: question.imageAlt || '',
-        caption: question.figureCaption || '',
-        assetVersion: (question.imageAsset?.assetVersion || 0) + 1,
+        alt: (isExplanation ? question.explanationImageAlt : question.imageAlt) || '',
+        caption: isExplanation ? '' : question.figureCaption || '',
+        assetVersion: (currentAsset?.assetVersion || 0) + 1,
         uploadedAt: new Date().toISOString(),
         uploadedBy: user.uid,
       };
       setNewTest(previous => ({
         ...previous,
         questions: previous.questions.map((item, itemIndex) => itemIndex === index
-          ? { ...item, imageUrl: downloadUrl, imageAsset: asset }
+          ? (isExplanation ? { ...item, explanationImageUrl: downloadUrl, explanationImageAsset: asset } : { ...item, imageUrl: downloadUrl, imageAsset: asset })
           : item),
       }));
       figureRetryFiles.current.delete(figureStateKey);
@@ -1412,9 +1421,11 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
     }
   };
 
-  const testQuestionFigureUrl = async (question: AssessmentQuestion, index: number) => {
-    const figureStateKey = getFigureStateKey(question, index);
-    const normalizedUrl = normalizeFigureUrl(question.imageUrl || question.imageAsset?.downloadUrl || '');
+  const testQuestionFigureUrl = async (question: AssessmentQuestion, index: number, target: 'question' | 'explanation' = 'question') => {
+    const figureStateKey = getFigureStateKey(question, index) + (target === 'explanation' ? ':explanation' : '');
+    const normalizedUrl = target === 'explanation'
+      ? normalizeFigureUrl(question.explanationImageUrl || question.explanationImageAsset?.downloadUrl || '')
+      : normalizeFigureUrl(question.imageUrl || question.imageAsset?.downloadUrl || '');
     if (!normalizedUrl) {
       setFigureStates(previous => ({ ...previous, [figureStateKey]: { status: 'error', message: 'Enter a valid HTTPS image URL first.' } }));
       return;
@@ -1559,6 +1570,8 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
       if (newTest.type === 'IELTS' && question.section === 'writing' && ![1, 2].includes(Number(question.writingTaskType || 0))) messages.push('Choose IELTS Writing Task 1 or Task 2.');
       const figureInput = question.imageUrl || question.imageAsset?.downloadUrl || '';
       if (figureInput && !normalizeFigureUrl(figureInput)) messages.push('Task figure URLs must use HTTPS and be a direct image URL.');
+      const explanationImageInput = question.explanationImageUrl || question.explanationImageAsset?.downloadUrl || '';
+      if (explanationImageInput && !normalizeFigureUrl(explanationImageInput)) messages.push('Explanation image URLs must use HTTPS and be a direct image URL.');
       if (assignedGroups.length && requiresTaskFigure(question) && !normalizeFigureUrl(figureInput)) {
         messages.push('Add and test a Task 1 figure, or explicitly mark this prompt as text-only before publishing.');
       }
@@ -1900,12 +1913,13 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                       <p className="mt-1 whitespace-pre-wrap rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-800 dark:bg-slate-900 dark:text-slate-100">{formatAnswerForReview(review.studentAnswer)}</p>
                     </section>}
                     <p className="text-sm text-slate-600 dark:text-slate-300">Status: {review.status}{review.earnedPoints != null ? `, ${review.earnedPoints}/${review.points} points` : ''}</p>
-                    {(review.answerKey || review.acceptedAnswers?.length || review.explanation) && <details className="rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-700">
+                    {(review.answerKey || review.acceptedAnswers?.length || review.explanation || review.explanationImageUrl || review.explanationImageAsset) && <details className="rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-700">
                       <summary className="cursor-pointer font-medium text-slate-700 dark:text-slate-200">Marking guide</summary>
                       <div className="mt-2 space-y-1 text-slate-600 dark:text-slate-300">
                         {review.answerKey && <p>Answer key: {formatAnswerForReview(review.answerKey)}</p>}
                         {review.acceptedAnswers?.length > 0 && <p>Accepted answers: {review.acceptedAnswers.join(', ')}</p>}
                         {review.explanation && <p>Explanation: <FormattedQuestionText text={review.explanation} /></p>}
+                        {explanationFigureQuestion(review) && <PromptFigure question={explanationFigureQuestion(review)} />}
                       </div>
                     </details>}
                     {review.teacherReview?.feedback && <p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-900 dark:bg-blue-950/40 dark:text-blue-200">Overall feedback: {review.teacherReview.feedback}</p>}
@@ -2281,6 +2295,77 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">Answer explanation (optional)
                          <QuestionTextEditor value={q.explanation || ''} onChange={value => handleUpdateQuestion(qIndex, 'explanation', value)} rows={2} placeholder="Explain why the correct answer is right. Students see this after they submit." ariaLabel="Answer explanation" className="mt-1" />
                        </label>
+
+                       {(() => {
+                         const explanationKey = `${getFigureStateKey(q, qIndex)}:explanation`;
+                         const explanationState = figureStates[explanationKey];
+                         const explanationUrl = q.explanationImageUrl || q.explanationImageAsset?.downloadUrl || '';
+                         return (
+                           <div className="mb-4 space-y-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-left dark:border-emerald-800 dark:bg-emerald-900/20">
+                             <h4 className="flex items-center gap-2 text-sm font-semibold text-emerald-800 dark:text-emerald-300">
+                               <ImageIcon className="h-4 w-4" /> Explanation image (optional)
+                             </h4>
+                             <p className="text-xs text-slate-600 dark:text-slate-300">Add a photo of your worked solution. Students see it only after they open the explanation.</p>
+                             <div className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                               <span id={`explanation-upload-label-${qIndex}`}>Upload from this device (PNG, JPEG, or WebP; maximum 5 MB)</span>
+                               <div className="mt-1 flex flex-wrap items-center gap-3">
+                                 <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-emerald-400 bg-white px-4 py-2 text-sm font-semibold text-emerald-800 focus-within:outline focus-within:outline-2 focus-within:outline-emerald-600 hover:bg-emerald-50 dark:border-emerald-600 dark:bg-slate-800 dark:text-emerald-200 dark:hover:bg-slate-700">
+                                   <ImageIcon className="h-4 w-4" aria-hidden="true" />Choose image
+                                   <input
+                                     type="file"
+                                     accept="image/png,image/jpeg,image/webp"
+                                     aria-labelledby={`explanation-upload-label-${qIndex}`}
+                                     disabled={explanationState?.status === 'uploading'}
+                                     onChange={event => {
+                                       const file = event.target.files?.[0];
+                                       void uploadQuestionFigure(qIndex, file, 'explanation');
+                                       event.target.value = '';
+                                     }}
+                                     className="sr-only"
+                                   />
+                                 </label>
+                                 <span className="min-w-0 break-all text-sm font-normal text-slate-600 dark:text-slate-300">{explanationState?.fileName || (q.explanationImageAsset ? 'Uploaded image attached' : 'No file chosen')}</span>
+                               </div>
+                             </div>
+                             {explanationState?.status === 'uploading' && typeof explanationState.progress === 'number' && (
+                               <div className="space-y-1" role="status">
+                                 <div className="h-2.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700" role="progressbar" aria-label="Explanation image upload progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={explanationState.progress}>
+                                   <div className="h-full rounded-full bg-emerald-600 transition-all" style={{ width: `${explanationState.progress}%` }} />
+                                 </div>
+                                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600 dark:text-slate-300">
+                                   <span>{explanationState.message} {explanationState.progress ? `${explanationState.progress}%` : ''}</span>
+                                   <button type="button" onClick={() => cancelFigureUpload(explanationKey)} className="rounded border border-slate-300 px-2 py-1 font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-100 dark:hover:bg-slate-700">Cancel upload</button>
+                                 </div>
+                               </div>
+                             )}
+                             <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">
+                               Or paste a direct HTTPS image link (for example from ImgBB)
+                               <input
+                                 type="url"
+                                 value={explanationUrl}
+                                 onChange={event => handleUpdateQuestion(qIndex, 'explanationImageUrl', event.target.value)}
+                                 placeholder="https://i.ibb.co/.../solution.png"
+                                 className="mt-1 w-full rounded border border-emerald-300 bg-white p-2 text-sm text-slate-800 dark:border-emerald-700 dark:bg-slate-800 dark:text-white"
+                               />
+                             </label>
+                             <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">
+                               Alternative text (describe the image for screen readers)
+                               <input value={q.explanationImageAlt || q.explanationImageAsset?.alt || ''} onChange={event => handleUpdateQuestion(qIndex, 'explanationImageAlt', event.target.value)} className="mt-1 w-full rounded border p-2 dark:border-slate-600 dark:bg-slate-800" />
+                             </label>
+                             <button type="button" onClick={() => void testQuestionFigureUrl(q, qIndex, 'explanation')} disabled={explanationState?.status === 'uploading'} className="rounded border border-emerald-400 px-3 py-1.5 text-sm font-medium text-emerald-800 disabled:opacity-50 dark:border-emerald-700 dark:text-emerald-300">
+                               {explanationState?.status === 'uploading' ? 'Working…' : 'Test image URL'}
+                             </button>
+                             {explanationState && explanationState.status !== 'uploading' && <div className="flex flex-wrap items-start gap-2">
+                               <p className={`min-w-0 flex-1 text-sm ${explanationState.status === 'error' ? 'text-red-700 dark:text-red-300' : 'text-slate-700 dark:text-slate-200'}`} role={explanationState.status === 'error' ? 'alert' : 'status'}>{explanationState.message}</p>
+                               {explanationState.status === 'error' && explanationState.canRetry && figureRetryFiles.current.has(explanationKey) && (
+                                 <button type="button" onClick={() => retryFigureUpload(explanationKey)} className="rounded-lg bg-emerald-700 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-800">Retry upload</button>
+                               )}
+                             </div>}
+                             {explanationUrl && <PromptFigure key={`${explanationKey}-${figureTestRevision[explanationKey] || 0}`} question={explanationFigureQuestion(q)} assessmentId={editingId || newTest.id || 'draft'} />}
+                             {explanationUrl && <button type="button" onClick={() => { handleUpdateQuestion(qIndex, 'explanationImageUrl', ''); }} className="text-sm font-medium text-red-600 underline">Remove explanation image</button>}
+                           </div>
+                         );
+                       })()}
 
                        <div className="mb-4 space-y-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-left dark:border-blue-800 dark:bg-blue-900/20">
                          <h4 className="flex items-center gap-2 text-sm font-semibold text-blue-800 dark:text-blue-300">
@@ -4243,6 +4328,7 @@ const StudentDashboard = ({ user, tests, results, writingResources, writingResou
                                      : review.status === 'ungraded' ? <p>This response is ungraded practice.</p>
                                        : <p>Unanswered.</p>}
                                  {review.explanation && <p className="mt-1"><FormattedQuestionText text={review.explanation} /></p>}
+                                 {explanationFigureQuestion(review) && <PromptFigure question={explanationFigureQuestion(review)} />}
                                </div>
                                <StudentTeacherFeedbackNotes result={result} review={review} onReply={onReplyTeacherComment} />
                              </div>

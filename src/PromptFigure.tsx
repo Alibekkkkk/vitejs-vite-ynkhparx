@@ -65,3 +65,19 @@ export function PromptFigure({ question, assessmentId = 'unknown', teacherFacing
     </figure>
   );
 }
+
+/**
+ * Wraps a question's (or review row's) explanation image in the shape PromptFigure expects,
+ * so the same loading, error and "open in new tab" handling is reused. Null when there is no image.
+ */
+export function explanationFigureQuestion(source: Record<string, any> | null | undefined): Record<string, any> | null {
+  const url = source?.explanationImageUrl;
+  const asset = source?.explanationImageAsset;
+  if (!(typeof url === 'string' && url.trim()) && !asset?.downloadUrl) return null;
+  return {
+    id: `${source?.id || source?.questionId || 'question'}-explanation`,
+    imageUrl: url,
+    imageAsset: asset,
+    imageAlt: source?.explanationImageAlt || asset?.alt || 'Explanation image',
+  };
+}

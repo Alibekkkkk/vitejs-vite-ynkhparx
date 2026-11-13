@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { createReviewRows } from './grading';
 import { describeResult, formatCorrectAnswer } from './answerDisplay';
 import { FormattedQuestionText } from './FormattedQuestionText';
+import { explanationFigureQuestion, PromptFigure } from './PromptFigure';
 
 type Props = {
   /** The question merged with its answer key, or null while the key is unavailable. */
@@ -31,11 +32,12 @@ export function TrainingFeedback({ question, answer, timedOut, keyError }: Props
       : 'border-red-300 bg-red-50 text-red-900 dark:border-red-700 dark:bg-red-900/30 dark:text-red-100';
   const correctAnswer = formatCorrectAnswer(row);
   const explanation = String(row.explanation || '').trim();
+  const explanationFigure = explanationFigureQuestion(question);
   return (
     <div className={`mt-5 rounded-lg border p-4 ${tone}`} role="status" aria-live="polite">
       <p className="font-semibold">{timedOut && result.kind === 'unanswered' ? 'Time is up. ' : ''}{result.symbol} {result.text}</p>
       {correctAnswer && <p className="mt-1 text-sm"><span className="font-semibold">Correct answer:</span> {correctAnswer}</p>}
-      {explanation && (
+      {(explanation || explanationFigure) && (
         <div className="mt-3">
           <button
             type="button"
@@ -45,7 +47,12 @@ export function TrainingFeedback({ question, answer, timedOut, keyError }: Props
           >
             {explanationOpen ? 'Hide explanation' : 'Show explanation'}
           </button>
-          {explanationOpen && <p className="mt-3 whitespace-pre-wrap text-sm"><FormattedQuestionText text={explanation} /></p>}
+          {explanationOpen && (
+            <div className="mt-3 text-sm">
+              {explanation && <p className="whitespace-pre-wrap"><FormattedQuestionText text={explanation} /></p>}
+              {explanationFigure && <PromptFigure question={explanationFigure} />}
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -25,6 +25,9 @@ export type ReviewRow = {
   answerKey: Record<string, unknown>;
   acceptedAnswers: unknown[];
   explanation: string;
+  explanationImageUrl?: string;
+  explanationImageAsset?: Record<string, unknown>;
+  explanationImageAlt?: string;
   teacherReview?: TeacherReview;
 };
 
@@ -71,6 +74,7 @@ export function createReviewRows(questions: any[], answers: Record<string, unkno
       },
       acceptedAnswers: question.acceptedAnswers || [],
       explanation: question.explanation || '',
+      ...(question.explanationImageUrl || question.explanationImageAsset ? { explanationImageUrl: question.explanationImageUrl || '', explanationImageAsset: question.explanationImageAsset, explanationImageAlt: question.explanationImageAlt || '' } : {}),
     };
   });
 }

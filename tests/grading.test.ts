@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
-import { getEffectiveGrade, gradeAttempt, needsAutoGrading, percentOf } from '../src/grading.ts';
+import { createReviewRows, getEffectiveGrade, gradeAttempt, needsAutoGrading, percentOf } from '../src/grading.ts';
 import { parseQuestionBank } from '../src/questionBank.ts';
 
 const banksDirectory = join(process.cwd(), 'sample-data');
@@ -118,4 +118,12 @@ test('sample bank writing prompts stay pending while their objective questions a
   assert.equal(graded.pendingReviewCount, bank.questions.length);
   assert.equal(graded.reviewStatus, 'pending-review');
   assert.equal(graded.scoredMaximum, 0);
+});
+
+test('review rows carry the explanation image so it can be shown with the explanation', () => {
+  const [row] = createReviewRows([{ id: 'q1', text: 'x', responseType: 'short-text', correctAnswer: '4', explanation: 'See photo', explanationImageUrl: 'https://i.ibb.co/abc/solution.png', explanationImageAlt: 'Worked solution' }], { q1: '4' });
+  assert.equal(row.explanationImageUrl, 'https://i.ibb.co/abc/solution.png');
+  assert.equal(row.explanationImageAlt, 'Worked solution');
+  const [plain] = createReviewRows([{ id: 'q2', text: 'y', responseType: 'short-text', correctAnswer: '1' }], { q2: '1' });
+  assert.equal('explanationImageUrl' in plain, false);
 });

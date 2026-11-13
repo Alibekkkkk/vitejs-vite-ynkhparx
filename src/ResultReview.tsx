@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { ArrowLeft, ArrowRight, Check, Clock } from 'lucide-react';
 import { FormattedQuestionText } from './FormattedQuestionText';
-import { PromptFigure } from './PromptFigure';
+import { explanationFigureQuestion, PromptFigure } from './PromptFigure';
 import { describeResult, formatCorrectAnswer, formatDuration, formatStudentAnswer, pointsLabel, type ResultLabel } from './answerDisplay';
 import { formatAssessmentTitle } from './assessmentTitle';
 import { resolveReviewData, type ReviewRow } from './grading';
@@ -228,6 +228,7 @@ function QuestionDetail({ row, index, total, question, test, headingRef, onPrevi
   const correct = new Set([...(Array.isArray(key?.correctAnswer) ? key.correctAnswer : [key?.correctAnswer]), ...(key?.acceptedAnswers || [])]
     .filter(value => value != null && value !== '').map(value => String(value).trim().toLowerCase()));
   const promptText = question?.text ?? row.questionText;
+  const explanationFigure = explanationFigureQuestion(row) || explanationFigureQuestion(question);
 
   return (
     <article className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800" aria-labelledby="review-question-heading">
@@ -277,10 +278,11 @@ function QuestionDetail({ row, index, total, question, test, headingRef, onPrevi
         </div>
       )}
 
-      {(row.explanation || question?.explanation) && (
+      {(row.explanation || question?.explanation || explanationFigure) && (
         <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-900 dark:bg-blue-900/20">
           <h3 className="text-sm font-semibold text-blue-900 dark:text-blue-200">Explanation</h3>
-          <div className="mt-1 whitespace-pre-wrap text-sm text-slate-800 dark:text-slate-100"><FormattedQuestionText text={row.explanation || question?.explanation} /></div>
+          {(row.explanation || question?.explanation) && <div className="mt-1 whitespace-pre-wrap text-sm text-slate-800 dark:text-slate-100"><FormattedQuestionText text={row.explanation || question?.explanation} /></div>}
+          {explanationFigure && <PromptFigure question={explanationFigure} />}
         </div>
       )}
       {row.teacherReview?.feedback && (
