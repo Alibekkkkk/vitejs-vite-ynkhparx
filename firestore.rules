@@ -45,11 +45,11 @@ service cloud.firestore {
       let assignedGroups = assessment.get('groupCodes', []);
       return signedIn()
         && request.auth.uid == userId
-        && assessment.get('published', false) == true
-        && assessment.get('status', '') != 'draft'
-        && assessment.get('answerKeysSecured', false) == true
         && (
           (profile.get('role', '') == 'student'
+            && assessment.get('published', false) == true
+            && assessment.get('status', '') != 'draft'
+            && assessment.get('answerKeysSecured', false) == true
             && (
               (assigned != '' && (assigned == 'all' || (group != '' && assigned == group)))
               || 'all' in assignedGroups

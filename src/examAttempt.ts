@@ -6,6 +6,8 @@ export type ExamAttemptSnapshot = {
   startedAtMs: number;
   answers: Record<string, unknown>;
   currentIndex: number;
+  /** When the current question's own countdown began (per-question timer tests). */
+  questionStartedAtMs: number;
   lastExitAtMs: number | null;
   lastSeenAtMs: number;
 };
@@ -23,6 +25,7 @@ export function createExamAttemptSnapshot(testId: string, now = Date.now()): Exa
     startedAtMs: now,
     answers: {},
     currentIndex: 0,
+    questionStartedAtMs: now,
     lastExitAtMs: null,
     lastSeenAtMs: now,
   };
@@ -52,6 +55,8 @@ export function restoreExamAttempt(raw: string | null, testId: string, now = Dat
       startedAtMs: saved.startedAtMs,
       answers: saved.answers,
       currentIndex: saved.currentIndex,
+      // Attempts saved before per-question timers existed have no value.
+      questionStartedAtMs: Number.isFinite(saved.questionStartedAtMs) ? saved.questionStartedAtMs : saved.startedAtMs,
       lastExitAtMs: saved.lastExitAtMs,
       lastSeenAtMs: saved.lastSeenAtMs,
     };

@@ -17,7 +17,7 @@ export function parseQuestionBank(input: unknown): QuestionBank {
   const bank = input as Record<string, unknown>;
   if (bank.schemaVersion !== 1) throw new Error('schemaVersion must be 1.');
   if (typeof bank.title !== 'string' || !bank.title.trim()) throw new Error('title must be non-empty text.');
-  if (!['IELTS', 'SAT', 'NUET', 'General'].includes(String(bank.type))) throw new Error('type must be IELTS, SAT, NUET, or General.');
+  if (!['IELTS', 'SAT', 'NUET', 'NUET Training', 'General'].includes(String(bank.type))) throw new Error('type must be IELTS, SAT, NUET, NUET Training, or General.');
   if (!Array.isArray(bank.questions) || bank.questions.length < 1 || bank.questions.length > 200) throw new Error('questions must contain 1–200 items.');
   if (bank.sections != null && (typeof bank.sections !== 'object' || Array.isArray(bank.sections))) throw new Error('sections must be an object when provided.');
   const sectionData = (bank.sections || {}) as Record<string, any>;

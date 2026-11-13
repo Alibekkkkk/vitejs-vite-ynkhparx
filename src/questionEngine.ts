@@ -1,4 +1,5 @@
 import { stripQuestionTextFormatting } from './questionTextFormatting.ts';
+import { validateQuestionTimeLimit } from './questionTimer.ts';
 
 export type ResponseType =
   | 'single-choice'
@@ -241,6 +242,7 @@ export function validateQuestion(question: EngineQuestion): string[] {
     : '';
   const hasFigure = Boolean(String(assetDownloadUrl || question.imageUrl || '').trim());
   if (!hasPromptText && !hasFigure) errors.push('Add the question prompt or attach a task figure.');
+  errors.push(...validateQuestionTimeLimit(question.timeLimitSeconds));
   if (normalized.responseType === 'long-text') return errors;
   const keyOptional = Boolean(normalized.manualReview || normalized.ungraded);
 

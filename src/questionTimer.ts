@@ -1,0 +1,82 @@
+// Per-question timing for NUET training tests.
+//
+// A test opts in with `perQuestionTimer: true`. Every question then gets
+// `defaultQuestionSeconds` (120 s = 2 minutes unless the teacher changes it),
+// and an individual question can override that with `timeLimitSeconds`.
+
+export const NUET_DEFAULT_QUESTION_SECONDS = 120;
+export const MIN_QUESTION_SECONDS = 10;
+export const MAX_QUESTION_SECONDS = 600;
+
+export const NUET_TRAINING_TYPE = 'NUET Training';
+
+type TimedTest = { type?: unknown; perQuestionTimer?: unknown; defaultQuestionSeconds?: unknown } | null | undefined;
+type TimedQuestion = { timeLimitSeconds?: unknown } | null | undefined;
+
+/** Whole seconds inside the allowed range, or null when the value is blank/invalid. */
+export function normalizeQuestionSeconds(value: unknown): number | null {
+  if (value === '' || value == null) return null;
+  const seconds = Number(value);
+  if (!Number.isInteger(seconds)) return null;
+  if (seconds < MIN_QUESTION_SECONDS || seconds > MAX_QUESTION_SECONDS) return null;
+  return seconds;
+}
+
+export function isPerQuestionTimerEnabled(test: TimedTest): boolean {
+  return test?.type === NUET_TRAINING_TYPE || test?.perQuestionTimer === true;
+}
+
+export function getDefaultQuestionSeconds(test: TimedTest): number {
+  return normalizeQuestionSeconds(test?.defaultQuestionSeconds) ?? NUET_DEFAULT_QUESTION_SECONDS;
+}
+
+/** Seconds allowed for this question, or null when the test has no per-question timer. */
+export function resolveQuestionTimeLimit(test: TimedTest, question: TimedQuestion): number | null {
+  if (!isPerQuestionTimerEnabled(test)) return null;
+  return normalizeQuestionSeconds(question?.timeLimitSeconds) ?? getDefaultQuestionSeconds(test);
+}
+
+export function totalQuestionSeconds(test: TimedTest, questions: TimedQuestion[]): number {
+  return questions.reduce((sum, question) => sum + (resolveQuestionTimeLimit(test, question) ?? 0), 0);
+}
+
+/** Error messages for a teacher-entered override (blank means "use the default"). */
+export function validateQuestionTimeLimit(value: unknown): string[] {
+  if (value === '' || value == null) return [];
+  return normalizeQuestionSeconds(value) === null
+    ? [`Question time limit must be a whole number of seconds from ${MIN_QUESTION_SECONDS} to ${MAX_QUESTION_SECONDS}.`]
+    : [];
+}
+
+export type QuestionPosition = {
+  index: number;
+  /** When the (possibly new) current question started counting down. */
+  questionStartedAtMs: number;
+  /** True when the last question's time has also run out. */
+  finished: boolean;
+};
+
+/**
+ * Moves forward through any questions whose time ran out between
+ * `questionStartedAtMs` and `now` (for example while the page was closed or the
+ * tab was throttled). Questions never move backwards.
+ */
+export function locateQuestionPosition(
+  test: TimedTest,
+  questions: TimedQuestion[],
+  currentIndex: number,
+  questionStartedAtMs: number,
+  now: number,
+): QuestionPosition {
+  if (!isPerQuestionTimerEnabled(test) || !questions.length) return { index: currentIndex, questionStartedAtMs, finished: false };
+  const last = questions.length - 1;
+  let index = Math.min(Math.max(0, currentIndex), last);
+  let startedAt = Math.min(questionStartedAtMs, now);
+  for (;;) {
+    const limitMs = (resolveQuestionTimeLimit(test, questions[index]) ?? 0) * 1000;
+    if (now - startedAt < limitMs) return { index, questionStartedAtMs: startedAt, finished: false };
+    if (index === last) return { index, questionStartedAtMs: startedAt, finished: true };
+    startedAt += limitMs;
+    index += 1;
+  }
+}

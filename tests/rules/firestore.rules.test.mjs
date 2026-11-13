@@ -41,6 +41,7 @@ beforeEach(async () => {
     await setDoc(doc(db, testsPath('legacy')), { ...base, groupCode: 'g2' });
     await setDoc(doc(db, testsPath('everyone')), { ...base, groupCode: 'all', groupCodes: ['all'] });
     await setDoc(doc(db, testsPath('other')), { ...base, groupCode: 'g9', groupCodes: ['g9'] });
+    await setDoc(doc(db, testsPath('draft')), { ...base, published: false, status: 'draft', answerKeysSecured: false, groupCode: '', groupCodes: [] });
     await setDoc(doc(db, keyPath('multi')), { questions: [{ id: 'q1', correctAnswer: 'A' }] });
     await setDoc(doc(db, keyPath('other')), { questions: [{ id: 'q1', correctAnswer: 'A' }] });
   });
@@ -93,6 +94,33 @@ test('students in any assigned group can submit, others cannot', async () => {
   await assertSucceeds(submit(student('s3'), 's3', 'a3', 'everyone', ''));
 });
 
+test('auto-submitted attempts follow the same valid save rules', async () => {
+  const db = student('s2');
+  const submission = central('s2', 'auto1', 'multi', 'g2');
+  submission.isAutoSubmitted = true;
+  const result = unscored('s2', 'auto1', 'multi', { isAutoSubmitted: true });
+  const batch = writeBatch(db);
+  batch.set(doc(db, submissionPath('s2_auto1')), submission);
+  batch.set(doc(db, resultPath('s2', 'auto1')), result);
+  batch.set(doc(db, markerPath('s2', 'multi')), { assessmentId: 'multi', attemptId: 'auto1', completedAt: 'now' });
+  await assertSucceeds(batch.commit());
+});
+
+test('an authorized teacher can preview and submit a draft assessment', async () => {
+  const db = teacher();
+  const attempt = 'preview1';
+  const previewResult = unscored('teacher1', attempt, 'draft');
+  const previewSubmission = {
+    ...central('teacher1', attempt, 'draft', ''),
+    assessmentTitle: 'Draft preview',
+  };
+  const batch = writeBatch(db);
+  batch.set(doc(db, submissionPath('teacher1_preview1')), previewSubmission);
+  batch.set(doc(db, resultPath('teacher1', attempt)), previewResult);
+  batch.set(doc(db, markerPath('teacher1', 'draft')), { assessmentId: 'draft', attemptId: attempt, completedAt: 'now' });
+  await assertSucceeds(batch.commit());
+});
+
 test('a result cannot claim a different assessment from its testId', async () => {
   const s2 = student('s2');
   await assertFails(setDoc(doc(s2, resultPath('s2', 'mismatch')), unscored('s2', 'mismatch', 'multi', { assessmentId: 'other' })));
@@ -119,7 +147,17 @@ test('a marker cannot be forged without a result for that assessment', async () 
 
 test('practice results cannot create completion markers or unlock assessment keys', async () => {
   const s2 = student('s2');
-  await assertSucceeds(setDoc(doc(s2, resultPath('s2', 'practice1')), unscored('s2', 'practice1', 'multi', { isPractice: true })));
+  const practiceResult = unscored('s2', 'practice1', 'multi', {
+    isPractice: true,
+    practiceMetadata: { kind: 'reading', mode: 'passage' },
+  });
+  await assertSucceeds(setDoc(doc(s2, resultPath('s2', 'practice1')), practiceResult));
+  await assertFails(setDoc(doc(s2, submissionPath('s2_practice1')), {
+    ...central('s2', 'practice1', 'multi', 'g2'),
+    ...practiceResult,
+    id: 's2_practice1',
+    studentUid: 's2',
+  }));
   await assertFails(setDoc(doc(s2, markerPath('s2', 'multi')), { assessmentId: 'multi', attemptId: 'practice1', completedAt: 'now' }));
   await assertFails(getDoc(doc(s2, keyPath('multi'))));
 

@@ -77,7 +77,10 @@ test('exam completion requires an in-app confirmation before submission', () => 
   assert.match(appSource, /title="Finish and submit exam\?"/);
   assert.match(appSource, /Are you sure you want to finish/);
   assert.match(appSource, /label: 'Keep working'/);
-  assert.match(appSource, /label: isSubmitting \? 'Submitting…' : 'Submit answers'/);
+  assert.match(appSource, /label: isSubmitting \? 'Submitting…' : submissionError \? 'Retry submission' : 'Submit answers'/);
+  assert.match(appSource, /savePendingExamSubmission\(localStorage, userId/);
+  assert.match(appSource, /retryWithBackoff\(async \(\) =>/);
+  assert.match(appSource, /getSubmissionErrorMessage\(err\)/);
   assert.match(appSource, /onClick=\{\(\) => setFinishConfirmationOpen\(true\)\}/);
 });
 
@@ -91,7 +94,7 @@ test('timed exams show a countdown and submit automatically when time expires', 
 test('active exam refreshes restore answers and the original deadline, with a five-minute return limit', () => {
   assert.match(appSource, /examAttempt:\$\{userId\}:\$\{test\?\.id\}/);
   assert.match(appSource, /attemptId,\s*answers,[\s\S]*?startedAtMs,/);
-  assert.match(appSource, /answers, currentIndex, startedAtMs/);
+  assert.match(appSource, /answers, currentIndex, questionStartedAtMs, startedAtMs/);
   assert.match(appSource, /window\.addEventListener\('pagehide', markAttemptExit\)/);
   assert.match(appSource, /EXAM_RETURN_GRACE_MS/);
   assert.match(appSource, /Exam attempt closed/);

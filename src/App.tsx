@@ -60,6 +60,26 @@ import { buildReadingSessionViewModel } from './readingSession';
 import { ReadingAnnotations } from './ReadingAnnotations';
 import { createExamAttemptSnapshot, EXAM_RETURN_GRACE_MS, restoreExamAttempt, type ExamAttemptSnapshot } from './examAttempt';
 import {
+  getDefaultQuestionSeconds,
+  isPerQuestionTimerEnabled,
+  locateQuestionPosition,
+  MAX_QUESTION_SECONDS,
+  normalizeQuestionSeconds,
+  NUET_DEFAULT_QUESTION_SECONDS,
+  NUET_TRAINING_TYPE,
+  resolveQuestionTimeLimit,
+  totalQuestionSeconds,
+} from './questionTimer';
+import {
+  clearPendingExamSubmission,
+  getSubmissionErrorCode,
+  getSubmissionErrorMessage,
+  isRetryableSubmissionError,
+  loadPendingExamSubmission,
+  retryWithBackoff,
+  savePendingExamSubmission,
+} from './examSubmission';
+import {
   fetchFigureForAI,
   getFigureSource,
   normalizeFigureUrl,
@@ -339,6 +359,8 @@ const createEmptyTest = () => ({
   type: 'IELTS',
   category: 'Exam',
   durationMinutes: 30,
+  perQuestionTimer: false,
+  defaultQuestionSeconds: NUET_DEFAULT_QUESTION_SECONDS,
   description: '',
   questions: [],
   pin: '',
@@ -1560,7 +1582,8 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
         ...toGroupFields(assignedGroups),
         status: assignedGroups.length ? 'published' : 'draft',
         published: assignedGroups.length > 0,
-        durationSeconds: newTest.durationMinutes * 60,
+        // With a per-question timer the overall limit is simply the sum of the question limits.
+        durationSeconds: isPerQuestionTimerEnabled(newTest) ? totalQuestionSeconds(newTest, newTest.questions) : newTest.durationMinutes * 60,
         authorId: user.uid,
         authorName: user.name
       };
@@ -1837,7 +1860,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
               <input aria-label="Search submissions" value={resultSearch} onChange={e => setResultSearch(e.target.value)} placeholder="Search student / test" className="lg:col-span-2 p-2 rounded border dark:bg-slate-700 dark:border-slate-600" />
               <select aria-label="Filter group" value={resultGroup} onChange={e => setResultGroup(e.target.value)} className="p-2 rounded border dark:bg-slate-700 dark:border-slate-600"><option value="">All groups</option>{[...new Set<string>(submissions.map((item: any) => String(item.groupCode || '')).filter(Boolean))].map(group => <option key={group} value={group}>{group}</option>)}</select>
               <select aria-label="Filter assessment" value={resultAssessment} onChange={e => setResultAssessment(e.target.value)} className="p-2 rounded border dark:bg-slate-700 dark:border-slate-600"><option value="">All assessments</option>{[...new Map<string, string>(submissions.map((item: any) => [String(item.assessmentId || ''), formatAssessmentTitle(item.assessmentTitle || item.assessmentId || '')] as [string, string])).entries()].filter(([id]) => id).map(([id, title]) => <option key={id} value={id}>{title}</option>)}</select>
-              <select aria-label="Filter exam type" value={resultType} onChange={e => setResultType(e.target.value)} className="p-2 rounded border dark:bg-slate-700 dark:border-slate-600"><option value="">All types</option>{['IELTS','SAT','NUET','General'].map(type => <option key={type}>{type}</option>)}</select>
+              <select aria-label="Filter exam type" value={resultType} onChange={e => setResultType(e.target.value)} className="p-2 rounded border dark:bg-slate-700 dark:border-slate-600"><option value="">All types</option>{['IELTS','SAT','NUET','NUET Training','General'].map(type => <option key={type}>{type}</option>)}</select>
               <select aria-label="Filter review status" value={resultStatus} onChange={e => setResultStatus(e.target.value)} className="p-2 rounded border dark:bg-slate-700 dark:border-slate-600"><option value="">All statuses</option>{['pending-review','reviewed','auto-submitted','submitted'].map(status => <option key={status}>{status}</option>)}</select>
               <div className="flex gap-1"><input aria-label="Submitted from" type="date" value={resultFrom} onChange={e => setResultFrom(e.target.value)} className="min-w-0 w-1/2 p-2 rounded border dark:bg-slate-700 dark:border-slate-600"/><input aria-label="Submitted to" type="date" value={resultTo} onChange={e => setResultTo(e.target.value)} className="min-w-0 w-1/2 p-2 rounded border dark:bg-slate-700 dark:border-slate-600"/></div>
             </div>
@@ -2005,17 +2028,28 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Type</label>
-                    <select value={newTest.type} onChange={e => { const type = e.target.value; setNewTest({...newTest, type}); setActiveQuestionSection(type === 'IELTS' ? 'listening' : 'general'); }} className="w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:ring-2 focus:ring-purple-500 outline-none">
+                    <select value={newTest.type} onChange={e => { const type = e.target.value; setNewTest({...newTest, type, perQuestionTimer: false}); setActiveQuestionSection(type === 'IELTS' ? 'listening' : 'general'); }} className="w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:ring-2 focus:ring-purple-500 outline-none">
                       <option value="IELTS">IELTS</option>
                       <option value="SAT">SAT</option>
-                      <option value="NUET">NUET</option>
+                      <option value="NUET">NUET Exam</option>
+                      <option value="NUET Training">NUET Training (timed questions)</option>
                       <option value="General">General / Custom</option>
                     </select>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Time Limit (Minutes)</label>
-                    <input type="number" min="1" value={newTest.durationMinutes} onChange={e => setNewTest({...newTest, durationMinutes: parseInt(e.target.value)})} className="w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:ring-2 focus:ring-purple-500 outline-none" />
+                    <input type="number" min="1" value={isPerQuestionTimerEnabled(newTest) ? Math.ceil(totalQuestionSeconds(newTest, newTest.questions) / 60) : newTest.durationMinutes} disabled={isPerQuestionTimerEnabled(newTest)} onChange={e => setNewTest({...newTest, durationMinutes: parseInt(e.target.value)})} className="w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:ring-2 focus:ring-purple-500 outline-none disabled:opacity-60" />
+                    {isPerQuestionTimerEnabled(newTest) && <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Calculated from the question timers below.</p>}
                   </div>
+                  {newTest.type === NUET_TRAINING_TYPE && (
+                    <div className="col-span-2 rounded-lg border border-purple-200 bg-purple-50/60 p-3 dark:border-purple-900 dark:bg-purple-950/20">
+                      <p className="text-sm font-semibold text-slate-800 dark:text-slate-100"><Clock className="mr-1 inline h-4 w-4" />NUET Training: every question has its own countdown</p>
+                      <div className="mt-3">
+                        <MinuteSecondInput label="Default time per question" value={getDefaultQuestionSeconds(newTest)} onChange={seconds => setNewTest({ ...newTest, defaultQuestionSeconds: seconds ?? NUET_DEFAULT_QUESTION_SECONDS })} />
+                      </div>
+                      <p className="mt-2 text-xs text-slate-600 dark:text-slate-300">Used for every question unless you set its own minutes and seconds inside that question. When a question's time ends, the next one opens automatically and students cannot go back.</p>
+                    </div>
+                  )}
                   <div>
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
                       <Lock className="w-3 h-3 text-slate-500 dark:text-slate-400"/> Secret PIN (Optional)
@@ -2168,6 +2202,11 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Points
                            <input type="number" min="0" value={q.points ?? 1} onChange={event => handleUpdateQuestion(qIndex, 'points', Number(event.target.value))} className="mt-1 w-full p-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white" />
                          </label>
+                         {isPerQuestionTimerEnabled(newTest) && (
+                           <div className="rounded-lg border border-purple-300 bg-purple-50 p-2 dark:border-purple-800 dark:bg-purple-950/30">
+                             <MinuteSecondInput label="Countdown for this question" value={q.timeLimitSeconds} defaultSeconds={getDefaultQuestionSeconds(newTest)} onChange={seconds => handleUpdateQuestion(qIndex, 'timeLimitSeconds', seconds)} />
+                           </div>
+                         )}
                        </div>
                        <div className="mb-4 grid gap-3 rounded-lg border border-indigo-200 bg-indigo-50/60 p-3 dark:border-indigo-900 dark:bg-indigo-950/20 md:grid-cols-2">
                          <label className="text-sm font-medium text-slate-700 dark:text-slate-200">Candidate instructions (optional)
@@ -2981,6 +3020,31 @@ const ReadingPracticeWorkspace = ({ test, userId, questions, answers, setCurrent
   );
 };
 
+// Minutes + seconds entry for a countdown. Stores whole seconds; undefined means "use the default".
+const MinuteSecondInput = ({ label, value, defaultSeconds, onChange }: { label: string; value: unknown; defaultSeconds?: number; onChange: (seconds: number | undefined) => void }) => {
+  const own = normalizeQuestionSeconds(value);
+  const shown = own ?? defaultSeconds;
+  const set = (minutes: number, seconds: number) => {
+    const total = Math.max(0, minutes) * 60 + Math.max(0, seconds);
+    onChange(total === 0 && defaultSeconds != null ? undefined : total);
+  };
+  const minutes = shown == null ? 0 : Math.floor(shown / 60);
+  const seconds = shown == null ? 0 : shown % 60;
+  const inputClass = 'w-20 rounded-lg border border-slate-300 bg-white p-2 text-center dark:border-slate-600 dark:bg-slate-700 dark:text-white';
+  return (
+    <fieldset>
+      <legend className="mb-1 text-sm font-medium text-slate-700 dark:text-slate-200"><Clock className="mr-1 inline h-4 w-4" />{label}</legend>
+      <div className="flex items-center gap-2">
+        <input type="number" min={0} max={Math.floor(MAX_QUESTION_SECONDS / 60)} aria-label={`${label}: minutes`} value={minutes} onChange={event => set(Number(event.target.value) || 0, seconds)} className={inputClass} />
+        <span className="text-sm text-slate-600 dark:text-slate-300">min</span>
+        <input type="number" min={0} max={59} aria-label={`${label}: seconds`} value={seconds} onChange={event => set(minutes, Number(event.target.value) || 0)} className={inputClass} />
+        <span className="text-sm text-slate-600 dark:text-slate-300">sec</span>
+      </div>
+      {defaultSeconds != null && <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{own == null ? 'Using the default time.' : 'Custom time for this question.'} Allowed: 0:10 to 10:00.</p>}
+    </fieldset>
+  );
+};
+
 const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, writingResourcesError, isDark, onToggleTheme }) => {
   const questions = Array.isArray(test?.questions) ? test.questions : [];
   const attemptStorageKey = `examAttempt:${userId}:${test?.id}`;
@@ -2993,7 +3057,24 @@ const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, wr
       return createExamAttemptSnapshot(String(test?.id || ''));
     }
   });
-  const [currentIndex, setCurrentIndex] = useState(initialAttempt.currentIndex);
+  const perQuestionTimer = isPerQuestionTimerEnabled(test) && questions.length > 0;
+  // A refresh (or a short absence) may have used up some questions' time; skip past those.
+  const [initialPosition] = useState(() => locateQuestionPosition(test, questions, initialAttempt.currentIndex, initialAttempt.questionStartedAtMs, Date.now()));
+  const [currentIndex, setCurrentIndexState] = useState(perQuestionTimer ? initialPosition.index : initialAttempt.currentIndex);
+  const [questionStartedAtMs, setQuestionStartedAtMs] = useState(perQuestionTimer ? initialPosition.questionStartedAtMs : initialAttempt.questionStartedAtMs);
+  const [questionSecondsLeft, setQuestionSecondsLeft] = useState<number | null>(null);
+  const currentIndexRef = useRef(currentIndex);
+  currentIndexRef.current = currentIndex;
+  const moveToQuestion = (index: number, startedAtMs: number) => {
+    currentIndexRef.current = index;
+    setCurrentIndexState(index);
+    setQuestionStartedAtMs(startedAtMs);
+  };
+  // Every move to another question restarts that question's own countdown.
+  const setCurrentIndex = (next: number | ((previous: number) => number)) => {
+    const target = typeof next === 'function' ? next(currentIndexRef.current) : next;
+    if (target !== currentIndexRef.current) moveToQuestion(target, Date.now());
+  };
   const [answers, setAnswers] = useState<Record<string, unknown>>(initialAttempt.answers);
   const [finishConfirmationOpen, setFinishConfirmationOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -3001,13 +3082,13 @@ const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, wr
   const [attemptId] = useState(initialAttempt.attemptId);
   const [startedAtMs] = useState(initialAttempt.startedAtMs);
   const attemptSnapshotRef = useRef<ExamAttemptSnapshot>(initialAttempt);
-  const durationSeconds = Number(test?.durationSeconds);
+  const durationSeconds = perQuestionTimer ? totalQuestionSeconds(test, questions) : Number(test?.durationSeconds);
   const hasTimeLimit = Number.isFinite(durationSeconds) && durationSeconds > 0;
   const [secondsRemaining, setSecondsRemaining] = useState(() => hasTimeLimit ? Math.max(0, Math.ceil((startedAtMs + durationSeconds * 1000 - Date.now()) / 1000)) : null);
   const [timeExpired, setTimeExpired] = useState(false);
   const submissionStarted = React.useRef(false);
   const deadlineMs = React.useRef(startedAtMs + (hasTimeLimit ? durationSeconds * 1000 : 0));
-  const submitAttemptRef = React.useRef<(autoSubmitted?: boolean) => Promise<void>>(async () => {});
+  const submitAttemptRef = React.useRef<(autoSubmitted?: boolean, queuedSubmission?: any) => Promise<void>>(async () => {});
   const onAbortRef = useRef(onAbort);
   onAbortRef.current = onAbort;
   const currentQuestion = questions[currentIndex] || null;
@@ -3030,7 +3111,7 @@ const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, wr
     setAnswers(previous => ({ ...previous, [currentQuestion.id]: value }));
   };
 
-  attemptSnapshotRef.current = { ...attemptSnapshotRef.current, answers, currentIndex, startedAtMs };
+  attemptSnapshotRef.current = { ...attemptSnapshotRef.current, answers, currentIndex, questionStartedAtMs, startedAtMs };
 
   const online = useOnlineStatus();
   const { flagged, toggle: toggleFlag } = useFlaggedQuestions(`examFlags:${userId}:${test?.id}`);
@@ -3043,7 +3124,7 @@ const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, wr
     } catch (error) {
       console.warn('Could not save the exam attempt:', error);
     }
-  }, [attemptStorageKey, answers, currentIndex]);
+  }, [attemptStorageKey, answers, currentIndex, questionStartedAtMs]);
 
   useEffect(() => {
     const saveHeartbeat = () => {
@@ -3105,27 +3186,90 @@ const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, wr
     />;
   };
 
-  const handleSubmit = async (autoSubmitted = false) => {
+  const resumeExam = () => {
+    if (timeExpired || isSubmitting) return;
+    try {
+      clearPendingExamSubmission(localStorage, userId, String(test?.id || ''));
+    } catch (error) {
+      console.error('Could not cancel the pending exam submission:', error);
+    }
+    setSubmissionError('');
+    setFinishConfirmationOpen(false);
+  };
+
+  const handleSubmit = async (autoSubmitted = false, queuedSubmission?: any) => {
     if (submissionStarted.current) return;
     submissionStarted.current = true;
     setIsSubmitting(true);
     setSubmissionError('');
+    const submission = queuedSubmission || {
+      attemptId,
+      answers,
+      startedAtMs,
+      isAutoSubmitted: autoSubmitted,
+    };
+    submission.isAutoSubmitted = Boolean(autoSubmitted || submission.isAutoSubmitted);
     try {
+      try {
+        localStorage.setItem(attemptStorageKey, JSON.stringify({
+          ...attemptSnapshotRef.current,
+          attemptId,
+          answers: submission.answers,
+          startedAtMs,
+          lastExitAtMs: null,
+          lastSeenAtMs: Date.now(),
+        }));
+      } catch (error) {
+        console.error('Could not synchronously save the exam answers before submission:', error);
+      }
       await onComplete?.({
-        attemptId,
-        answers,
-        startedAtMs,
+        ...submission,
         submittedAt: new Date().toISOString(),
-        isAutoSubmitted: autoSubmitted,
       });
+      try {
+        clearPendingExamSubmission(localStorage, userId, String(test?.id || ''));
+      } catch (error) {
+        console.error('Could not clear the completed exam submission queue:', error);
+      }
     } catch (error) {
-      console.error('Failed to submit assessment:', error);
-      setSubmissionError(error instanceof Error ? error.message : 'Could not submit your answers. Please try again.');
+      console.error('Failed to submit assessment:', {
+        code: getSubmissionErrorCode(error),
+        testId: test?.id,
+        attemptId,
+        error,
+      });
+      try {
+        savePendingExamSubmission(localStorage, userId, String(test?.id || ''), submission, error);
+      } catch (queueError) {
+        console.error('Could not persist the pending exam submission queue:', queueError);
+      }
+      setSubmissionError(getSubmissionErrorMessage(error));
       submissionStarted.current = false;
       setIsSubmitting(false);
     }
   };
   submitAttemptRef.current = handleSubmit;
+
+  useEffect(() => {
+    const testId = String(test?.id || '');
+    if (!testId) return undefined;
+    const inspectPendingSubmission = (trySubmit: boolean) => {
+      try {
+        const pending = loadPendingExamSubmission<any>(localStorage, userId, testId);
+        if (!pending || pending.payload?.attemptId !== attemptId) return;
+        setSubmissionError(getSubmissionErrorMessage({ code: pending.errorCode }));
+        if (trySubmit && isRetryableSubmissionError({ code: pending.errorCode })) {
+          void submitAttemptRef.current(Boolean(pending.payload.isAutoSubmitted), pending.payload);
+        }
+      } catch (error) {
+        console.error('Could not load a pending exam submission:', error);
+      }
+    };
+    inspectPendingSubmission(navigator.onLine);
+    const retryPending = () => inspectPendingSubmission(true);
+    window.addEventListener('online', retryPending);
+    return () => window.removeEventListener('online', retryPending);
+  }, [attemptId, test?.id, userId]);
 
   useEffect(() => {
     if (!hasTimeLimit) return undefined;
@@ -3147,6 +3291,33 @@ const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, wr
     return () => window.clearInterval(timer);
   }, [hasTimeLimit]);
 
+  // Per-question countdown: move on when a question's time is up, submit after the last one.
+  useEffect(() => {
+    if (!perQuestionTimer) return undefined;
+    const tick = () => {
+      const now = Date.now();
+      const position = locateQuestionPosition(test, questions, currentIndexRef.current, questionStartedAtMs, now);
+      if (position.finished) {
+        setQuestionSecondsLeft(0);
+        setTimeExpired(true);
+        setFinishConfirmationOpen(false);
+        void submitAttemptRef.current(true);
+        return true;
+      }
+      if (position.index !== currentIndexRef.current) {
+        moveToQuestion(position.index, position.questionStartedAtMs);
+        return false;
+      }
+      const limit = resolveQuestionTimeLimit(test, questions[position.index]) ?? 0;
+      setQuestionSecondsLeft(Math.max(0, Math.ceil((position.questionStartedAtMs + limit * 1000 - now) / 1000)));
+      return false;
+    };
+    if (tick()) return undefined;
+    const timer = window.setInterval(() => { if (tick()) window.clearInterval(timer); }, 500);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [perQuestionTimer, currentIndex, questionStartedAtMs]);
+
   if (!questions.length) {
     return (
       <section className="mx-auto max-w-3xl rounded-xl border border-slate-200 bg-white p-8 text-left shadow-sm dark:border-slate-700 dark:bg-slate-800">
@@ -3161,10 +3332,10 @@ const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, wr
     <Modal
       isOpen={finishConfirmationOpen}
       title="Finish and submit exam?"
-      onClose={() => { if (!isSubmitting) setFinishConfirmationOpen(false); }}
+      onClose={() => { if (submissionError) resumeExam(); else if (!isSubmitting) setFinishConfirmationOpen(false); }}
       actions={[
-        { label: 'Keep working', onClick: () => setFinishConfirmationOpen(false), disabled: isSubmitting },
-        { label: isSubmitting ? 'Submitting…' : 'Submit answers', onClick: handleSubmit, disabled: isSubmitting },
+        { label: 'Keep working', onClick: resumeExam, disabled: isSubmitting || timeExpired },
+        { label: isSubmitting ? 'Submitting…' : submissionError ? 'Retry submission' : 'Submit answers', onClick: handleSubmit, disabled: isSubmitting },
       ]}
     >
       <p>
@@ -3194,7 +3365,15 @@ const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, wr
           >
             {isDark ? <Sun className="h-5 w-5" aria-hidden="true" /> : <Moon className="h-5 w-5" aria-hidden="true" />}
           </button>
-          {hasTimeLimit ? (
+          {perQuestionTimer ? (
+            <span
+              role="timer"
+              aria-label={`Time left for this question ${formatTime(questionSecondsLeft ?? 0)}`}
+              className={`rounded-full px-3 py-1 text-sm font-semibold tabular-nums ${(questionSecondsLeft ?? 0) <= 10 ? 'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300' : 'bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200'}`}
+            >
+              <Clock className="mr-1 inline h-4 w-4" />{questionSecondsLeft == null ? '--:--' : formatTime(questionSecondsLeft)}
+            </span>
+          ) : hasTimeLimit ? (
             <span
               role="timer"
               aria-label={`Time remaining ${formatTime(secondsRemaining)}`}
@@ -3212,7 +3391,28 @@ const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, wr
           {submissionError ? `Time expired, but submission could not be completed: ${submissionError}` : 'Time is up. Your answers are being submitted.'}
         </p>
       )}
-      <ExamNotices online={online} secondsRemaining={timeExpired ? 0 : secondsRemaining} />
+      {submissionError && !finishConfirmationOpen && !timeExpired && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950/30 dark:text-red-200" role="alert">
+          <p>{submissionError}</p>
+          <button type="button" onClick={() => void handleSubmit()} disabled={isSubmitting} className="rounded-lg bg-red-700 px-3 py-2 font-semibold text-white disabled:opacity-50">
+            {isSubmitting ? 'Submitting…' : 'Retry submission'}
+          </button>
+        </div>
+      )}
+      {perQuestionTimer && !timeExpired && (
+        <div className="mb-4" aria-hidden="true">
+          <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+            <div
+              className={`h-full transition-[width] duration-500 ease-linear ${(questionSecondsLeft ?? 0) <= 10 ? 'bg-red-500' : 'bg-blue-500'}`}
+              style={{ width: `${Math.min(100, ((questionSecondsLeft ?? 0) / (resolveQuestionTimeLimit(test, currentQuestion) || 1)) * 100)}%` }}
+            />
+          </div>
+        </div>
+      )}
+      {perQuestionTimer && !timeExpired && (
+        <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">Timed training: each question has its own countdown. When it ends, the next question appears automatically and you cannot return to earlier questions.</p>
+      )}
+      <ExamNotices online={online} secondsRemaining={perQuestionTimer ? null : timeExpired ? 0 : secondsRemaining} />
 
       {isReadingWorkspace ? (
         <ReadingPracticeWorkspace
@@ -3260,7 +3460,7 @@ const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, wr
         {renderAnswerInput()}
       </div>}
 
-      {!isReadingWorkspace && <QuestionNavigator questions={questions} answers={answers} currentIndex={currentIndex} flagged={flagged} disabled={timeExpired || isSubmitting} onGo={setCurrentIndex} onToggleFlag={toggleFlag} />}
+      {!isReadingWorkspace && !perQuestionTimer && <QuestionNavigator questions={questions} answers={answers} currentIndex={currentIndex} flagged={flagged} disabled={timeExpired || isSubmitting} onGo={setCurrentIndex} onToggleFlag={toggleFlag} />}
 
       <div className="exam-interface__footer mt-6 flex items-center justify-between gap-3 border-t border-slate-200 pt-4 dark:border-slate-700">
         {isReadingWorkspace ? timeExpired ? (
@@ -3284,7 +3484,7 @@ const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, wr
           <button
             type="button"
             onClick={() => setCurrentIndex(previous => Math.max(0, previous - 1))}
-            disabled={currentIndex === 0 || timeExpired || isSubmitting}
+            disabled={currentIndex === 0 || perQuestionTimer || timeExpired || isSubmitting}
             className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:text-slate-200"
           >
             Previous
@@ -4088,7 +4288,34 @@ export default function App() {
                 console.error('Could not restore the saved exam attempt:', error);
                 restored = { status: 'invalid' as const };
               }
-              if (restored.status === 'expired' || restored.status === 'invalid') {
+              let pendingSubmission: { payload: any } | null = null;
+              try {
+                pendingSubmission = loadPendingExamSubmission<any>(localStorage, firebaseUser.uid, String(savedExam.id));
+              } catch (error) {
+                console.error('Could not restore the pending exam submission:', error);
+              }
+              const queuedAttempt = pendingSubmission?.payload;
+              const canRestorePending = Boolean(
+                queuedAttempt
+                && typeof queuedAttempt.attemptId === 'string'
+                && Number.isFinite(queuedAttempt.startedAtMs)
+                && queuedAttempt.answers
+                && typeof queuedAttempt.answers === 'object'
+                && !Array.isArray(queuedAttempt.answers),
+              );
+              if ((restored.status === 'expired' || restored.status === 'invalid') && canRestorePending) {
+                localStorage.setItem(attemptStorageKey, JSON.stringify({
+                  testId: String(savedExam.id),
+                  attemptId: queuedAttempt.attemptId,
+                  startedAtMs: queuedAttempt.startedAtMs,
+                  answers: queuedAttempt.answers,
+                  currentIndex: 0,
+                  lastExitAtMs: null,
+                  lastSeenAtMs: Date.now(),
+                }));
+                setActiveTest(savedExam);
+                setCurrentView('exam');
+              } else if (restored.status === 'expired' || restored.status === 'invalid') {
                 localStorage.removeItem(attemptStorageKey);
                 localStorage.removeItem(`activeExam:${firebaseUser.uid}`);
                 setActiveTest(null);
@@ -4372,10 +4599,18 @@ export default function App() {
       const resultRef = doc(db, 'artifacts', appId, 'users', user.uid, 'results', attemptId);
       const centralId = `${user.uid}_${attemptId}`;
       const submissionRef = doc(db, 'artifacts', appId, 'public', 'data', 'submissions', centralId);
-      const existingSubmission = assessment.isPractice ? null : await getDoc(submissionRef);
-      const batch = writeBatch(db);
-      if (!existingSubmission?.exists()) {
-        if (!assessment.isPractice) {
+      await retryWithBackoff(async () => {
+        const [existingResult, existingSubmission] = await Promise.all([
+          getDoc(resultRef),
+          assessment.isPractice ? Promise.resolve(null) : getDoc(submissionRef),
+        ]);
+        const batch = writeBatch(db);
+        let hasWrites = false;
+        if (!existingResult.exists()) {
+          batch.set(resultRef, result);
+          hasWrites = true;
+        }
+        if (!assessment.isPractice && !existingSubmission?.exists()) {
           batch.set(submissionRef, {
             ...result,
             id: centralId,
@@ -4389,15 +4624,16 @@ export default function App() {
             assessmentTitle: formatAssessmentTitle(assessment.title, 'Assessment'),
             examType: assessment.type || 'General',
           });
+          hasWrites = true;
         }
-        batch.set(resultRef, result);
-      }
-      if (!assessment.isPractice) {
-        result.assessmentIds.forEach((assessmentId: string) => {
-          batch.set(doc(db, 'artifacts', appId, 'users', user.uid, 'completedAssessments', assessmentId), { assessmentId, attemptId, completedAt: submittedAt });
-        });
-      }
-      await batch.commit();
+        if (!assessment.isPractice) {
+          result.assessmentIds.forEach((assessmentId: string) => {
+            batch.set(doc(db, 'artifacts', appId, 'users', user.uid, 'completedAssessments', assessmentId), { assessmentId, attemptId, completedAt: submittedAt });
+          });
+          hasWrites = true;
+        }
+        if (hasWrites) await batch.commit();
+      });
 
       let selfGrade: any = null;
       if (!assessment.isPractice) {
@@ -4424,8 +4660,14 @@ export default function App() {
       setReviewTarget({ record: { ...result, id: attemptId, selfGrade }, test: assessment, returnTo: 'student_dashboard' });
       setCurrentView('result_review');
     } catch (err) {
-      console.error(err);
-      throw new Error('Failed to save results. Your saved answers are still available to retry.', { cause: err });
+      console.error('Exam submission failed:', {
+        code: getSubmissionErrorCode(err),
+        userId: user.uid,
+        assessmentId: activeTest?.id,
+        groupCode: user.groupCode || '',
+        error: err,
+      });
+      throw new Error(getSubmissionErrorMessage(err), { cause: err });
     }
   };
 
