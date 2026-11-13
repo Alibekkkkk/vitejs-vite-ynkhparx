@@ -44,6 +44,7 @@ import { GroupCodeInput } from './GroupCodeInput';
 import { StudentAssessmentCard, TeacherAssessmentCard } from './AssessmentCards';
 import { createReviewRows, gradeAttempt, needsAutoGrading, resolveReviewData, summarizeReviews } from './grading';
 import { ResultReview } from './ResultReview';
+import { TrainingFeedback } from './TrainingFeedback';
 import { bucketProblemMessage, createStallWatchdog, describeUploadFailure, probeStorageBucket } from './figureUpload';
 import { ExamNotices, QuestionNavigator, useFlaggedQuestions, useLeaveWarning, useOnlineStatus } from './ExamSafetyNets';
 import { useFocusTrap } from './useFocusTrap';
@@ -62,7 +63,7 @@ import { createExamAttemptSnapshot, EXAM_RETURN_GRACE_MS, restoreExamAttempt, ty
 import {
   getDefaultQuestionSeconds,
   isPerQuestionTimerEnabled,
-  locateQuestionPosition,
+  secondsRemaining as questionSecondsRemaining,
   MAX_QUESTION_SECONDS,
   normalizeQuestionSeconds,
   NUET_DEFAULT_QUESTION_SECONDS,
@@ -3058,11 +3059,21 @@ const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, wr
     }
   });
   const perQuestionTimer = isPerQuestionTimerEnabled(test) && questions.length > 0;
-  // A refresh (or a short absence) may have used up some questions' time; skip past those.
-  const [initialPosition] = useState(() => locateQuestionPosition(test, questions, initialAttempt.currentIndex, initialAttempt.questionStartedAtMs, Date.now()));
-  const [currentIndex, setCurrentIndexState] = useState(perQuestionTimer ? initialPosition.index : initialAttempt.currentIndex);
-  const [questionStartedAtMs, setQuestionStartedAtMs] = useState(perQuestionTimer ? initialPosition.questionStartedAtMs : initialAttempt.questionStartedAtMs);
+  const [currentIndex, setCurrentIndexState] = useState(initialAttempt.currentIndex);
+  const [questionStartedAtMs, setQuestionStartedAtMs] = useState(initialAttempt.questionStartedAtMs);
   const [questionSecondsLeft, setQuestionSecondsLeft] = useState<number | null>(null);
+  // NUET Training: questions whose answer was checked (or whose time ran out) in this attempt.
+  const revealedStorageKey = `examRevealed:${userId}:${test?.id}`;
+  const [revealedIds, setRevealedIds] = useState<string[]>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(revealedStorageKey) || 'null');
+      return saved?.attemptId === initialAttempt.attemptId && Array.isArray(saved.ids) ? saved.ids.filter((id: unknown) => typeof id === 'string') : [];
+    } catch {
+      return [];
+    }
+  });
+  const [trainingKeys, setTrainingKeys] = useState<any[] | null>(null);
+  const [trainingKeyError, setTrainingKeyError] = useState('');
   const currentIndexRef = useRef(currentIndex);
   currentIndexRef.current = currentIndex;
   const moveToQuestion = (index: number, startedAtMs: number) => {
@@ -3082,7 +3093,8 @@ const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, wr
   const [attemptId] = useState(initialAttempt.attemptId);
   const [startedAtMs] = useState(initialAttempt.startedAtMs);
   const attemptSnapshotRef = useRef<ExamAttemptSnapshot>(initialAttempt);
-  const durationSeconds = perQuestionTimer ? totalQuestionSeconds(test, questions) : Number(test?.durationSeconds);
+  // NUET Training has no overall limit: each question has its own countdown and the student moves on.
+  const durationSeconds = perQuestionTimer ? 0 : Number(test?.durationSeconds);
   const hasTimeLimit = Number.isFinite(durationSeconds) && durationSeconds > 0;
   const [secondsRemaining, setSecondsRemaining] = useState(() => hasTimeLimit ? Math.max(0, Math.ceil((startedAtMs + durationSeconds * 1000 - Date.now()) / 1000)) : null);
   const [timeExpired, setTimeExpired] = useState(false);
@@ -3182,7 +3194,7 @@ const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, wr
       question={currentQuestion}
       value={currentValue}
       onChange={updateAnswer}
-      disabled={timeExpired || isSubmitting}
+      disabled={timeExpired || isSubmitting || isRevealed}
     />;
   };
 
@@ -3291,32 +3303,58 @@ const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, wr
     return () => window.clearInterval(timer);
   }, [hasTimeLimit]);
 
-  // Per-question countdown: move on when a question's time is up, submit after the last one.
+  const isRevealed = perQuestionTimer && Boolean(currentQuestion) && revealedIds.includes(currentQuestion.id);
+  const revealCurrentQuestion = () => {
+    const id = currentQuestion?.id;
+    if (!id) return;
+    setRevealedIds(previous => previous.includes(id) ? previous : [...previous, id]);
+  };
+
   useEffect(() => {
-    if (!perQuestionTimer) return undefined;
+    if (!perQuestionTimer) return;
+    try {
+      localStorage.setItem(revealedStorageKey, JSON.stringify({ attemptId, ids: revealedIds }));
+    } catch (error) {
+      console.warn('Could not save revealed questions:', error);
+    }
+  }, [perQuestionTimer, revealedStorageKey, attemptId, revealedIds]);
+
+  // NUET Training shows the correct answer after each question; the rules release the key for that type only.
+  useEffect(() => {
+    if (!perQuestionTimer || !test?.id) return undefined;
+    let cancelled = false;
+    getDoc(doc(db, 'artifacts', appId, 'teacher', 'data', 'answerKeys', String(test.id)))
+      .then(snapshot => {
+        if (cancelled) return;
+        if (snapshot.exists()) setTrainingKeys(snapshot.data().questions || []);
+        else setTrainingKeyError('The correct answers for this training test are not available yet. Ask your teacher.');
+      })
+      .catch(error => {
+        console.error('Could not load the training answer key:', error);
+        if (!cancelled) setTrainingKeyError('The correct answers could not be loaded. Check your connection or ask your teacher.');
+      });
+    return () => { cancelled = true; };
+  }, [perQuestionTimer, test?.id]);
+
+  // Countdown for the current NUET Training question. At zero the answer is revealed;
+  // the student, not the timer, decides when to go to the next question.
+  useEffect(() => {
+    if (!perQuestionTimer || isRevealed || !currentQuestion) return undefined;
+    const limit = resolveQuestionTimeLimit(test, currentQuestion) ?? 0;
     const tick = () => {
-      const now = Date.now();
-      const position = locateQuestionPosition(test, questions, currentIndexRef.current, questionStartedAtMs, now);
-      if (position.finished) {
-        setQuestionSecondsLeft(0);
-        setTimeExpired(true);
-        setFinishConfirmationOpen(false);
-        void submitAttemptRef.current(true);
+      const left = questionSecondsRemaining(limit, questionStartedAtMs, Date.now());
+      setQuestionSecondsLeft(left);
+      if (left <= 0) {
+        revealCurrentQuestion();
         return true;
       }
-      if (position.index !== currentIndexRef.current) {
-        moveToQuestion(position.index, position.questionStartedAtMs);
-        return false;
-      }
-      const limit = resolveQuestionTimeLimit(test, questions[position.index]) ?? 0;
-      setQuestionSecondsLeft(Math.max(0, Math.ceil((position.questionStartedAtMs + limit * 1000 - now) / 1000)));
       return false;
     };
     if (tick()) return undefined;
     const timer = window.setInterval(() => { if (tick()) window.clearInterval(timer); }, 500);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [perQuestionTimer, currentIndex, questionStartedAtMs]);
+  }, [perQuestionTimer, isRevealed, currentIndex, questionStartedAtMs]);
 
   if (!questions.length) {
     return (
@@ -3399,7 +3437,7 @@ const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, wr
           </button>
         </div>
       )}
-      {perQuestionTimer && !timeExpired && (
+      {perQuestionTimer && !timeExpired && !isRevealed && (
         <div className="mb-4" aria-hidden="true">
           <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
             <div
@@ -3410,7 +3448,7 @@ const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, wr
         </div>
       )}
       {perQuestionTimer && !timeExpired && (
-        <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">Timed training: each question has its own countdown. When it ends, the next question appears automatically and you cannot return to earlier questions.</p>
+        <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">Timed training: each question has its own countdown. After you check your answer or time runs out, the correct answer is shown and you choose when to go to the next question. You cannot return to earlier questions.</p>
       )}
       <ExamNotices online={online} secondsRemaining={perQuestionTimer ? null : timeExpired ? 0 : secondsRemaining} />
 
@@ -3436,7 +3474,7 @@ const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, wr
         maxLeftPercent={65}
         left={<div className="space-y-5">
           <div className="rounded-lg bg-slate-50 p-4 dark:bg-slate-700/50">
-            <p className="whitespace-pre-wrap text-base font-medium text-slate-800 dark:text-slate-100"><QuestionPrompt question={currentQuestion} value={currentValue} onChange={updateAnswer} disabled={timeExpired || isSubmitting} /></p>
+            <p className="whitespace-pre-wrap text-base font-medium text-slate-800 dark:text-slate-100"><QuestionPrompt question={currentQuestion} value={currentValue} onChange={updateAnswer} disabled={timeExpired || isSubmitting || isRevealed} /></p>
             <PromptFigure question={currentQuestion} assessmentId={test?.id || 'unknown'} />
           </div>
           {renderAnswerInput()}
@@ -3460,10 +3498,52 @@ const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, wr
         {renderAnswerInput()}
       </div>}
 
+      {isRevealed && (
+        <TrainingFeedback
+          key={currentQuestion.id}
+          question={trainingKeys ? mergeQuestionKeys([currentQuestion], trainingKeys)[0] : currentQuestion.correctAnswer != null ? currentQuestion : null}
+          answer={answers[currentQuestion.id]}
+          timedOut={questionSecondsLeft === 0}
+          keyError={trainingKeyError}
+        />
+      )}
+
       {!isReadingWorkspace && !perQuestionTimer && <QuestionNavigator questions={questions} answers={answers} currentIndex={currentIndex} flagged={flagged} disabled={timeExpired || isSubmitting} onGo={setCurrentIndex} onToggleFlag={toggleFlag} />}
 
       <div className="exam-interface__footer mt-6 flex items-center justify-between gap-3 border-t border-slate-200 pt-4 dark:border-slate-700">
-        {isReadingWorkspace ? timeExpired ? (
+        {perQuestionTimer ? (
+          <>
+            <span className="text-sm text-slate-500 dark:text-slate-400">Question {currentIndex + 1} of {questions.length}</span>
+            {!isRevealed ? (
+              <button
+                type="button"
+                onClick={revealCurrentQuestion}
+                disabled={isSubmitting}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                Check answer
+              </button>
+            ) : currentIndex < questions.length - 1 ? (
+              <button
+                type="button"
+                onClick={() => setCurrentIndex(currentIndex + 1)}
+                disabled={isSubmitting}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                Next question
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setFinishConfirmationOpen(true)}
+                disabled={isSubmitting}
+                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                Finish exam
+              </button>
+            )}
+          </>
+        ) : isReadingWorkspace ? timeExpired ? (
           <button
             type="button"
             onClick={() => void handleSubmit(true)}

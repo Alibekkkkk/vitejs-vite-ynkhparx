@@ -48,35 +48,7 @@ export function validateQuestionTimeLimit(value: unknown): string[] {
     : [];
 }
 
-export type QuestionPosition = {
-  index: number;
-  /** When the (possibly new) current question started counting down. */
-  questionStartedAtMs: number;
-  /** True when the last question's time has also run out. */
-  finished: boolean;
-};
-
-/**
- * Moves forward through any questions whose time ran out between
- * `questionStartedAtMs` and `now` (for example while the page was closed or the
- * tab was throttled). Questions never move backwards.
- */
-export function locateQuestionPosition(
-  test: TimedTest,
-  questions: TimedQuestion[],
-  currentIndex: number,
-  questionStartedAtMs: number,
-  now: number,
-): QuestionPosition {
-  if (!isPerQuestionTimerEnabled(test) || !questions.length) return { index: currentIndex, questionStartedAtMs, finished: false };
-  const last = questions.length - 1;
-  let index = Math.min(Math.max(0, currentIndex), last);
-  let startedAt = Math.min(questionStartedAtMs, now);
-  for (;;) {
-    const limitMs = (resolveQuestionTimeLimit(test, questions[index]) ?? 0) * 1000;
-    if (now - startedAt < limitMs) return { index, questionStartedAtMs: startedAt, finished: false };
-    if (index === last) return { index, questionStartedAtMs: startedAt, finished: true };
-    startedAt += limitMs;
-    index += 1;
-  }
+/** Whole seconds left for a question that started at `startedAtMs` (never negative). */
+export function secondsRemaining(limitSeconds: number, startedAtMs: number, now: number): number {
+  return Math.max(0, Math.ceil((startedAtMs + limitSeconds * 1000 - now) / 1000));
 }

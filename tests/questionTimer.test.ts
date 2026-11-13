@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   isPerQuestionTimerEnabled,
-  locateQuestionPosition,
   normalizeQuestionSeconds,
+  secondsRemaining,
   resolveQuestionTimeLimit,
   totalQuestionSeconds,
   validateQuestionTimeLimit,
@@ -35,17 +35,13 @@ test('invalid overrides fall back to the default and are reported', () => {
   assert.equal(validateQuestionTimeLimit(2).length, 1);
 });
 
-test('position stays put while the current question still has time', () => {
-  assert.deepEqual(locateQuestionPosition(timedTest, questions, 0, 1_000, 60_000), { index: 0, questionStartedAtMs: 1_000, finished: false });
+test('seconds remaining counts down and never goes negative', () => {
+  assert.equal(secondsRemaining(120, 1_000, 1_000), 120);
+  assert.equal(secondsRemaining(120, 1_000, 60_500), 61);
+  assert.equal(secondsRemaining(30, 0, 45_000), 0);
 });
 
-test('position skips forward over questions whose time ran out while away', () => {
-  // q0 (120 s) ends at 121_000; q1 (30 s) ends at 151_000; now is 160_000 so q2 has run 9 s.
-  assert.deepEqual(locateQuestionPosition(timedTest, questions, 0, 1_000, 160_000), { index: 2, questionStartedAtMs: 151_000, finished: false });
-});
-
-test('position reports finished once the last question runs out', () => {
-  const result = locateQuestionPosition(timedTest, questions, 0, 0, 10 * 60_000);
-  assert.equal(result.index, 2);
-  assert.equal(result.finished, true);
+test('the NUET Training type turns the per-question timer on by itself', () => {
+  assert.equal(isPerQuestionTimerEnabled({ type: 'NUET Training' }), true);
+  assert.equal(isPerQuestionTimerEnabled({ type: 'NUET' }), false);
 });
