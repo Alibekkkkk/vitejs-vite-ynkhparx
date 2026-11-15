@@ -1532,7 +1532,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
       const idMap = new Map(bank.questions.map((question: any, index) => [question.id, `q_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 6)}`]));
       const questions = bank.questions.map((question: any) => ({ ...question, sourceId: question.id, id: idMap.get(question.id), answerSlots: question.answerSlots?.map((slot: any, index: number) => ({ ...slot, id: `${idMap.get(question.id)}_slot_${index + 1}` })) }));
       setEditingId(null);
-      setNewTest({ ...createEmptyTest(), ...bank, id: undefined, durationMinutes: Math.max(1, Math.round(Number(bank.durationSeconds || 1800) / 60)), groupCode: '', groupCodes: [], status: 'draft', published: false, questions });
+      setNewTest({ ...createEmptyTest(), ...bank, id: undefined, durationMinutes: Math.max(1, Math.round(Number(bank.durationSeconds || 1800) / 60)), ...toGroupFields(bank.groupCodes), status: 'draft', published: false, questions });
     } catch (error) {
       setQuestionBankError(error instanceof Error ? error.message : 'Could not import this question bank.');
     } finally {
@@ -2480,7 +2480,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                     <label className="px-4 py-2 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-sm font-medium cursor-pointer">Import question bank JSON<input type="file" accept="application/json,.json" onChange={importQuestionBank} className="sr-only" /></label>
                     <button type="button" onClick={exportQuestionBank} disabled={!newTest.questions.length} className="px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-sm font-medium disabled:opacity-50">Export questions JSON</button>
                   </div>
-                  <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Import appends validated questions. Exported files include answer keys; keep them private.</p>
+                  <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Import appends validated questions; a bank may pre-fill its group codes, but it always stays an unpublished draft. Exported files include answer keys; keep them private.</p>
                   {questionBankError && <p className="mt-2 text-sm text-red-600" role="alert">{questionBankError}</p>}
                 </div>
 

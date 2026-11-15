@@ -7,6 +7,8 @@ export type QuestionBank = {
   type: string;
   category?: string;
   durationSeconds?: number;
+  /** Optional group codes to pre-fill when the bank is imported as a draft (it is never published automatically). */
+  groupCodes?: string[];
   settings?: Record<string, unknown>;
   sections?: Record<string, unknown>;
   questions: EngineQuestion[];
