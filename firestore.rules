@@ -223,6 +223,27 @@ service cloud.firestore {
         && accountCanSubmit(appId, testId, request.auth.uid);
     }
 
+    // Saved NUET/SAT Training progress: only the student themselves can read or write it, so a test
+    // can be paused and continued later on any device. It holds answers only, never scores or keys.
+    match /artifacts/{appId}/users/{userId}/trainingProgress/{assessmentId} {
+      allow get, list, delete: if signedIn() && request.auth.uid == userId;
+      allow create, update: if signedIn()
+        && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly(['assessmentId', 'attemptId', 'answers', 'revealedIds', 'currentIndex', 'secondsLeft', 'activeMs', 'updatedAtMs', 'updatedAt'])
+        && request.resource.data.get('assessmentId', '') == assessmentId
+        && request.resource.data.get('attemptId', '') is string
+        && request.resource.data.get('attemptId', '').size() > 0
+        && request.resource.data.get('attemptId', '').size() <= 64
+        && request.resource.data.get('answers', null) is map
+        && request.resource.data.get('revealedIds', null) is list
+        && request.resource.data.get('revealedIds', []).size() <= 300
+        && request.resource.data.get('currentIndex', -1) is int
+        && request.resource.data.get('currentIndex', -1) >= 0
+        && request.resource.data.get('currentIndex', -1) <= 300
+        && (request.resource.data.get('secondsLeft', null) == null || request.resource.data.get('secondsLeft', null) is number)
+        && request.resource.data.get('activeMs', 0) is number;
+    }
+
     match /artifacts/{appId}/users/{userId}/completedAssessments/{assessmentId} {
       allow get, list: if signedIn() && request.auth.uid == userId;
       allow create, update: if signedIn()

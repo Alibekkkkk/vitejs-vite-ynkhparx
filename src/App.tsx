@@ -3204,12 +3204,50 @@ const MinuteSecondInput = ({ label, value, defaultSeconds, onChange }: { label: 
   );
 };
 
-const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, writingResourcesError, isDark, onToggleTheme }) => {
+// Loads a student's saved NUET/SAT Training progress (if any) before the exam screen opens.
+const TrainingProgressGate = ({ test, userId, children }: { test: any; userId: string; children: (resume: any) => React.ReactNode }) => {
+  const [state, setState] = useState<{ loading: boolean; resume: any; problem: string }>({ loading: true, resume: null, problem: '' });
+  useEffect(() => {
+    let cancelled = false;
+    getDoc(doc(db, 'artifacts', appId, 'users', userId, 'trainingProgress', String(test.id)))
+      .then(snapshot => { if (!cancelled) setState({ loading: false, resume: snapshot.exists() ? snapshot.data() : null, problem: '' }); })
+      .catch(error => {
+        console.error('Could not load saved training progress:', error);
+        if (!cancelled) setState({ loading: false, resume: null, problem: 'Your saved progress could not be loaded, so this session starts from the progress saved in this browser (if any).' });
+      });
+    return () => { cancelled = true; };
+  }, [test.id, userId]);
+  if (state.loading) {
+    return <p className="mx-auto max-w-xl rounded-xl border border-slate-200 bg-white p-8 text-center text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200" role="status">Loading your saved progress…</p>;
+  }
+  return <>{state.problem && <p className="mx-auto mb-3 max-w-4xl rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" role="alert">{state.problem}</p>}{children(state.resume)}</>;
+};
+
+const ExamInterface = ({ test, onComplete, onAbort, onPause, resume, userId, writingResources, writingResourcesError, isDark, onToggleTheme }: any) => {
   const questions = Array.isArray(test?.questions) ? test.questions : [];
   const attemptStorageKey = `examAttempt:${userId}:${test?.id}`;
   const [initialAttempt] = useState(() => {
     try {
+      // NUET/SAT Training can be paused and continued later (even on another device): use the saved progress.
+      if (resume && isPerQuestionTimerEnabled(test) && resume.attemptId) {
+        const now = Date.now();
+        const savedIndex = Math.min(Math.max(0, Number(resume.currentIndex) || 0), Math.max(0, questions.length - 1));
+        const limit = resolveQuestionTimeLimit(test, questions[savedIndex]) ?? 0;
+        const secondsLeft = Number.isFinite(resume.secondsLeft) ? Math.min(limit, Math.max(0, Number(resume.secondsLeft))) : limit;
+        return {
+          testId: String(test?.id || ''),
+          attemptId: String(resume.attemptId),
+          startedAtMs: now - Math.max(0, Number(resume.activeMs) || 0),
+          answers: resume.answers && typeof resume.answers === 'object' ? resume.answers : {},
+          currentIndex: savedIndex,
+          questionStartedAtMs: now - (limit - secondsLeft) * 1000,
+          lastExitAtMs: null,
+          lastSeenAtMs: now,
+        } as ExamAttemptSnapshot;
+      }
       const restored = restoreExamAttempt(localStorage.getItem(attemptStorageKey), String(test?.id || ''));
+      // A training attempt never expires: the student may come back after any break.
+      if (restored.status === 'expired' && isPerQuestionTimerEnabled(test)) return { ...restored.snapshot, lastExitAtMs: null, lastSeenAtMs: Date.now() };
       return restored.status === 'resumable' ? restored.snapshot : createExamAttemptSnapshot(String(test?.id || ''));
     } catch (error) {
       console.warn('Could not restore the exam attempt:', error);
@@ -3224,6 +3262,7 @@ const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, wr
   const revealedStorageKey = `examRevealed:${userId}:${test?.id}`;
   const [revealedIds, setRevealedIds] = useState<string[]>(() => {
     try {
+      if (resume && Array.isArray(resume.revealedIds) && resume.attemptId === initialAttempt.attemptId) return resume.revealedIds.filter((id: unknown) => typeof id === 'string');
       const saved = JSON.parse(localStorage.getItem(revealedStorageKey) || 'null');
       return saved?.attemptId === initialAttempt.attemptId && Array.isArray(saved.ids) ? saved.ids.filter((id: unknown) => typeof id === 'string') : [];
     } catch {
@@ -3317,6 +3356,7 @@ const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, wr
       }
     };
     const validateReturn = () => {
+      if (isPerQuestionTimerEnabled(test)) return;
       try {
         const restored = restoreExamAttempt(localStorage.getItem(attemptStorageKey), String(test?.id || ''));
         if (restored.status === 'expired') {
@@ -3395,6 +3435,9 @@ const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, wr
         ...submission,
         submittedAt: new Date().toISOString(),
       });
+      if (perQuestionTimer && userId && test?.id) {
+        try { await deleteDoc(doc(db, 'artifacts', appId, 'users', userId, 'trainingProgress', String(test.id))); } catch (error) { console.warn('Could not clear saved training progress:', error); }
+      }
       try {
         clearPendingExamSubmission(localStorage, userId, String(test?.id || ''));
       } catch (error) {
@@ -3493,6 +3536,48 @@ const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, wr
     return () => { cancelled = true; };
   }, [perQuestionTimer, test?.id]);
 
+  // Training progress is saved to the student's account so they can stop at any time and continue later.
+  const progressRef = perQuestionTimer && userId && test?.id ? doc(db, 'artifacts', appId, 'users', userId, 'trainingProgress', String(test.id)) : null;
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [exitProblem, setExitProblem] = useState('');
+  const saveProgress = async (): Promise<boolean> => {
+    if (!progressRef) return true;
+    setSaveState('saving');
+    try {
+      await setDoc(progressRef, removeUndefinedValues({
+        assessmentId: String(test.id),
+        attemptId,
+        answers,
+        revealedIds,
+        currentIndex,
+        secondsLeft: isRevealed ? null : questionSecondsLeft,
+        activeMs: Math.max(0, Date.now() - startedAtMs),
+        updatedAtMs: Date.now(),
+        updatedAt: serverTimestamp(),
+      }));
+      setSaveState('saved');
+      return true;
+    } catch (error) {
+      console.error('Could not save training progress:', error);
+      setSaveState('error');
+      return false;
+    }
+  };
+  useEffect(() => {
+    if (!progressRef || submissionStarted.current) return undefined;
+    const timer = window.setTimeout(() => { void saveProgress(); }, 1200);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [perQuestionTimer, answers, revealedIds, currentIndex]);
+  const saveAndExit = async (force = false) => {
+    setExitProblem('');
+    if (!force && !(await saveProgress())) {
+      setExitProblem('Your progress could not be saved to your account (check your connection). It is still saved in this browser. Try again, or leave anyway.');
+      return;
+    }
+    onPause?.();
+  };
+
   // Countdown for the current NUET Training question. At zero the answer is revealed;
   // the student, not the timer, decides when to go to the next question.
   useEffect(() => {
@@ -3578,6 +3663,17 @@ const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, wr
             </span>
           ) : <span className="text-sm text-slate-500 dark:text-slate-400">No time limit</span>}
           <span className="rounded-full bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">{questionHeader}</span>
+          {perQuestionTimer && !timeExpired && (
+            <button
+              type="button"
+              onClick={() => void saveAndExit()}
+              disabled={isSubmitting || saveState === 'saving'}
+              className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 bg-white px-3 py-1 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600"
+              title="Save your place and leave. You can continue later from the same question."
+            >
+              <LogOut className="h-4 w-4" aria-hidden="true" />Save and exit
+            </button>
+          )}
         </div>
       </div>
 
@@ -3604,8 +3700,15 @@ const ExamInterface = ({ test, onComplete, onAbort, userId, writingResources, wr
           </div>
         </div>
       )}
+      {perQuestionTimer && exitProblem && (
+        <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-100" role="alert">
+          <p className="min-w-0 flex-1">{exitProblem}</p>
+          <button type="button" onClick={() => void saveAndExit()} className="rounded-lg bg-amber-600 px-3 py-1.5 font-semibold text-white">Try again</button>
+          <button type="button" onClick={() => void saveAndExit(true)} className="rounded-lg border border-amber-600 px-3 py-1.5 font-semibold">Leave anyway</button>
+        </div>
+      )}
       {perQuestionTimer && !timeExpired && (
-        <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">Timed training: each question has its own countdown. Make your choice, then press Check answer (it stays disabled until you have answered) or wait for the timer. The correct answer is then shown and you choose when to go to the next question. You cannot return to earlier questions.</p>
+        <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">{saveState === 'saved' ? 'Progress saved. ' : saveState === 'error' ? 'Progress could not be saved to your account yet. ' : ''}You can press Save and exit at any time and continue later from this question. Timed training: each question has its own countdown. Make your choice, then press Check answer (it stays disabled until you have answered) or wait for the timer. The correct answer is then shown and you choose when to go to the next question. You cannot return to earlier questions.</p>
       )}
       <ExamNotices online={online} secondsRemaining={perQuestionTimer ? null : timeExpired ? 0 : secondsRemaining} />
 
@@ -4173,7 +4276,7 @@ const StudentTeacherFeedbackNotes = ({ result, review, onReply }) => {
   </aside>;
 };
 
-const StudentDashboard = ({ user, tests, results, writingResources, writingResourcesError, onStartTest, onSaveGroupCode, onReplyTeacherComment, onDeleteResults, onReviewResult, onLogout }) => {
+const StudentDashboard = ({ user, tests, results, trainingProgress, writingResources, writingResourcesError, onStartTest, onSaveGroupCode, onReplyTeacherComment, onDeleteResults, onReviewResult, onLogout }) => {
   const [activeTab, setActiveTab] = useState('tests');
   const [selectedResultIds, setSelectedResultIds] = useState<string[]>([]);
   const [deleteResultsConfirm, setDeleteResultsConfirm] = useState<string[] | null>(null);
@@ -4325,7 +4428,7 @@ const StudentDashboard = ({ user, tests, results, writingResources, writingResou
                </div>
             )}
             {visibleTests.map((test) => (
-              <StudentAssessmentCard key={test.id} test={test} completed={hasCompletedTest(test.id)} onStart={() => handleStartClick(test)} />
+              <StudentAssessmentCard key={test.id} test={test} completed={hasCompletedTest(test.id)} progress={trainingProgress[test.id]} onStart={() => handleStartClick(test)} />
             ))}
           </div>
           </>
@@ -4485,6 +4588,7 @@ export default function App() {
   const [submissionsError, setSubmissionsError] = useState('');
   const [currentView, setCurrentView] = useState('loading');
   const [activeTest, setActiveTest] = useState<any>(null);
+  const [trainingProgress, setTrainingProgress] = useState<Record<string, any>>({});
   const [reviewTarget, setReviewTarget] = useState<null | { record: any; test: any; returnTo: string }>(null);
   const [modalInfo, setModalInfo] = useState({ isOpen: false, title: '', message: '' });
   
@@ -4526,6 +4630,12 @@ export default function App() {
               } catch (error) {
                 console.error('Could not restore the saved exam attempt:', error);
                 restored = { status: 'invalid' as const };
+              }
+              if (isPerQuestionTimerEnabled(savedExam)) {
+                setActiveTest(savedExam);
+                setCurrentView('exam');
+                setLoadingAuth(false);
+                return;
               }
               let pendingSubmission: { payload: any } | null = null;
               try {
@@ -4736,6 +4846,19 @@ export default function App() {
     }
   };
 
+  // Saved NUET/SAT Training progress of the signed-in student, so unfinished tests show "Continue".
+  useEffect(() => {
+    if (!user?.uid || !db) {
+      setTrainingProgress({});
+      return undefined;
+    }
+    return onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, 'trainingProgress'), snapshot => {
+      const next: Record<string, any> = {};
+      snapshot.docs.forEach(item => { next[item.id] = item.data(); });
+      setTrainingProgress(next);
+    }, error => console.error('Could not load saved training progress:', error));
+  }, [user?.uid]);
+
   const handleLogout = async () => {
     if (user?.uid && activeTest?.id) {
       try {
@@ -4767,7 +4890,9 @@ export default function App() {
     }
     try {
       localStorage.setItem(`activeExam:${user.uid}`, JSON.stringify(test));
-      localStorage.setItem(`examAttempt:${user.uid}:${test.id}`, JSON.stringify(createExamAttemptSnapshot(String(test.id))));
+      if (!isPerQuestionTimerEnabled(test) || !localStorage.getItem(`examAttempt:${user.uid}:${test.id}`)) {
+        localStorage.setItem(`examAttempt:${user.uid}:${test.id}`, JSON.stringify(createExamAttemptSnapshot(String(test.id))));
+      }
     } catch (error) {
       console.error('Could not start and save the exam attempt:', error);
       setModalInfo({ isOpen: true, title: 'Could not start exam', message: 'Your attempt could not be saved in this browser. Check available storage and try again.' });
@@ -4775,6 +4900,20 @@ export default function App() {
     }
     setActiveTest(test);
     setCurrentView('exam');
+  };
+
+  // Leave a Training test without losing the place: the saved progress stays so the student can continue later.
+  const pauseActiveExam = () => {
+    if (user?.uid) {
+      try {
+        localStorage.removeItem(`activeExam:${user.uid}`);
+      } catch (error) {
+        console.error('Could not clear the paused exam marker:', error);
+      }
+    }
+    setActiveTest(null);
+    setCurrentView('student_dashboard');
+    setModalInfo({ isOpen: true, title: 'Progress saved', message: 'Your place is saved. Open this test again from your dashboard and choose Continue to carry on from the same question, on any device.' });
   };
 
   const abortActiveExam = () => {
@@ -5308,13 +5447,15 @@ export default function App() {
 
       {currentView === 'login' && <LoginScreen onAuthAction={handleAuthAction} />}
       {currentView === 'teacher_dashboard' && <TeacherDashboard user={user} tests={tests} resources={writingResources} resourceError={writingResourcesError} onSaveResource={saveWritingResource} onDeleteResource={deleteWritingResource} submissions={submissions} submissionsLoading={submissionsLoading} submissionsError={submissionsError} onSaveReview={saveTeacherReview} onBackfillLegacy={backfillLegacySubmissions} onSecureAnswerKeys={secureExistingAnswerKeys} onRegradeAll={() => gradeSubmissionsAutomatically(submissions, { force: true })} onChangeStudentGroup={changeStudentGroup} autoGradingNotice={autoGradingNotice} onLogout={handleLogout} />}
-      {currentView === 'student_dashboard' && <StudentDashboard user={user} tests={tests} results={results} writingResources={writingResources} writingResourcesError={writingResourcesError} onStartTest={startTest} onSaveGroupCode={saveStudentGroupCode} onReplyTeacherComment={saveTeacherFeedbackReply} onDeleteResults={deleteStudentResults} onReviewResult={openResultReview} onLogout={handleLogout} />}
+      {currentView === 'student_dashboard' && <StudentDashboard user={user} tests={tests} results={results} trainingProgress={trainingProgress} writingResources={writingResources} writingResourcesError={writingResourcesError} onStartTest={startTest} onSaveGroupCode={saveStudentGroupCode} onReplyTeacherComment={saveTeacherFeedbackReply} onDeleteResults={deleteStudentResults} onReviewResult={openResultReview} onLogout={handleLogout} />}
       {currentView === 'result_review' && reviewTarget && (
         <main className="min-h-screen w-full bg-slate-50 p-4 transition-colors duration-300 dark:bg-slate-900 sm:p-8">
           <ResultReview record={reviewTarget.record} test={reviewTarget.test} backLabel="Back to dashboard" onBack={() => { setReviewTarget(null); setCurrentView(reviewTarget.returnTo); }} />
         </main>
       )}
-      {currentView === 'exam' && activeTest && user && <ExamInterface key={`${user.uid}:${activeTest.id}`} test={activeTest} userId={user.uid} writingResources={writingResources} writingResourcesError={writingResourcesError} isDark={isDark} onToggleTheme={() => setIsDark(previous => !previous)} onComplete={completeTest} onAbort={abortActiveExam} />}
+      {currentView === 'exam' && activeTest && user && (isPerQuestionTimerEnabled(activeTest)
+        ? <TrainingProgressGate key={`${user.uid}:${activeTest.id}`} test={activeTest} userId={user.uid}>{resume => <ExamInterface test={activeTest} userId={user.uid} resume={resume} writingResources={writingResources} writingResourcesError={writingResourcesError} isDark={isDark} onToggleTheme={() => setIsDark(previous => !previous)} onComplete={completeTest} onAbort={abortActiveExam} onPause={pauseActiveExam} />}</TrainingProgressGate>
+        : <ExamInterface key={`${user.uid}:${activeTest.id}`} test={activeTest} userId={user.uid} writingResources={writingResources} writingResourcesError={writingResourcesError} isDark={isDark} onToggleTheme={() => setIsDark(previous => !previous)} onComplete={completeTest} onAbort={abortActiveExam} />)}
 
       <Modal isOpen={modalInfo.isOpen} title={modalInfo.title} onClose={() => setModalInfo(prev => ({ ...prev, isOpen: false }))}>
         <p className="whitespace-pre-wrap text-left">{modalInfo.message}</p>

@@ -178,3 +178,28 @@ test('teacher group control and the error boundary render accessible content', a
   const { ErrorBoundary } = await load('/src/ErrorBoundary.tsx');
   assert.match(html(createElement(ErrorBoundary, null, createElement('p', null, 'fine'))), /fine/);
 });
+
+test('a paused training test shows its progress and a Continue button', async () => {
+  const { StudentAssessmentCard } = await load('/src/AssessmentCards.tsx');
+  const training = { id: 't1', title: 'NUET Training', type: 'NUET Training', category: 'Practice', durationSeconds: 6000, questions: Array.from({ length: 50 }, (_, i) => ({ id: `q${i}` })) };
+  const fresh = html(createElement(StudentAssessmentCard, { test: training, completed: false, onStart() {} }));
+  assert.match(fresh, /Start Task/);
+  assert.doesNotMatch(fresh, /In progress/);
+  const paused = html(createElement(StudentAssessmentCard, { test: training, completed: false, progress: { revealedIds: ['q0', 'q1', 'q2'], currentIndex: 3 }, onStart() {} }));
+  assert.match(paused, /Continue/);
+  assert.match(paused, /In progress: 3 of 50 questions done/);
+  assert.match(paused, /continue at question 4/);
+  const finished = html(createElement(StudentAssessmentCard, { test: training, completed: true, progress: { revealedIds: ['q0'], currentIndex: 1 }, onStart() {} }));
+  assert.match(finished, /Completed/);
+  assert.doesNotMatch(finished, /In progress/);
+});
+
+test('training feedback shows the correct answer first and keeps the explanation and its image closed', async () => {
+  const { TrainingFeedback } = await load('/src/TrainingFeedback.tsx');
+  const question = { id: 'q1', text: 'x', responseType: 'single-choice', options: ['A', 'B'], correctAnswer: 'B', points: 1, explanation: 'Because B.', explanationImageUrl: 'https://example.com/solution.png' };
+  const markup = html(createElement(TrainingFeedback, { question, answer: 'A', timedOut: false }));
+  assert.match(markup, /Correct answer:<\/span> B/);
+  assert.match(markup, /Show explanation/);
+  assert.doesNotMatch(markup, /Because B\./);
+  assert.doesNotMatch(markup, /solution\.png/);
+});

@@ -207,3 +207,38 @@ test('teachers keep full access to tests and keys', async () => {
   await assertSucceeds(getDoc(doc(teacher(), keyPath('multi'))));
   await assertSucceeds(setDoc(doc(teacher(), testsPath('new')), { ...base, groupCode: 'g1', groupCodes: ['g1', 'g2'] }));
 });
+
+const progressPath = (uid, id) => `artifacts/${APP}/users/${uid}/trainingProgress/${id}`;
+const progress = id => ({ assessmentId: id, attemptId: 'attempt-1', answers: { q1: 'A' }, revealedIds: ['q1'], currentIndex: 1, secondsLeft: 90, activeMs: 120000, updatedAtMs: 1 });
+
+test('a student can save and resume their own training progress, nobody else can', async () => {
+  await assertSucceeds(setDoc(doc(student('s1'), progressPath('s1', 'multi')), progress('multi')));
+  await assertSucceeds(getDoc(doc(student('s1'), progressPath('s1', 'multi'))));
+  await assertSucceeds(getDocs(collection(student('s1'), `artifacts/${APP}/users/s1/trainingProgress`)));
+  await assertFails(getDoc(doc(student('s2'), progressPath('s1', 'multi'))));
+  await assertFails(setDoc(doc(student('s2'), progressPath('s1', 'multi')), progress('multi')));
+  await assertSucceeds(setDoc(doc(student('s1'), progressPath('s1', 'multi')), { ...progress('multi'), secondsLeft: null }));
+  await assertSucceeds(updateDoc(doc(student('s1'), progressPath('s1', 'multi')), { currentIndex: 2 }));
+  await assertSucceeds(env.authenticatedContext('s1').firestore().doc(progressPath('s1', 'multi')).delete());
+});
+
+test('training progress rejects extra fields, a wrong assessment id and oversized positions', async () => {
+  await assertFails(setDoc(doc(student('s1'), progressPath('s1', 'multi')), { ...progress('multi'), score: 50 }));
+  await assertFails(setDoc(doc(student('s1'), progressPath('s1', 'multi')), progress('other')));
+  await assertFails(setDoc(doc(student('s1'), progressPath('s1', 'multi')), { ...progress('multi'), currentIndex: 5000 }));
+  await assertFails(setDoc(doc(student('s1'), progressPath('s1', 'multi')), { ...progress('multi'), answers: 'x' }));
+});
+
+test('training tests release their answer key to assigned students; exams do not', async () => {
+  await env.withSecurityRulesDisabled(async context => {
+    const db = context.firestore();
+    await setDoc(doc(db, testsPath('train')), { ...base, type: 'NUET Training', groupCode: 'g1', groupCodes: ['g1'] });
+    await setDoc(doc(db, testsPath('satTrain')), { ...base, type: 'SAT Training', groupCode: 'g1', groupCodes: ['g1'] });
+    await setDoc(doc(db, testsPath('exam')), { ...base, type: 'NUET', groupCode: 'g1', groupCodes: ['g1'] });
+    for (const id of ['train', 'satTrain', 'exam']) await setDoc(doc(db, keyPath(id)), { questions: [{ id: 'q1', correctAnswer: 'A' }] });
+  });
+  await assertSucceeds(getDoc(doc(student('s1'), keyPath('train'))));
+  await assertSucceeds(getDoc(doc(student('s1'), keyPath('satTrain'))));
+  await assertFails(getDoc(doc(student('s1'), keyPath('exam'))));
+  await assertFails(getDoc(doc(student('s2'), keyPath('train'))));
+});

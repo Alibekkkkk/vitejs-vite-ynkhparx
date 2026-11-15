@@ -146,11 +146,16 @@ export function TeacherAssessmentCard({ test, archived, migrationFailed, actions
 type StudentCardProps = {
   test: any;
   completed: boolean;
+  /** Saved NUET/SAT Training progress, when the student has paused this test. */
+  progress?: { revealedIds?: string[]; currentIndex?: number } | null;
   onStart: () => void;
 };
 
-export function StudentAssessmentCard({ test, completed, onStart }: StudentCardProps) {
+export function StudentAssessmentCard({ test, completed, progress, onStart }: StudentCardProps) {
   const title = formatAssessmentTitle(test.title);
+  const total = test.questions?.length || 0;
+  const doneCount = Array.isArray(progress?.revealedIds) ? progress.revealedIds.length : 0;
+  const resumable = !completed && Boolean(progress) && total > 0;
   return (
     <article className="flex h-full min-w-0 flex-col rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md dark:border-slate-700 dark:bg-slate-800" aria-label={title}>
       <h3 className="flex min-w-0 items-start gap-2 break-words text-lg font-bold leading-snug text-slate-900 dark:text-white" title={title}>
@@ -166,6 +171,11 @@ export function StudentAssessmentCard({ test, completed, onStart }: StudentCardP
         <Meta icon={<Clock className="h-4 w-4" />} label="Duration" value={durationLabel(test.durationSeconds)} />
         <Meta icon={<FileText className="h-4 w-4" />} label="Questions" value={String(test.questions?.length || 0)} />
       </div>
+      {resumable && (
+        <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900 dark:bg-amber-900/30 dark:text-amber-100" role="status">
+          In progress: {doneCount} of {total} questions done. You will continue at question {Math.min(total, (Number(progress?.currentIndex) || 0) + 1)}.
+        </p>
+      )}
       <div className="mt-auto pt-5">
         {completed ? (
           <button type="button" disabled className="flex w-full cursor-not-allowed items-center justify-center gap-2 rounded-lg border border-slate-200 bg-slate-100 py-2.5 font-medium text-slate-600 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-300">
@@ -173,7 +183,7 @@ export function StudentAssessmentCard({ test, completed, onStart }: StudentCardP
           </button>
         ) : (
           <button type="button" onClick={onStart} className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 py-2.5 font-medium text-white transition-colors hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">
-            <Play className="h-5 w-5" aria-hidden="true" />Start Task
+            <Play className="h-5 w-5" aria-hidden="true" />{resumable ? 'Continue' : 'Start Task'}
           </button>
         )}
       </div>
