@@ -1518,8 +1518,80 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
     return { ...prev, questions };
   });
 
+  // Several bank files chosen at once: validate all of them, then save each as its own assessment.
+  // A bank's own group codes decide who sees it; one confirmation covers the whole batch.
+  const importSeveralBanks = async (files: File[]) => {
+    setQuestionBankError('');
+    try {
+      const prepared = [] as any[];
+      for (const file of files) {
+        if (file.size > 2_000_000) throw new Error(`${file.name} is larger than 2 MB.`);
+        let bank;
+        try {
+          bank = parseQuestionBank(JSON.parse(await file.text()));
+        } catch (error) {
+          throw new Error(`${file.name}: ${error instanceof Error ? error.message : 'could not be read.'}`);
+        }
+        const stamp = `${Date.now()}_${prepared.length}`;
+        const idMap = new Map(bank.questions.map((question: any, index: number) => [question.id, `q_${stamp}_${index}_${Math.random().toString(36).slice(2, 6)}`]));
+        const questions = bank.questions.map((question: any) => ({ ...question, sourceId: question.id, id: idMap.get(question.id), responseType: resolveResponseType(question), answerSlots: question.answerSlots?.map((slot: any, index: number) => ({ ...slot, id: `${idMap.get(question.id)}_slot_${index + 1}` })) }));
+        for (const [index, question] of questions.entries()) {
+          const messages = [...validateQuestion(question), ...(question.imageUrl && !normalizeFigureUrl(question.imageUrl) ? ['The figure URL must use HTTPS and be a direct image URL.'] : [])];
+          if (messages.length) throw new Error(`${file.name}, question ${index + 1}: ${messages[0]}`);
+        }
+        const draft: any = { ...createEmptyTest(), ...bank, ...toGroupFields(bank.groupCodes), questions };
+        prepared.push({ file, draft });
+      }
+      const summary = prepared.map(({ draft }) => `- “${formatAssessmentTitle(draft.title)}” (${draft.questions.length} questions) for ${getAssessmentGroupCodes(draft).join(', ') || 'no group (saved as a draft)'}`).join('\n');
+      const confirmed = await showConfirmDialog(`Import ${prepared.length} assessments?`, `${summary}\n\nAssessments with a group are published to that group immediately; the others are saved as drafts.`, 'Import and publish');
+      if (!confirmed) return;
+      setIsSubmitting(true);
+      const savedTitles: string[] = [];
+      for (const { draft } of prepared) {
+        const assignedGroups = getAssessmentGroupCodes(draft);
+        const testToSave: any = {
+          ...draft,
+          ...toGroupFields(assignedGroups),
+          status: assignedGroups.length ? 'published' : 'draft',
+          published: assignedGroups.length > 0,
+          durationSeconds: isPerQuestionTimerEnabled(draft) ? totalQuestionSeconds(draft, draft.questions) : Number(draft.durationSeconds || draft.durationMinutes * 60 || 1800),
+          authorId: user.uid,
+          authorName: user.name,
+          createdAt: new Date().toISOString(),
+        };
+        delete testToSave.durationMinutes;
+        delete testToSave.id;
+        const { publicQuestions, answerKeyQuestions, publicSections, teacherSections } = splitQuestionKeys(testToSave.questions, testToSave.sections);
+        testToSave.questions = publicQuestions;
+        testToSave.sections = publicSections;
+        testToSave.answerKeysSecured = true;
+        testToSave.answerKeyVersion = 1;
+        const testRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'tests'));
+        const answerKeyRef = doc(db, 'artifacts', appId, 'teacher', 'data', 'answerKeys', testRef.id);
+        testToSave.id = testRef.id;
+        const batch = writeBatch(db);
+        batch.set(answerKeyRef, removeUndefinedValues({ assessmentId: testRef.id, questions: answerKeyQuestions, teacherSections, updatedAt: serverTimestamp() }));
+        batch.set(testRef, removeUndefinedValues(testToSave));
+        await batch.commit();
+        savedTitles.push(formatAssessmentTitle(testToSave.title));
+      }
+      await showAlertDialog('Assessments imported', `Saved ${savedTitles.length} assessments: ${savedTitles.map(title => `“${title}”`).join(', ')}. They now appear in your assessment list.`);
+    } catch (error) {
+      console.error('Importing several question banks failed:', error);
+      setQuestionBankError(error instanceof Error ? error.message : 'Could not import these question banks.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const importQuestionBank = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+    const chosen = Array.from(event.target.files || []);
+    if (chosen.length > 1) {
+      event.target.value = '';
+      await importSeveralBanks(chosen);
+      return;
+    }
+    const file = chosen[0];
     if (!file) return;
     setQuestionBankError('');
     try {
@@ -2477,10 +2549,10 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                     <button onClick={() => handleAddQuestion('text', activeQuestionSection)} className="px-4 py-2 bg-white dark:bg-slate-700 border border-purple-300 dark:border-purple-600 text-purple-700 dark:text-purple-300 rounded-lg hover:bg-purple-50 dark:hover:bg-slate-600 text-sm font-medium transition-colors">
                       {activeQuestionSection === 'writing' ? '+ Add Writing Task' : '+ Add Written Response'}
                     </button>
-                    <label className="px-4 py-2 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-sm font-medium cursor-pointer">Import question bank JSON<input type="file" accept="application/json,.json" onChange={importQuestionBank} className="sr-only" /></label>
+                    <label className="px-4 py-2 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-sm font-medium cursor-pointer">Import question bank JSON<input type="file" multiple accept="application/json,.json" onChange={importQuestionBank} className="sr-only" /></label>
                     <button type="button" onClick={exportQuestionBank} disabled={!newTest.questions.length} className="px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-sm font-medium disabled:opacity-50">Export questions JSON</button>
                   </div>
-                  <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Import appends validated questions; a bank may pre-fill its group codes, but it always stays an unpublished draft. Exported files include answer keys; keep them private.</p>
+                  <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Choose one file to open it as a draft, or select several files at once to save each as its own assessment (published to the group codes inside the file). Exported files include answer keys; keep them private.</p>
                   {questionBankError && <p className="mt-2 text-sm text-red-600" role="alert">{questionBankError}</p>}
                 </div>
 
