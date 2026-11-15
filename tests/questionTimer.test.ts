@@ -45,3 +45,8 @@ test('the NUET Training type turns the per-question timer on by itself', () => {
   assert.equal(isPerQuestionTimerEnabled({ type: 'NUET Training' }), true);
   assert.equal(isPerQuestionTimerEnabled({ type: 'NUET' }), false);
 });
+
+test('SAT Training also uses the per-question timer', () => {
+  assert.equal(isPerQuestionTimerEnabled({ type: 'SAT Training' }), true);
+  assert.equal(isPerQuestionTimerEnabled({ type: 'SAT' }), false);
+});

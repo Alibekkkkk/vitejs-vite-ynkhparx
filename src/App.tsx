@@ -67,7 +67,7 @@ import {
   MAX_QUESTION_SECONDS,
   normalizeQuestionSeconds,
   NUET_DEFAULT_QUESTION_SECONDS,
-  NUET_TRAINING_TYPE,
+  isTrainingType,
   resolveQuestionTimeLimit,
   totalQuestionSeconds,
 } from './questionTimer';
@@ -1874,7 +1874,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
               <input aria-label="Search submissions" value={resultSearch} onChange={e => setResultSearch(e.target.value)} placeholder="Search student / test" className="lg:col-span-2 p-2 rounded border dark:bg-slate-700 dark:border-slate-600" />
               <select aria-label="Filter group" value={resultGroup} onChange={e => setResultGroup(e.target.value)} className="p-2 rounded border dark:bg-slate-700 dark:border-slate-600"><option value="">All groups</option>{[...new Set<string>(submissions.map((item: any) => String(item.groupCode || '')).filter(Boolean))].map(group => <option key={group} value={group}>{group}</option>)}</select>
               <select aria-label="Filter assessment" value={resultAssessment} onChange={e => setResultAssessment(e.target.value)} className="p-2 rounded border dark:bg-slate-700 dark:border-slate-600"><option value="">All assessments</option>{[...new Map<string, string>(submissions.map((item: any) => [String(item.assessmentId || ''), formatAssessmentTitle(item.assessmentTitle || item.assessmentId || '')] as [string, string])).entries()].filter(([id]) => id).map(([id, title]) => <option key={id} value={id}>{title}</option>)}</select>
-              <select aria-label="Filter exam type" value={resultType} onChange={e => setResultType(e.target.value)} className="p-2 rounded border dark:bg-slate-700 dark:border-slate-600"><option value="">All types</option>{['IELTS','SAT','NUET','NUET Training','General'].map(type => <option key={type}>{type}</option>)}</select>
+              <select aria-label="Filter exam type" value={resultType} onChange={e => setResultType(e.target.value)} className="p-2 rounded border dark:bg-slate-700 dark:border-slate-600"><option value="">All types</option>{['IELTS','SAT','SAT Training','NUET','NUET Training','General'].map(type => <option key={type}>{type}</option>)}</select>
               <select aria-label="Filter review status" value={resultStatus} onChange={e => setResultStatus(e.target.value)} className="p-2 rounded border dark:bg-slate-700 dark:border-slate-600"><option value="">All statuses</option>{['pending-review','reviewed','auto-submitted','submitted'].map(status => <option key={status}>{status}</option>)}</select>
               <div className="flex gap-1"><input aria-label="Submitted from" type="date" value={resultFrom} onChange={e => setResultFrom(e.target.value)} className="min-w-0 w-1/2 p-2 rounded border dark:bg-slate-700 dark:border-slate-600"/><input aria-label="Submitted to" type="date" value={resultTo} onChange={e => setResultTo(e.target.value)} className="min-w-0 w-1/2 p-2 rounded border dark:bg-slate-700 dark:border-slate-600"/></div>
             </div>
@@ -2045,7 +2045,8 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Type</label>
                     <select value={newTest.type} onChange={e => { const type = e.target.value; setNewTest({...newTest, type, perQuestionTimer: false}); setActiveQuestionSection(type === 'IELTS' ? 'listening' : 'general'); }} className="w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:ring-2 focus:ring-purple-500 outline-none">
                       <option value="IELTS">IELTS</option>
-                      <option value="SAT">SAT</option>
+                      {newTest.type === 'SAT' && <option value="SAT">SAT (existing test; switch to SAT Training for timed questions)</option>}
+                      <option value="SAT Training">SAT Training (timed questions)</option>
                       <option value="NUET">NUET Exam</option>
                       <option value="NUET Training">NUET Training (timed questions)</option>
                       <option value="General">General / Custom</option>
@@ -2056,9 +2057,9 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                     <input type="number" min="1" value={isPerQuestionTimerEnabled(newTest) ? Math.ceil(totalQuestionSeconds(newTest, newTest.questions) / 60) : newTest.durationMinutes} disabled={isPerQuestionTimerEnabled(newTest)} onChange={e => setNewTest({...newTest, durationMinutes: parseInt(e.target.value)})} className="w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:ring-2 focus:ring-purple-500 outline-none disabled:opacity-60" />
                     {isPerQuestionTimerEnabled(newTest) && <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Calculated from the question timers below.</p>}
                   </div>
-                  {newTest.type === NUET_TRAINING_TYPE && (
+                  {isTrainingType(newTest.type) && (
                     <div className="col-span-2 rounded-lg border border-purple-200 bg-purple-50/60 p-3 dark:border-purple-900 dark:bg-purple-950/20">
-                      <p className="text-sm font-semibold text-slate-800 dark:text-slate-100"><Clock className="mr-1 inline h-4 w-4" />NUET Training: every question has its own countdown</p>
+                      <p className="text-sm font-semibold text-slate-800 dark:text-slate-100"><Clock className="mr-1 inline h-4 w-4" />{newTest.type}: every question has its own countdown</p>
                       <div className="mt-3">
                         <MinuteSecondInput label="Default time per question" value={getDefaultQuestionSeconds(newTest)} onChange={seconds => setNewTest({ ...newTest, defaultQuestionSeconds: seconds ?? NUET_DEFAULT_QUESTION_SECONDS })} />
                       </div>
@@ -2200,7 +2201,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                              </label>
                            </>
                          )}
-                         {newTest.type === 'SAT' && (
+                         {(newTest.type === 'SAT' || newTest.type === 'SAT Training') && (
                            <>
                              <label className="text-sm font-medium text-slate-700 dark:text-slate-300">SAT domain
                                <select value={q.satDomain || ''} onChange={event => { handleUpdateQuestion(qIndex, 'satDomain', event.target.value); handleUpdateQuestion(qIndex, 'satSkill', ''); }} className="mt-1 w-full p-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white">

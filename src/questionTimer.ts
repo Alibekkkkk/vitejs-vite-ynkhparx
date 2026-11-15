@@ -9,6 +9,13 @@ export const MIN_QUESTION_SECONDS = 10;
 export const MAX_QUESTION_SECONDS = 600;
 
 export const NUET_TRAINING_TYPE = 'NUET Training';
+export const SAT_TRAINING_TYPE = 'SAT Training';
+/** Assessment types that run one countdown per question and reveal each answer afterwards. */
+export const TRAINING_TYPES = [NUET_TRAINING_TYPE, SAT_TRAINING_TYPE];
+
+export function isTrainingType(type: unknown): boolean {
+  return typeof type === 'string' && TRAINING_TYPES.includes(type);
+}
 
 type TimedTest = { type?: unknown; perQuestionTimer?: unknown; defaultQuestionSeconds?: unknown } | null | undefined;
 type TimedQuestion = { timeLimitSeconds?: unknown } | null | undefined;
@@ -23,7 +30,7 @@ export function normalizeQuestionSeconds(value: unknown): number | null {
 }
 
 export function isPerQuestionTimerEnabled(test: TimedTest): boolean {
-  return test?.type === NUET_TRAINING_TYPE || test?.perQuestionTimer === true;
+  return isTrainingType(test?.type) || test?.perQuestionTimer === true;
 }
 
 export function getDefaultQuestionSeconds(test: TimedTest): number {

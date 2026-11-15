@@ -215,11 +215,11 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/artifacts/$(appId)/public/data/tests/$(testId)).data.get('releaseAnswersAfterSubmit', true) == true;
     }
 
-    // NUET Training shows the correct answer after every question, so its keys are readable
+    // NUET Training and SAT Training show the correct answer after every question, so its keys are readable
     // by students the assessment is assigned to. This never applies to exams of any other type.
     match /artifacts/{appId}/teacher/data/answerKeys/{testId} {
       allow get: if signedIn()
-        && get(/databases/$(database)/documents/artifacts/$(appId)/public/data/tests/$(testId)).data.get('type', '') == 'NUET Training'
+        && get(/databases/$(database)/documents/artifacts/$(appId)/public/data/tests/$(testId)).data.get('type', '') in ['NUET Training', 'SAT Training']
         && accountCanSubmit(appId, testId, request.auth.uid);
     }
 
