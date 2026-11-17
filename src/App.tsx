@@ -44,7 +44,8 @@ import { GroupCodeInput } from './GroupCodeInput';
 import { StudentAssessmentCard, TeacherAssessmentCard } from './AssessmentCards';
 import { createReviewRows, gradeAttempt, needsAutoGrading, resolveReviewData, summarizeReviews } from './grading';
 import { ResultReview } from './ResultReview';
-import { TrainingFeedback } from './TrainingFeedback';
+import { TrainingFeedback, TrainingReviewPanel } from './TrainingFeedback';
+import { getExamFamily, groupTestsForDashboard, SECTION_OPTIONS } from './examSections';
 import { bucketProblemMessage, createStallWatchdog, describeUploadFailure, probeStorageBucket } from './figureUpload';
 import { ExamNotices, QuestionNavigator, useFlaggedQuestions, useLeaveWarning, useOnlineStatus } from './ExamSafetyNets';
 import { useFocusTrap } from './useFocusTrap';
@@ -361,6 +362,7 @@ const createEmptyTest = () => ({
   category: 'Exam',
   durationMinutes: 30,
   perQuestionTimer: false,
+  examSection: '',
   defaultQuestionSeconds: NUET_DEFAULT_QUESTION_SECONDS,
   description: '',
   questions: [],
@@ -2115,7 +2117,7 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Type</label>
-                    <select value={newTest.type} onChange={e => { const type = e.target.value; setNewTest({...newTest, type, perQuestionTimer: false}); setActiveQuestionSection(type === 'IELTS' ? 'listening' : 'general'); }} className="w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:ring-2 focus:ring-purple-500 outline-none">
+                    <select value={newTest.type} onChange={e => { const type = e.target.value; setNewTest({...newTest, type, perQuestionTimer: false, ...(getExamFamily({ type }) === getExamFamily(newTest) ? {} : { examSection: '' })}); setActiveQuestionSection(type === 'IELTS' ? 'listening' : 'general'); }} className="w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:ring-2 focus:ring-purple-500 outline-none">
                       <option value="IELTS">IELTS</option>
                       {newTest.type === 'SAT' && <option value="SAT">SAT (existing test; switch to SAT Training for timed questions)</option>}
                       <option value="SAT Training">SAT Training (timed questions)</option>
@@ -2124,6 +2126,16 @@ const TeacherDashboard = ({ user, tests, resources, resourceError, onSaveResourc
                       <option value="General">General / Custom</option>
                     </select>
                   </div>
+                  {SECTION_OPTIONS[getExamFamily(newTest)] && (
+                    <div>
+                      <label htmlFor="exam-section" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Subject section</label>
+                      <select id="exam-section" value={newTest.examSection || ''} onChange={e => setNewTest({ ...newTest, examSection: e.target.value })} className="w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:ring-2 focus:ring-purple-500 outline-none">
+                        <option value="">Choose a section…</option>
+                        {SECTION_OPTIONS[getExamFamily(newTest)]!.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
+                      </select>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Students see this task under this heading on their page.</p>
+                    </div>
+                  )}
                   <div>
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Time Limit (Minutes)</label>
                     <input type="number" min="1" value={isPerQuestionTimerEnabled(newTest) ? Math.ceil(totalQuestionSeconds(newTest, newTest.questions) / 60) : newTest.durationMinutes} disabled={isPerQuestionTimerEnabled(newTest)} onChange={e => setNewTest({...newTest, durationMinutes: parseInt(e.target.value)})} className="w-full p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:ring-2 focus:ring-purple-500 outline-none disabled:opacity-60" />
@@ -3270,6 +3282,8 @@ const ExamInterface = ({ test, onComplete, onAbort, onPause, resume, userId, wri
     }
   });
   const [trainingKeys, setTrainingKeys] = useState<any[] | null>(null);
+  // NUET/SAT Training: index of an earlier question being looked at read-only (null = the active question).
+  const [reviewIndex, setReviewIndex] = useState<number | null>(null);
   const [trainingKeyError, setTrainingKeyError] = useState('');
   const currentIndexRef = useRef(currentIndex);
   currentIndexRef.current = currentIndex;
@@ -3504,6 +3518,8 @@ const ExamInterface = ({ test, onComplete, onAbort, onPause, resume, userId, wri
   }, [hasTimeLimit]);
 
   const isRevealed = perQuestionTimer && Boolean(currentQuestion) && revealedIds.includes(currentQuestion.id);
+  const reviewing = perQuestionTimer && reviewIndex !== null && reviewIndex >= 0 && reviewIndex < currentIndex;
+  const reviewQuestion = reviewing ? questions[reviewIndex as number] : null;
   const revealCurrentQuestion = () => {
     const id = currentQuestion?.id;
     if (!id) return;
@@ -3708,11 +3724,21 @@ const ExamInterface = ({ test, onComplete, onAbort, onPause, resume, userId, wri
         </div>
       )}
       {perQuestionTimer && !timeExpired && (
-        <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">{saveState === 'saved' ? 'Progress saved. ' : saveState === 'error' ? 'Progress could not be saved to your account yet. ' : ''}You can press Save and exit at any time and continue later from this question. Timed training: each question has its own countdown. Make your choice, then press Check answer (it stays disabled until you have answered) or wait for the timer. The correct answer is then shown and you choose when to go to the next question. You cannot return to earlier questions.</p>
+        <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">{saveState === 'saved' ? 'Progress saved. ' : saveState === 'error' ? 'Progress could not be saved to your account yet. ' : ''}You can press Save and exit at any time and continue later from this question. Timed training: each question has its own countdown. Make your choice, then press Check answer (it stays disabled until you have answered) or wait for the timer. The correct answer is then shown and you choose when to go to the next question. You can look back at earlier questions with the Previous button, but you cannot change their answers.</p>
       )}
       <ExamNotices online={online} secondsRemaining={perQuestionTimer ? null : timeExpired ? 0 : secondsRemaining} />
 
-      {isReadingWorkspace ? (
+      {reviewing && reviewQuestion && (
+        <TrainingReviewPanel
+          question={trainingKeys ? mergeQuestionKeys([reviewQuestion], trainingKeys)[0] : reviewQuestion}
+          answer={answers[reviewQuestion.id]}
+          number={(reviewIndex as number) + 1}
+          total={questions.length}
+          assessmentId={String(test?.id || 'unknown')}
+          keyError={trainingKeyError}
+        />
+      )}
+      {!reviewing && (isReadingWorkspace ? (
         <ReadingPracticeWorkspace
           test={test}
           userId={userId}
@@ -3756,9 +3782,9 @@ const ExamInterface = ({ test, onComplete, onAbort, onPause, resume, userId, wri
         </div>
 
         {renderAnswerInput()}
-      </div>}
+      </div>)}
 
-      {isRevealed && (
+      {!reviewing && isRevealed && (
         <TrainingFeedback
           key={currentQuestion.id}
           question={trainingKeys ? mergeQuestionKeys([currentQuestion], trainingKeys)[0] : currentQuestion.correctAnswer != null ? currentQuestion : null}
@@ -3771,9 +3797,38 @@ const ExamInterface = ({ test, onComplete, onAbort, onPause, resume, userId, wri
       {!isReadingWorkspace && !perQuestionTimer && <QuestionNavigator questions={questions} answers={answers} currentIndex={currentIndex} flagged={flagged} disabled={timeExpired || isSubmitting} onGo={setCurrentIndex} onToggleFlag={toggleFlag} />}
 
       <div className="exam-interface__footer mt-6 flex items-center justify-between gap-3 border-t border-slate-200 pt-4 dark:border-slate-700">
-        {perQuestionTimer ? (
+        {perQuestionTimer && reviewing ? (
           <>
-            <span className="text-sm text-slate-500 dark:text-slate-400">Question {currentIndex + 1} of {questions.length}</span>
+            <button
+              type="button"
+              onClick={() => setReviewIndex(previous => Math.max(0, (previous ?? 1) - 1))}
+              disabled={reviewIndex === 0}
+              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:text-slate-200"
+            >
+              Previous
+            </button>
+            <span className="text-sm text-slate-500 dark:text-slate-400">Reviewing question {(reviewIndex as number) + 1} of {questions.length}</span>
+            <div className="flex flex-wrap items-center gap-2">
+              {(reviewIndex as number) < currentIndex - 1 && (
+                <button type="button" onClick={() => setReviewIndex(previous => (previous ?? 0) + 1)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 dark:border-slate-600 dark:text-slate-200">Next reviewed question</button>
+              )}
+              <button type="button" onClick={() => setReviewIndex(null)} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white">Back to question {currentIndex + 1}</button>
+            </div>
+          </>
+        ) : perQuestionTimer ? (
+          <>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setReviewIndex(currentIndex - 1)}
+                disabled={currentIndex === 0}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:text-slate-200"
+                title="Look at an earlier question (read only)"
+              >
+                Previous
+              </button>
+              <span className="text-sm text-slate-500 dark:text-slate-400">Question {currentIndex + 1} of {questions.length}</span>
+            </div>
             {!isRevealed ? (
               <button
                 type="button"
@@ -4421,16 +4476,30 @@ const StudentDashboard = ({ user, tests, results, trainingProgress, writingResou
           <p className="mb-4 rounded-lg bg-slate-100 p-3 text-sm text-slate-700 dark:bg-slate-800 dark:text-slate-200">
             Available Tasks are assessments assigned by your teacher. They are timed when a time limit is shown, and your submitted answers are sent for review. For coaching and AI suggestions, open Practice instead.
           </p>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {visibleTests.length === 0 && (
-               <div className="col-span-full py-12 text-center text-slate-500 dark:text-slate-400">
-                 No exams are available for your group yet. Check that you entered the correct group code.
-               </div>
-            )}
-            {visibleTests.map((test) => (
-              <StudentAssessmentCard key={test.id} test={test} completed={hasCompletedTest(test.id)} progress={trainingProgress[test.id]} onStart={() => handleStartClick(test)} />
-            ))}
-          </div>
+          {visibleTests.length === 0 && (
+            <div className="py-12 text-center text-slate-500 dark:text-slate-400">
+              No exams are available for your group yet. Check that you entered the correct group code.
+            </div>
+          )}
+          {(() => {
+            const groups = groupTestsForDashboard<any>(visibleTests);
+            const showHeadings = groups.length > 1;
+            return groups.map(group => (
+              <section key={group.key} className="mb-10" aria-labelledby={`task-group-${group.key}`}>
+                {showHeadings && (
+                  <h3 id={`task-group-${group.key}`} className="mb-4 flex items-center gap-3 border-b border-slate-200 pb-2 text-xl font-bold text-slate-800 dark:border-slate-700 dark:text-white">
+                    {group.title}
+                    <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-sm font-medium text-slate-600 dark:bg-slate-700 dark:text-slate-200">{group.tests.length}</span>
+                  </h3>
+                )}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                  {group.tests.map((test) => (
+                    <StudentAssessmentCard key={test.id} test={test} completed={hasCompletedTest(test.id)} progress={trainingProgress[test.id]} onStart={() => handleStartClick(test)} />
+                  ))}
+                </div>
+              </section>
+            ));
+          })()}
           </>
         )}
 

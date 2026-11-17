@@ -203,3 +203,17 @@ test('training feedback shows the correct answer first and keeps the explanation
   assert.doesNotMatch(markup, /Because B\./);
   assert.doesNotMatch(markup, /solution\.png/);
 });
+
+test('the read-only review of an earlier training question has no inputs and marks the correct and chosen options', async () => {
+  const { TrainingReviewPanel } = await load('/src/TrainingFeedback.tsx');
+  const question = { id: 'q1', text: 'Which is right?', responseType: 'single-choice', options: ['Alpha', 'Beta', 'Gamma'], correctAnswer: 'Beta', points: 1, explanation: 'Beta is right.' };
+  const markup = html(createElement(TrainingReviewPanel, { question, answer: 'Gamma', number: 4, total: 50, assessmentId: 't1' }));
+  assert.match(markup, /Looking back at question 4 of 50/);
+  assert.match(markup, /read-only review/);
+  assert.doesNotMatch(markup, /<input/);
+  assert.doesNotMatch(markup, /<button[^>]*>(Alpha|Beta|Gamma)/);
+  assert.match(markup, /Correct answer<\/span>/);
+  assert.match(markup, /Your answer<\/span>/);
+  assert.match(markup, /Show explanation/);
+  assert.doesNotMatch(markup, /Beta is right\./);
+});
